@@ -1,0 +1,148 @@
+name: benchmark-suite
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    - cron: "0 10 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: benchmark-suite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark-smoke-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        run: python -m pip install --upgrade uv
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run smoke benchmark (CPU)
+        run: |
+          uv run cauchy-gen benchmark \
+            --suite smoke \
+            --profile cpu \
+            --baseline benchmarks/baselines/cpu_smoke.json \
+            --warn-threshold-pct 10 \
+            --fail-threshold-pct 20 \
+            --fail-on-regression \
+            --no-hardware-aware \
+            --no-memory \
+            --out-dir benchmarks/results/ci_smoke
+
+      - name: Upload smoke benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-smoke-pr
+          path: benchmarks/results/ci_smoke
+          if-no-files-found: warn
+
+      - name: Comment smoke benchmark summary on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- cauchy-benchmark-smoke -->';
+            const summaryPath = 'benchmarks/results/ci_smoke/summary.md';
+
+            let summary = 'Benchmark summary file was not generated.';
+            if (fs.existsSync(summaryPath)) {
+              summary = fs.readFileSync(summaryPath, 'utf8');
+            }
+
+            const body = `${marker}\n## Benchmark Smoke (CPU)\n\n${summary}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find((c) => c.user?.type === 'Bot' && c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+  benchmark-standard-scheduled:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        run: python -m pip install --upgrade uv
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run standard benchmark (CPU)
+        run: |
+          uv run cauchy-gen benchmark \
+            --suite standard \
+            --profile cpu \
+            --baseline benchmarks/baselines/cpu_standard.json \
+            --warn-threshold-pct 10 \
+            --fail-threshold-pct 20 \
+            --fail-on-regression \
+            --no-hardware-aware \
+            --out-dir benchmarks/results/ci_standard
+
+      - name: Upload standard benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-standard-scheduled
+          path: benchmarks/results/ci_standard
+          if-no-files-found: warn
+
+      - name: Publish standard benchmark summary
+        if: always()
+        run: |
+          if [ -f benchmarks/results/ci_standard/summary.md ]; then
+            cat benchmarks/results/ci_standard/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "summary.md was not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi

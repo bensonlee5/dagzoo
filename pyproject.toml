@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cauchy-generator"
+version = "0.1.0"
+description = "High-performance synthetic tabular data generator scaffold aligned with TabICLv2 Appendix E."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "numpy>=2.1",
+  "pyyaml>=6.0",
+  "pyarrow>=16.0",
+  "scikit-learn>=1.5",
+]
+
+[project.optional-dependencies]
+gpu = [
+  "torch>=2.2",
+]
+full = [
+  "torch>=2.2",
+]
+
+[project.scripts]
+cauchy-gen = "cauchy_generator.cli:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.11",
+  "pre-commit>=3.8",
+  "pytest>=8.0",
+  "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cauchy_generator"]
+
+[tool.uv]
+package = true
+default-groups = ["dev"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.mypy]
+python_version = "3.13"
+warn_unused_configs = true
+ignore_missing_imports = true

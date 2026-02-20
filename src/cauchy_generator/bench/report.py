@@ -1,0 +1,106 @@
+"""Benchmark suite artifact writers (JSON and Markdown)."""
+
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+from typing import Any
+
+
+def _sanitize_json(value: Any) -> Any:
+    """Recursively replace non-finite floats with ``None`` for valid JSON output."""
+
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _sanitize_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_json(v) for v in value]
+    return value
+
+
+def write_suite_json(summary: dict[str, Any], out_path: str | Path) -> Path:
+    """Write a suite summary as JSON."""
+
+    path = Path(out_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(_sanitize_json(summary), f, indent=2, sort_keys=True)
+    return path
+
+
+def _format_float(value: Any, digits: int = 3) -> str:
+    """Render floats consistently for markdown tables."""
+
+    if not isinstance(value, (int, float)):
+        return "-"
+    if not math.isfinite(float(value)):
+        return "-"
+    return f"{float(value):.{digits}f}"
+
+
+def _build_profile_table(profile_results: list[dict[str, Any]]) -> list[str]:
+    """Create a markdown table summarizing per-profile performance metrics."""
+
+    lines = [
+        "| Profile | Device | Backend | Datasets/min | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) |",
+        "|---|---|---:|---:|---:|---:|---:|",
+    ]
+    for result in profile_results:
+        lines.append(
+            "| "
+            f"{result.get('profile_key', '-') } | "
+            f"{result.get('device', '-') } | "
+            f"{result.get('hardware_backend', '-') } | "
+            f"{_format_float(result.get('datasets_per_minute'), 2)} | "
+            f"{_format_float(result.get('elapsed_seconds'), 3)} | "
+            f"{_format_float(result.get('latency_p95_ms'), 2)} | "
+            f"{_format_float(result.get('peak_rss_mb'), 2)} |"
+        )
+    return lines
+
+
+def write_suite_markdown(summary: dict[str, Any], out_path: str | Path) -> Path:
+    """Write a concise markdown report for one benchmark suite run."""
+
+    path = Path(out_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines: list[str] = [
+        "# Benchmark Suite Report",
+        "",
+        f"- Suite: `{summary.get('suite', '-')}`",
+        f"- Generated at: `{summary.get('generated_at', '-')}`",
+    ]
+
+    regression = summary.get("regression", {})
+    if isinstance(regression, dict):
+        lines.append(f"- Regression status: `{regression.get('status', 'pass')}`")
+    lines.append("")
+
+    profile_results = summary.get("profile_results", [])
+    if isinstance(profile_results, list) and profile_results:
+        lines.append("## Profiles")
+        lines.extend(_build_profile_table(profile_results))
+        lines.append("")
+
+    if isinstance(regression, dict) and regression.get("issues"):
+        lines.append("## Regression Issues")
+        lines.append("| Severity | Profile | Metric | Current | Baseline | Degradation % |")
+        lines.append("|---|---|---|---:|---:|---:|")
+        for issue in regression["issues"]:
+            lines.append(
+                "| "
+                f"{issue.get('severity')} | "
+                f"{issue.get('profile')} | "
+                f"{issue.get('metric')} | "
+                f"{_format_float(issue.get('current'), 3)} | "
+                f"{_format_float(issue.get('baseline'), 3)} | "
+                f"{_format_float(issue.get('degradation_pct'), 2)} |"
+            )
+        lines.append("")
+
+    with path.open("w", encoding="utf-8") as f:
+        f.write("\n".join(lines).rstrip() + "\n")
+    return path

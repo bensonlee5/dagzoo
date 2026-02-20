@@ -1,0 +1,63 @@
+seed: 123
+
+dataset:
+  task: classification
+  n_train: 512
+  n_test: 128
+  n_features_min: 16
+  n_features_max: 48
+  n_classes_min: 2
+  n_classes_max: 10
+  categorical_ratio_min: -0.3
+  categorical_ratio_max: 1.0
+  max_categorical_cardinality: 12
+
+graph:
+  n_nodes_min: 2
+  n_nodes_max: 24
+
+runtime:
+  device: cpu
+  prefer_torch: false
+  torch_dtype: float32
+  generation_engine: appendix_light
+  torch_output: false
+  hardware_aware: true
+
+output:
+  out_dir: data/benchmark_cpu
+  shard_size: 128
+  compression: zstd
+
+benchmark:
+  profile_name: cpu
+  suite: standard
+  num_datasets: 200
+  warmup_datasets: 10
+  warn_threshold_pct: 10.0
+  fail_threshold_pct: 20.0
+  collect_memory: true
+  collect_reproducibility: false
+  reproducibility_num_datasets: 2
+  latency_num_samples: 20
+  profiles:
+    cpu:
+      device: cpu
+      num_datasets: 200
+      warmup_datasets: 10
+    cuda_desktop:
+      device: cuda
+      num_datasets: 1500
+      warmup_datasets: 20
+    cuda_h100:
+      device: cuda
+      num_datasets: 5000
+      warmup_datasets: 50
+
+filter:
+  enabled: false
+  n_estimators: 25
+  max_depth: 6
+  n_bootstrap: 200
+  threshold: 0.95
+  max_attempts: 3

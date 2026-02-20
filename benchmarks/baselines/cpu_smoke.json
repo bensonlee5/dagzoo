@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "suite": "smoke",
+  "metrics": [
+    "datasets_per_minute"
+  ],
+  "profiles": {
+    "cpu": {
+      "datasets_per_minute": 200.0
+    }
+  }
+}
