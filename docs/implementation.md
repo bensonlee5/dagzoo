@@ -48,10 +48,10 @@ Persist generated outputs as Parquet shards with a sidecar metadata JSON per sha
 - `sampling/random_weights.py`: positive normalized weights (`E.11`)
 - `sampling/random_points.py`: base distributions + random function transform (`E.12`)
 - `postprocess/postprocess.py`: cleanup, scaling, class/index permutation (`E.13`)
-- `filtering/extratrees_filter.py`: ExtraTrees OOB filter (`E.14`)
+- `filtering/torch_rf_filter.py`: Torch-native RF OOB filter (`E.14`)
 
 ## Performance Strategy
-1. Current generator path runs Torch on all devices (CPU/CUDA/MPS) and uses NumPy only for postprocessing/filtering contracts backed by sklearn.
+1. Current generator path runs Torch on all devices (CPU/CUDA/MPS) and uses NumPy only for postprocessing contracts.
 2. Keep kernels batch-oriented with vectorized NumPy operations and avoid Python loops in inner math paths.
 3. Use optional filtering (`E.14`) behind config flags to avoid CPU bottlenecks in throughput benchmarks.
 4. Profile with `bench/throughput.py` and track JSON baseline regressions by preset.

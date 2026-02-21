@@ -1,5 +1,5 @@
 """Dataset filters."""
 
-from .extratrees_filter import apply_extratrees_filter
+from .torch_rf_filter import apply_torch_rf_filter
 
-__all__ = ["apply_extratrees_filter"]
+__all__ = ["apply_torch_rf_filter"]

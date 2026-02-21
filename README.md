@@ -32,6 +32,11 @@ See `scripts/README.md` for argument details.
 - `configs/benchmark_cuda_desktop.yaml`: benchmark profile for desktop CUDA GPUs.
 - `configs/benchmark_cuda_h100.yaml`: benchmark profile for H100-class GPUs.
 
+## Config Notes
+
+- Filter config uses RF field names: `filter.n_trees` and `filter.depth`.
+- Legacy keys (`filter.n_estimators`, `filter.max_depth`) are intentionally rejected.
+
 ## Benchmark Suite
 
 Run profile-specific or matrix benchmark suites:

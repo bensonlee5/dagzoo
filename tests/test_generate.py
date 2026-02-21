@@ -58,7 +58,7 @@ def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch)
         called["count"] += 1
         return True, {"wins_ratio": 1.0, "n_valid_oob": 128}
 
-    monkeypatch.setattr("cauchy_generator.core.dataset.apply_extratrees_filter", _stub_filter)
+    monkeypatch.setattr("cauchy_generator.core.dataset.apply_torch_rf_filter", _stub_filter)
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     cfg.filter.enabled = True
 

@@ -14,7 +14,7 @@ from cauchy_generator.core.node_pipeline import (
     ConverterSpec,
     apply_node_pipeline_torch,
 )
-from cauchy_generator.filtering import apply_extratrees_filter
+from cauchy_generator.filtering import apply_torch_rf_filter
 from cauchy_generator.graph import sample_cauchy_dag
 from cauchy_generator.postprocess import postprocess_dataset
 from cauchy_generator.rng import SeedManager
@@ -346,34 +346,6 @@ def _classification_split_valid(y_train: np.ndarray, y_test: np.ndarray) -> bool
     return len(train_classes) >= 2 and train_classes == test_classes
 
 
-def _apply_filter_numpy(
-    config: GeneratorConfig,
-    x: np.ndarray,
-    y: np.ndarray,
-    *,
-    seed: int,
-) -> tuple[bool, dict[str, Any]]:
-    """Run optional ExtraTrees filtering and return acceptance metadata."""
-
-    details: dict[str, Any] = {"enabled": config.filter.enabled}
-    if not config.filter.enabled:
-        return True, details
-
-    accepted, filter_details = apply_extratrees_filter(
-        x,
-        y,
-        task=config.dataset.task,
-        seed=seed,
-        n_estimators=config.filter.n_estimators,
-        max_depth=config.filter.max_depth,
-        n_bootstrap=config.filter.n_bootstrap,
-        threshold=config.filter.threshold,
-    )
-    details.update(filter_details)
-    details["accepted"] = accepted
-    return accepted, details
-
-
 def _apply_filter_torch(
     config: GeneratorConfig,
     x: torch.Tensor,
@@ -381,14 +353,29 @@ def _apply_filter_torch(
     *,
     seed: int,
 ) -> tuple[bool, dict[str, Any]]:
-    """Run E.14 filtering for torch tensors via NumPy/sklearn backend."""
+    """Run E.14-style filtering natively in Torch using random forests."""
 
-    x_np = _to_numpy(x).astype(np.float32, copy=False)
-    if config.dataset.task == "classification":
-        y_np = _to_numpy(y).astype(np.int64, copy=False)
-    else:
-        y_np = _to_numpy(y).astype(np.float32, copy=False)
-    return _apply_filter_numpy(config, x_np, y_np, seed=seed)
+    details: dict[str, Any] = {"enabled": config.filter.enabled}
+    if not config.filter.enabled:
+        return True, details
+
+    accepted, filter_details = apply_torch_rf_filter(
+        x,
+        y,
+        task=config.dataset.task,
+        seed=seed,
+        n_trees=config.filter.n_trees,
+        depth=config.filter.depth,
+        min_samples_leaf=config.filter.min_samples_leaf,
+        max_leaf_nodes=config.filter.max_leaf_nodes,
+        max_features=config.filter.max_features,
+        n_split_candidates=config.filter.n_split_candidates,
+        n_bootstrap=config.filter.n_bootstrap,
+        threshold=config.filter.threshold,
+    )
+    details.update(filter_details)
+    details["accepted"] = accepted
+    return accepted, details
 
 
 def generate_one(

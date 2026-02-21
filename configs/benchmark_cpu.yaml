@@ -54,8 +54,10 @@ benchmark:
 
 filter:
   enabled: false
-  n_estimators: 25
-  max_depth: 6
+  n_trees: 25
+  depth: 6
+  max_features: auto
+  n_split_candidates: 8
   n_bootstrap: 200
   threshold: 0.95
   max_attempts: 3

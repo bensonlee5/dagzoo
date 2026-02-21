@@ -1,3 +1,5 @@
+import pytest
+
 from cauchy_generator.config import GeneratorConfig
 
 
@@ -6,6 +8,10 @@ def test_load_default_config() -> None:
     assert cfg.dataset.n_train > 0
     assert cfg.dataset.n_features_min <= cfg.dataset.n_features_max
     assert cfg.output.shard_size > 0
+    assert cfg.filter.n_trees > 0
+    assert cfg.filter.depth >= 0
+    assert cfg.filter.max_features == "auto"
+    assert cfg.filter.n_split_candidates > 0
 
 
 def test_load_cuda_presets() -> None:
@@ -36,3 +42,16 @@ def test_runtime_config_from_dict() -> None:
     )
     assert cfg.runtime.device == "cpu"
     assert cfg.runtime.torch_dtype == "float64"
+
+
+def test_legacy_filter_keys_are_rejected() -> None:
+    with pytest.raises(TypeError, match="n_estimators"):
+        GeneratorConfig.from_dict(
+            {
+                "filter": {
+                    "enabled": True,
+                    "n_estimators": 25,
+                    "max_depth": 6,
+                }
+            }
+        )

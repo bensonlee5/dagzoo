@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from cauchy_generator.core.trees import compute_odt_leaf_indices, sample_odt_splits
 from cauchy_generator.functions.activations import (
     apply_random_activation,
     apply_random_activation_torch,
@@ -210,26 +211,19 @@ def _apply_tree_torch(x: torch.Tensor, out_dim: int, generator: torch.Generator)
     if not np.isfinite(total) or total <= 1e-12:
         probs = torch.ones_like(std) / max(1, len(std))
     else:
-        probs = std / total
-        probs = torch.clamp(probs, min=0.0)
-        probs /= torch.sum(probs)
+        probs = torch.clamp(std, min=0.0)
+        probs /= torch.clamp(torch.sum(probs), min=1e-12)
+        if not torch.all(torch.isfinite(probs)) or torch.any(probs < 0):
+            probs = torch.ones_like(std) / max(1, len(std))
 
     for _ in range(max(1, n_trees)):
-        depth = torch.randint(1, 8, (1,), generator=generator).item()
-        split_dims = torch.multinomial(probs, int(depth), replacement=True, generator=generator)
+        depth = int(torch.randint(1, 8, (1,), generator=generator).item())
+        split_dims, thresholds = sample_odt_splits(x, depth, generator, feature_probs=probs)
+        leaf_idx = compute_odt_leaf_indices(x, split_dims, thresholds)
 
-        row_indices = torch.randint(
-            0, x.shape[0], (int(depth),), generator=generator, device=x.device
-        )
-        thresholds = x[row_indices, split_dims]
-
-        bits = (x[:, split_dims] > thresholds).to(torch.int32)
-        powers = (1 << torch.arange(int(depth), device=x.device)).to(torch.int32)
-        leaf_idx = torch.sum(bits * powers, dim=1)
-
-        n_leaves = 2 ** int(depth)
+        n_leaves = 2**depth
         leaf_vals = torch.randn(n_leaves, out_dim, generator=generator, device=x.device)
-        y += leaf_vals[leaf_idx.to(torch.long)]
+        y += leaf_vals[leaf_idx]
 
     y /= float(max(1, n_trees))
     return y

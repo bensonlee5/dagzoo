@@ -71,8 +71,12 @@ class BenchmarkConfig:
 @dataclass(slots=True)
 class FilterConfig:
     enabled: bool = False
-    n_estimators: int = 25
-    max_depth: int = 6
+    n_trees: int = 25
+    depth: int = 6
+    min_samples_leaf: int = 1
+    max_leaf_nodes: int | None = None
+    max_features: str | int | float = "auto"
+    n_split_candidates: int = 8
     n_bootstrap: int = 200
     threshold: float = 0.95
     max_attempts: int = 3
