@@ -51,7 +51,7 @@ Persist generated outputs as Parquet shards with a sidecar metadata JSON per sha
 - `filtering/extratrees_filter.py`: ExtraTrees OOB filter (`E.14`)
 
 ## Performance Strategy
-1. Current generator path computes Appendix-light graph/node flows in NumPy and can emit Torch tensors on selected device.
+1. Current generator path defaults to Torch compute with NumPy fallback and keeps postprocessing/filtering contracts aligned across backends.
 2. Keep kernels batch-oriented with vectorized NumPy operations and avoid Python loops in inner math paths.
 3. Use optional filtering (`E.14`) behind config flags to avoid CPU bottlenecks in throughput benchmarks.
 4. Profile with `bench/throughput.py` and track JSON baseline regressions by preset.

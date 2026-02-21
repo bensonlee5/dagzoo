@@ -1,13 +1,16 @@
 """Random positive weights sampling (Appendix E.11)."""
 
-from __future__ import annotations
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-try:
+if TYPE_CHECKING:
     import torch
-except ImportError:
-    torch = None
+else:
+    try:
+        import torch
+    except ImportError:
+        torch = None
 
 
 def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
@@ -51,7 +54,7 @@ def sample_random_weights_torch(
     w = torch.pow(m, -q) * torch.exp(noise)
     w = torch.clamp(w, min=1e-12)
     w /= torch.sum(w)
-    
+
     # Shuffle
     idx = torch.randperm(dim, generator=generator, device=device)
     return w[idx]

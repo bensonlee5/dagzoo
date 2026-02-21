@@ -17,9 +17,7 @@ def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
     return float(np.exp(rng.uniform(np.log(low), np.log(high))))
 
 
-def _log_uniform_torch(
-    generator: torch.Generator, low: float, high: float, device: str
-) -> float:
+def _log_uniform_torch(generator: torch.Generator, low: float, high: float, device: str) -> float:
     """Sample from a log-uniform distribution using torch."""
     low_log = np.log(low)
     high_log = np.log(high)
@@ -50,9 +48,7 @@ def _softmax(x: np.ndarray) -> np.ndarray:
     return exp / np.clip(exp.sum(axis=1, keepdims=True), 1e-9, None)
 
 
-def _sample_categories_from_probs(
-    probs: np.ndarray, rng: np.random.Generator
-) -> np.ndarray:
+def _sample_categories_from_probs(probs: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     """Sample categorical indices from row-wise probability vectors."""
 
     cdf = np.cumsum(probs, axis=1)
@@ -95,9 +91,7 @@ def apply_categorical_converter_torch(
     centers = None
     if selected_method == "neighbor":
         n_centers = min(c, y.shape[0])
-        idx = torch.randperm(y.shape[0], generator=generator, device=y.device)[
-            :n_centers
-        ]
+        idx = torch.randperm(y.shape[0], generator=generator, device=y.device)[:n_centers]
         centers = y[idx]
         p = _log_uniform_torch(generator, 0.5, 4.0, device)
         # Pairwise distance (N, 1, D) - (1, M, D)
@@ -208,9 +202,7 @@ def apply_categorical_converter(
             out = centers[labels % centers.shape[0]]
             if out.shape[1] != d:
                 out = (
-                    out[:, :d]
-                    if out.shape[1] > d
-                    else np.pad(out, ((0, 0), (0, d - out.shape[1])))
+                    out[:, :d] if out.shape[1] > d else np.pad(out, ((0, 0), (0, d - out.shape[1])))
                 )
         else:
             out = arr

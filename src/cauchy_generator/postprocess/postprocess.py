@@ -5,7 +5,9 @@ from __future__ import annotations
 import numpy as np
 
 
-def _remove_constant_columns(x: np.ndarray, feature_types: list[str]) -> tuple[np.ndarray, list[str]]:
+def _remove_constant_columns(
+    x: np.ndarray, feature_types: list[str]
+) -> tuple[np.ndarray, list[str]]:
     """Drop columns with near-zero variance and align feature type metadata."""
 
     keep = np.std(x, axis=0) > 1e-12

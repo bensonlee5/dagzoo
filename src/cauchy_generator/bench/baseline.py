@@ -67,7 +67,9 @@ def compare_summary_to_baseline(
 ) -> dict[str, Any]:
     """Compare suite results with baseline and return severity-ranked issues."""
 
-    metric_names = list(metrics) if metrics is not None else list(baseline_payload.get("metrics", []))
+    metric_names = (
+        list(metrics) if metrics is not None else list(baseline_payload.get("metrics", []))
+    )
     if not metric_names:
         metric_names = list(DEFAULT_GATING_METRICS)
 

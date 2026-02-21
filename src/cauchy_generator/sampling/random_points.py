@@ -1,16 +1,25 @@
 """Random points mechanism (Appendix E.12)."""
 
-from __future__ import annotations
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-try:
+if TYPE_CHECKING:
     import torch
-except ImportError:
-    torch = None
+else:
+    try:
+        import torch
+    except ImportError:
+        torch = None
 
-from cauchy_generator.functions.random_functions import apply_random_function, apply_random_function_torch
-from cauchy_generator.sampling.random_weights import sample_random_weights, sample_random_weights_torch
+from cauchy_generator.functions.random_functions import (
+    apply_random_function,
+    apply_random_function_torch,
+)
+from cauchy_generator.sampling.random_weights import (
+    sample_random_weights,
+    sample_random_weights_torch,
+)
 
 
 def _sample_unit_ball(n: int, d: int, rng: np.random.Generator) -> np.ndarray:
@@ -22,7 +31,9 @@ def _sample_unit_ball(n: int, d: int, rng: np.random.Generator) -> np.ndarray:
     return (v * r).astype(np.float32)
 
 
-def _sample_unit_ball_torch(n: int, d: int, generator: torch.Generator, device: str) -> torch.Tensor:
+def _sample_unit_ball_torch(
+    n: int, d: int, generator: torch.Generator, device: str
+) -> torch.Tensor:
     """Sample points uniformly from the d-dimensional unit ball in torch."""
     v = torch.randn(n, d, generator=generator, device=device)
     v /= torch.clamp(torch.norm(v, dim=1, keepdim=True), min=1e-6)
@@ -40,7 +51,9 @@ def _sample_random_covariance_normal(n: int, d: int, rng: np.random.Generator) -
     return ((x * w[None, :]) @ a.T).astype(np.float32)
 
 
-def _sample_random_covariance_normal_torch(n: int, d: int, generator: torch.Generator, device: str) -> torch.Tensor:
+def _sample_random_covariance_normal_torch(
+    n: int, d: int, generator: torch.Generator, device: str
+) -> torch.Tensor:
     """Sample normal points with random covariance in torch."""
     x = torch.randn(n, d, generator=generator, device=device)
     w = sample_random_weights_torch(d, generator, device)

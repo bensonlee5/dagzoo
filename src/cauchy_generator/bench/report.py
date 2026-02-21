@@ -50,9 +50,9 @@ def _build_profile_table(profile_results: list[dict[str, Any]]) -> list[str]:
     for result in profile_results:
         lines.append(
             "| "
-            f"{result.get('profile_key', '-') } | "
-            f"{result.get('device', '-') } | "
-            f"{result.get('hardware_backend', '-') } | "
+            f"{result.get('profile_key', '-')} | "
+            f"{result.get('device', '-')} | "
+            f"{result.get('hardware_backend', '-')} | "
             f"{_format_float(result.get('datasets_per_minute'), 2)} | "
             f"{_format_float(result.get('elapsed_seconds'), 3)} | "
             f"{_format_float(result.get('latency_p95_ms'), 2)} | "

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -11,10 +12,13 @@ from cauchy_generator.config import GeneratorConfig
 
 logger = logging.getLogger(__name__)
 
-try:
+if TYPE_CHECKING:
     import torch
-except Exception:  # pragma: no cover - optional dependency
-    torch = None
+else:
+    try:
+        import torch
+    except ImportError:
+        torch = None
 
 
 @dataclass(slots=True)
@@ -66,11 +70,7 @@ def get_peak_flops(device_name: str) -> float:
         if all(p in name for p in patterns):
             return flops
 
-    if (
-        "data center gpu max 1550" in name
-        and torch is not None
-        and hasattr(torch, "xpu")
-    ):
+    if "data center gpu max 1550" in name and torch is not None and hasattr(torch, "xpu"):
         try:
             max_comp_units = torch.xpu.get_device_properties("xpu").max_compute_units
             return float(512 * max_comp_units * 1300 * 10**6)
@@ -81,9 +81,7 @@ def get_peak_flops(device_name: str) -> float:
     return float("inf")
 
 
-def _recommend_profile(
-    device_name: str, total_memory_gb: float | None, backend: str
-) -> str:
+def _recommend_profile(device_name: str, total_memory_gb: float | None, backend: str) -> str:
     """Map detected hardware to a coarse runtime profile tier."""
 
     if backend != "cuda":
@@ -141,10 +139,7 @@ def detect_hardware(requested_device: str | None = None) -> HardwareInfo:
             profile="cpu",
         )
 
-    if (
-        requested in ("cpu", "auto")
-        and torch is not None
-    ):
+    if requested in ("cpu", "auto") and torch is not None:
         return HardwareInfo(
             backend="torch",
             requested_device=requested,
@@ -164,9 +159,7 @@ def detect_hardware(requested_device: str | None = None) -> HardwareInfo:
     )
 
 
-def apply_hardware_profile(
-    config: GeneratorConfig, hw: HardwareInfo
-) -> GeneratorConfig:
+def apply_hardware_profile(config: GeneratorConfig, hw: HardwareInfo) -> GeneratorConfig:
     """Apply conservative config overrides based on detected hardware tier."""
 
     config.runtime.gpu_name_hint = hw.device_name

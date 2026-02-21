@@ -40,4 +40,4 @@ PRs must include:
 - benchmark deltas for performance-sensitive code
 
 ## Architecture & Performance Notes
-Primary runtime is NumPy with optional PyTorch/CUDA output and benchmarking paths. Keep hot paths vectorized and batch-oriented. Preserve Appendix E (`E.2`-`E.14`) behavior as the source of truth; use other papers in `reference/` only to clarify ambiguous details.
+Primary runtime is PyTorch with NumPy fallback paths and benchmarking support. Keep hot paths vectorized and batch-oriented. Preserve Appendix E (`E.2`-`E.14`) behavior as the source of truth; use other papers in `reference/` only to clarify ambiguous details.

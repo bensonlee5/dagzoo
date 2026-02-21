@@ -8,7 +8,25 @@ import time
 from pathlib import Path
 
 from cauchy_generator.config import GeneratorConfig
-from cauchy_generator.core.dataset import generate_batch
+from cauchy_generator.core.dataset import generate_batch_iter
+
+
+def _consume_generation(
+    config: GeneratorConfig,
+    *,
+    num_datasets: int,
+    seed: int,
+    device: str | None,
+) -> None:
+    """Run generation for ``num_datasets`` items while discarding outputs."""
+
+    for _ in generate_batch_iter(
+        config,
+        num_datasets=num_datasets,
+        seed=seed,
+        device=device,
+    ):
+        pass
 
 
 def run_throughput_benchmark(
@@ -17,14 +35,24 @@ def run_throughput_benchmark(
     num_datasets: int,
     warmup_datasets: int = 10,
     device: str | None = None,
-) -> dict[str, float | int | str]:
+) -> dict[str, float | int | str | None]:
     """Measure end-to-end generation throughput for a benchmark profile."""
 
     if warmup_datasets > 0:
-        generate_batch(config, num_datasets=warmup_datasets, seed=config.seed + 1, device=device)
+        _consume_generation(
+            config,
+            num_datasets=warmup_datasets,
+            seed=config.seed + 1,
+            device=device,
+        )
 
     start = time.perf_counter()
-    generate_batch(config, num_datasets=num_datasets, seed=config.seed + 2, device=device)
+    _consume_generation(
+        config,
+        num_datasets=num_datasets,
+        seed=config.seed + 2,
+        device=device,
+    )
     elapsed = time.perf_counter() - start
     dps = num_datasets / elapsed if elapsed > 0 else 0.0
     dpm = dps * 60.0

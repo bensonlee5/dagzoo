@@ -27,9 +27,7 @@ def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
     return float(np.exp(rng.uniform(np.log(low), np.log(high))))
 
 
-def _log_uniform_torch(
-    generator: torch.Generator, low: float, high: float, device: str
-) -> float:
+def _log_uniform_torch(generator: torch.Generator, low: float, high: float, device: str) -> float:
     """Sample from a log-uniform distribution using torch."""
     low_log = np.log(low)
     high_log = np.log(high)
@@ -76,9 +74,7 @@ def _apply_linear(x: Array, out_dim: int, rng: np.random.Generator) -> Array:
     return (x @ m.T).astype(np.float32)
 
 
-def _apply_linear_torch(
-    x: torch.Tensor, out_dim: int, generator: torch.Generator
-) -> torch.Tensor:
+def _apply_linear_torch(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
     """Apply a sampled random linear map in torch."""
     m = sample_random_matrix_torch(out_dim, x.shape[1], generator, str(x.device))
     return x @ m.t()
@@ -93,9 +89,7 @@ def _apply_quadratic(x: Array, out_dim: int, rng: np.random.Generator) -> Array:
         x_sub = x[:, idx]
     else:
         x_sub = x
-    x_aug = np.concatenate(
-        [x_sub, np.ones((x_sub.shape[0], 1), dtype=np.float32)], axis=1
-    )
+    x_aug = np.concatenate([x_sub, np.ones((x_sub.shape[0], 1), dtype=np.float32)], axis=1)
 
     y = np.empty((x_aug.shape[0], out_dim), dtype=np.float32)
     for i in range(out_dim):
@@ -118,9 +112,7 @@ def _apply_quadratic_torch(
 
     y = torch.empty(x_aug.shape[0], out_dim, device=x.device)
     for i in range(out_dim):
-        m = sample_random_matrix_torch(
-            x_aug.shape[1], x_aug.shape[1], generator, str(x.device)
-        )
+        m = sample_random_matrix_torch(x_aug.shape[1], x_aug.shape[1], generator, str(x.device))
         y[:, i] = torch.sum((x_aug @ m) * x_aug, dim=1)
     return y
 
@@ -148,9 +140,7 @@ def _apply_nn(x: Array, out_dim: int, rng: np.random.Generator) -> Array:
     return y.astype(np.float32)
 
 
-def _apply_nn_torch(
-    x: torch.Tensor, out_dim: int, generator: torch.Generator
-) -> torch.Tensor:
+def _apply_nn_torch(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
     """Apply a shallow random NN in torch."""
     n_layers = torch.randint(1, 4, (1,), generator=generator).item()
     hidden = int(_log_uniform_torch(generator, 1.0, 127.0, str(x.device)))
@@ -192,9 +182,7 @@ def _apply_tree(x: Array, out_dim: int, rng: np.random.Generator) -> Array:
 
     for _ in range(max(1, n_trees)):
         depth = int(rng.integers(1, 8))
-        split_dims = rng.choice(
-            np.arange(x.shape[1]), size=depth, replace=True, p=probs
-        )
+        split_dims = rng.choice(np.arange(x.shape[1]), size=depth, replace=True, p=probs)
         thresholds = np.array(
             [x[int(rng.integers(0, x.shape[0])), d] for d in split_dims],
             dtype=np.float32,
@@ -212,9 +200,7 @@ def _apply_tree(x: Array, out_dim: int, rng: np.random.Generator) -> Array:
     return y.astype(np.float32)
 
 
-def _apply_tree_torch(
-    x: torch.Tensor, out_dim: int, generator: torch.Generator
-) -> torch.Tensor:
+def _apply_tree_torch(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
     """Apply an ensemble of random trees in torch."""
     n_trees = int(_log_uniform_torch(generator, 1.0, 32.0, str(x.device)))
     y = torch.zeros(x.shape[0], out_dim, device=x.device)
@@ -230,9 +216,7 @@ def _apply_tree_torch(
 
     for _ in range(max(1, n_trees)):
         depth = torch.randint(1, 8, (1,), generator=generator).item()
-        split_dims = torch.multinomial(
-            probs, int(depth), replacement=True, generator=generator
-        )
+        split_dims = torch.multinomial(probs, int(depth), replacement=True, generator=generator)
 
         row_indices = torch.randint(
             0, x.shape[0], (int(depth),), generator=generator, device=x.device
@@ -272,9 +256,7 @@ def _apply_discretization_torch(
     """Apply discretization function in torch."""
     n_centers = int(_log_uniform_torch(generator, 2.0, 128.0, str(x.device)))
     n_centers = min(max(2, n_centers), x.shape[0])
-    center_idx = torch.randperm(x.shape[0], generator=generator, device=x.device)[
-        :n_centers
-    ]
+    center_idx = torch.randperm(x.shape[0], generator=generator, device=x.device)[:n_centers]
     centers = x[center_idx]
 
     p = _log_uniform_torch(generator, 0.5, 4.0, str(x.device))
@@ -340,9 +322,7 @@ def _apply_gp(x: Array, out_dim: int, rng: np.random.Generator) -> Array:
     return y.astype(np.float32)
 
 
-def _apply_gp_torch(
-    x: torch.Tensor, out_dim: int, generator: torch.Generator
-) -> torch.Tensor:
+def _apply_gp_torch(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
     """Apply GP approximation in torch."""
     din = x.shape[1]
     p = 256
@@ -352,8 +332,7 @@ def _apply_gp_torch(
     if torch.rand(1, generator=generator).item() < 0.5:
         r = _sample_radial_ha_torch(p * din, generator, device, a=a).view(p, din)
         s = torch.where(
-            torch.empty(p, din, device=device).uniform_(0, 1, generator=generator)
-            < 0.5,
+            torch.empty(p, din, device=device).uniform_(0, 1, generator=generator) < 0.5,
             -1.0,
             1.0,
         )
@@ -388,9 +367,7 @@ def _apply_em(x: Array, out_dim: int, rng: np.random.Generator) -> Array:
     p = _log_uniform(rng, 1.0, 4.0)
     q = _log_uniform(rng, 1.0, 2.0)
 
-    dist_p = np.power(np.abs(x[:, None, :] - centers[None, :, :]), p).sum(axis=2) ** (
-        1.0 / p
-    )
+    dist_p = np.power(np.abs(x[:, None, :] - centers[None, :, :]), p).sum(axis=2) ** (1.0 / p)
     logits = -0.5 * np.log(2.0 * np.pi * sigma[None, :] ** 2) - np.power(
         dist_p / np.clip(sigma[None, :], 1e-6, None), q
     )
@@ -398,28 +375,20 @@ def _apply_em(x: Array, out_dim: int, rng: np.random.Generator) -> Array:
     return _apply_linear(probs, out_dim, rng)
 
 
-def _apply_em_torch(
-    x: torch.Tensor, out_dim: int, generator: torch.Generator
-) -> torch.Tensor:
+def _apply_em_torch(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
     """Apply EM assignment function in torch."""
-    m_val = int(
-        _log_uniform_torch(generator, 2.0, float(max(16, 2 * out_dim)), str(x.device))
-    )
+    m_val = int(_log_uniform_torch(generator, 2.0, float(max(16, 2 * out_dim)), str(x.device)))
     m_val = max(2, m_val)
 
-    base_idx = torch.randint(
-        0, x.shape[0], (m_val,), generator=generator, device=x.device
-    )
-    centers = x[base_idx] + torch.randn(
-        m_val, x.shape[1], generator=generator, device=x.device
-    )
+    base_idx = torch.randint(0, x.shape[0], (m_val,), generator=generator, device=x.device)
+    centers = x[base_idx] + torch.randn(m_val, x.shape[1], generator=generator, device=x.device)
     sigma = torch.exp(0.1 * torch.randn(m_val, generator=generator, device=x.device))
     p_val = _log_uniform_torch(generator, 1.0, 4.0, str(x.device))
     q_val = _log_uniform_torch(generator, 1.0, 2.0, str(x.device))
 
-    dist_p = torch.pow(torch.abs(x.unsqueeze(1) - centers.unsqueeze(0)), p_val).sum(
-        dim=2
-    ) ** (1.0 / p_val)
+    dist_p = torch.pow(torch.abs(x.unsqueeze(1) - centers.unsqueeze(0)), p_val).sum(dim=2) ** (
+        1.0 / p_val
+    )
     logits = -0.5 * torch.log(2.0 * np.pi * sigma**2) - torch.pow(
         dist_p / torch.clamp(sigma, min=1e-6), q_val
     )
@@ -438,9 +407,7 @@ def _apply_product(x: Array, out_dim: int, rng: np.random.Generator) -> Array:
     return (fx * gx).astype(np.float32)
 
 
-def _apply_product_torch(
-    x: torch.Tensor, out_dim: int, generator: torch.Generator
-) -> torch.Tensor:
+def _apply_product_torch(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
     """Apply product function in torch."""
     allowed = ["tree", "discretization", "gp", "linear", "quadratic"]
     idx_f = torch.randint(0, len(allowed), (1,), generator=generator).item()

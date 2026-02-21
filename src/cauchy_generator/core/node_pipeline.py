@@ -39,9 +39,7 @@ def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
     return float(np.exp(rng.uniform(np.log(low), np.log(high))))
 
 
-def _log_uniform_torch(
-    generator: torch.Generator, low: float, high: float, device: str
-) -> float:
+def _log_uniform_torch(generator: torch.Generator, low: float, high: float, device: str) -> float:
     """Sample from a log-uniform distribution using torch."""
     low_log = np.log(low)
     high_log = np.log(high)
@@ -81,13 +79,7 @@ def apply_node_pipeline_torch(
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Apply Appendix E.5-style node transform in torch."""
     required_dim = int(sum(max(1, s.dim) for s in converter_specs))
-    latent_extra = int(
-        np.exp(
-            np.random.default_rng(
-                int(torch.randint(0, 2**31, (1,), generator=generator).item())
-            ).uniform(np.log(1.0), np.log(32.0))
-        )
-    )
+    latent_extra = int(_log_uniform_torch(generator, 1.0, 32.0, device))
     total_dim = required_dim + max(1, latent_extra)
 
     if parent_data:
@@ -117,6 +109,8 @@ def apply_node_pipeline_torch(
 
         view = x[:, cursor : cursor + d]
         if spec.kind == "cat":
+            if spec.cardinality is None:
+                raise ValueError(f"Missing cardinality for categorical spec: {spec.key}")
             x_prime, v = apply_categorical_converter_torch(
                 view, generator, n_categories=int(spec.cardinality)
             )
@@ -125,9 +119,8 @@ def apply_node_pipeline_torch(
             x_prime, v = apply_numeric_converter_torch(view[:, :1], generator)
             extracted[spec.key] = v
         elif spec.kind == "target_cls":
-            x_prime, v = apply_categorical_converter_torch(
-                view, generator, n_categories=int(spec.cardinality)
-            )
+            cls = max(2, int(spec.cardinality or 2))
+            x_prime, v = apply_categorical_converter_torch(view, generator, n_categories=cls)
             extracted[spec.key] = v
         elif spec.kind == "target_reg":
             x_prime, v = apply_numeric_converter_torch(view[:, :1], generator)
@@ -184,20 +177,14 @@ def apply_node_pipeline(
     for spec in converter_specs:
         d = max(1, int(spec.dim))
         if cursor + d > x.shape[1]:
-            pad = rng.normal(size=(x.shape[0], cursor + d - x.shape[1])).astype(
-                np.float32
-            )
+            pad = rng.normal(size=(x.shape[0], cursor + d - x.shape[1])).astype(np.float32)
             x = np.concatenate([x, pad], axis=1)
 
         view = x[:, cursor : cursor + d]
         if spec.kind == "cat":
             if spec.cardinality is None:
-                raise ValueError(
-                    f"Missing cardinality for categorical spec: {spec.key}"
-                )
-            x_prime, v = apply_categorical_converter(
-                view, rng, n_categories=int(spec.cardinality)
-            )
+                raise ValueError(f"Missing cardinality for categorical spec: {spec.key}")
+            x_prime, v = apply_categorical_converter(view, rng, n_categories=int(spec.cardinality))
             extracted[spec.key] = v
         elif spec.kind == "num":
             x_prime, v = apply_numeric_converter(view[:, :1], rng)

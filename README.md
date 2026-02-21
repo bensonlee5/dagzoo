@@ -63,7 +63,7 @@ Unknown GPUs fall back safely (`peak_flops=inf`) so utilization metrics do not r
 
 This repository currently provides:
 - package/CLI/config scaffolding
-- NumPy-first seeded batch generation with optional Torch/CUDA paths
+- Torch-first seeded batch generation with NumPy fallback paths
 - Parquet writing interface
 - benchmark harness and test scaffolding
 

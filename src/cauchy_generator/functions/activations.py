@@ -12,9 +12,7 @@ def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
     return float(np.exp(rng.uniform(np.log(low), np.log(high))))
 
 
-def _log_uniform_torch(
-    generator: torch.Generator, low: float, high: float, device: str
-) -> float:
+def _log_uniform_torch(generator: torch.Generator, low: float, high: float, device: str) -> float:
     """Sample from a log-uniform distribution using torch."""
     low_log = np.log(low)
     high_log = np.log(high)
@@ -105,9 +103,7 @@ def _fixed_activation_torch(x: torch.Tensor, name: str) -> torch.Tensor:
     return x
 
 
-def _param_activation_torch(
-    x: torch.Tensor, generator: torch.Generator
-) -> torch.Tensor:
+def _param_activation_torch(x: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
     """Apply one randomly parameterized activation family in torch."""
     choices = ["relu_pow", "signed_pow", "inv_pow", "poly"]
     idx = torch.randint(0, len(choices), (1,), generator=generator).item()
@@ -238,9 +234,7 @@ def _fixed_activation(x: np.ndarray, name: str) -> np.ndarray:
     if name == "selu":
         _alpha = 1.6732632
         _lambda = 1.0507010
-        return _lambda * np.where(
-            x >= 0, x, _alpha * (np.exp(np.clip(x, -20.0, 20.0)) - 1.0)
-        )
+        return _lambda * np.where(x >= 0, x, _alpha * (np.exp(np.clip(x, -20.0, 20.0)) - 1.0))
     if name == "relu6":
         return np.clip(x, 0.0, 6.0)
     if name == "hardtanh":

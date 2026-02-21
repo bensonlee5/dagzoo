@@ -77,8 +77,8 @@ def summarize_latencies(latencies_seconds: Iterable[float]) -> dict[str, float]:
     }
 
 
-def reproducibility_signature(bundles: list[DatasetBundle]) -> str:
-    """Build a deterministic digest for a sequence of generated dataset bundles."""
+def reproducibility_signature(bundles: Iterable[DatasetBundle]) -> str:
+    """Build a deterministic digest for a sequence or stream of dataset bundles."""
 
     h = hashlib.blake2s(digest_size=16)
     for bundle in bundles:

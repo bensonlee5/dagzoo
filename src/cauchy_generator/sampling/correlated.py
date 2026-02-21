@@ -29,7 +29,9 @@ class CorrelatedSampler:
         if name not in self._numeric_params:
             t = self._rng.uniform(0.0, 1.0)
             s = np.exp(self._rng.uniform(np.log(0.1), np.log(10_000.0)))
-            self._numeric_params[name] = _NumericParams(alpha=float(s * t), beta=float(s * (1.0 - t)))
+            self._numeric_params[name] = _NumericParams(
+                alpha=float(s * t), beta=float(s * (1.0 - t))
+            )
         return self._numeric_params[name]
 
     def sample_num(

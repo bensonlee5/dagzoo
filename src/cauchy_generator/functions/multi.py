@@ -15,9 +15,7 @@ def _logsumexp(x: np.ndarray, axis: int) -> np.ndarray:
     """Numerically stable log-sum-exp reduction."""
 
     m = np.max(x, axis=axis, keepdims=True)
-    return (m + np.log(np.sum(np.exp(x - m), axis=axis, keepdims=True))).squeeze(
-        axis=axis
-    )
+    return (m + np.log(np.sum(np.exp(x - m), axis=axis, keepdims=True))).squeeze(axis=axis)
 
 
 def apply_multi_function_torch(
@@ -36,9 +34,7 @@ def apply_multi_function_torch(
         concat = torch.cat(inputs, dim=1)
         return apply_random_function_torch(concat, generator, out_dim=out_dim)
 
-    transformed = [
-        apply_random_function_torch(inp, generator, out_dim=out_dim) for inp in inputs
-    ]
+    transformed = [apply_random_function_torch(inp, generator, out_dim=out_dim) for inp in inputs]
     stacked = torch.stack(transformed, dim=1)  # (N, parents, out_dim)
 
     aggs = ["sum", "product", "max", "logsumexp"]

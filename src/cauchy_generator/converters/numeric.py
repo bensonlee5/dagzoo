@@ -12,9 +12,7 @@ def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
     return float(np.exp(rng.uniform(np.log(low), np.log(high))))
 
 
-def _log_uniform_torch(
-    generator: torch.Generator, low: float, high: float, device: str
-) -> float:
+def _log_uniform_torch(generator: torch.Generator, low: float, high: float, device: str) -> float:
     """Sample from a log-uniform distribution using torch."""
     low_log = np.log(low)
     high_log = np.log(high)

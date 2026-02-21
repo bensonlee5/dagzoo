@@ -11,9 +11,13 @@ from cauchy_generator.bench.baseline import build_baseline_payload, load_baselin
 from cauchy_generator.bench.report import write_suite_json, write_suite_markdown
 from cauchy_generator.bench.suite import resolve_profile_run_specs, run_benchmark_suite
 from cauchy_generator.config import GeneratorConfig
-from cauchy_generator.core.dataset import generate_batch
-from cauchy_generator.hardware import apply_hardware_profile, detect_hardware
-from cauchy_generator.io.parquet_writer import write_parquet_shards
+from cauchy_generator.core.dataset import generate_batch_iter
+from cauchy_generator.hardware import (
+    HardwareInfo,
+    apply_hardware_profile,
+    detect_hardware,
+)
+from cauchy_generator.io.parquet_writer import write_parquet_shards_stream
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -47,7 +51,9 @@ def _build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("benchmark", help="Run benchmark suite across one or more profiles.")
     b.add_argument("--config", default=None, help="Optional YAML config for profile 'custom'.")
     b.add_argument("--device", default=None, help="Device override for custom profile.")
-    b.add_argument("--num-datasets", type=int, default=None, help="Override benchmark dataset count.")
+    b.add_argument(
+        "--num-datasets", type=int, default=None, help="Override benchmark dataset count."
+    )
     b.add_argument("--warmup", type=int, default=None, help="Override benchmark warmup count.")
     b.add_argument(
         "--no-hardware-aware",
@@ -68,7 +74,9 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["all", "cpu", "cuda_desktop", "cuda_h100", "custom"],
         help="Benchmark profile key. Repeat to run multiple profiles.",
     )
-    b.add_argument("--baseline", default=None, help="Optional baseline JSON path for regression checks.")
+    b.add_argument(
+        "--baseline", default=None, help="Optional baseline JSON path for regression checks."
+    )
     b.add_argument("--out-dir", default=None, help="Optional directory for summary artifacts.")
     b.add_argument(
         "--fail-on-regression",
@@ -113,7 +121,7 @@ def _resolve_config_with_hardware(
     *,
     device: str | None,
     no_hardware_aware: bool,
-) -> tuple[GeneratorConfig, object]:
+) -> tuple[GeneratorConfig, HardwareInfo]:
     """Apply runtime hardware detection and optional profile-based tuning."""
 
     if no_hardware_aware:
@@ -141,23 +149,31 @@ def _run_generate(args: argparse.Namespace) -> int:
         f"memory_gb={hw.total_memory_gb} peak_flops={hw.peak_flops:.3e} profile={hw.profile}"
     )
 
-    bundles = generate_batch(
-        config,
-        num_datasets=args.num_datasets,
-        seed=seed,
-        device=args.device,
-    )
     if args.no_write:
-        print(f"Generated {len(bundles)} datasets (no-write mode).")
+        generated = sum(
+            1
+            for _ in generate_batch_iter(
+                config,
+                num_datasets=args.num_datasets,
+                seed=seed,
+                device=args.device,
+            )
+        )
+        print(f"Generated {generated} datasets (no-write mode).")
         return 0
 
-    write_parquet_shards(
-        bundles,
+    written = write_parquet_shards_stream(
+        generate_batch_iter(
+            config,
+            num_datasets=args.num_datasets,
+            seed=seed,
+            device=args.device,
+        ),
         out_dir=out_dir,
         shard_size=config.output.shard_size,
         compression=config.output.compression,
     )
-    print(f"Wrote {len(bundles)} datasets to: {Path(out_dir)}")
+    print(f"Wrote {written} datasets to: {Path(out_dir)}")
     return 0
 
 
@@ -227,7 +243,8 @@ def _run_benchmark(args: argparse.Namespace) -> int:
         warmup_override=args.warmup,
         collect_memory=not bool(args.no_memory),
         collect_reproducibility=(
-            bool(args.collect_reproducibility) or bool(default_cfg.benchmark.collect_reproducibility)
+            bool(args.collect_reproducibility)
+            or bool(default_cfg.benchmark.collect_reproducibility)
         ),
         fail_on_regression=bool(args.fail_on_regression),
         no_hardware_aware=bool(args.no_hardware_aware),
@@ -237,7 +254,9 @@ def _run_benchmark(args: argparse.Namespace) -> int:
         _print_profile_result_line(result)
 
     regression = summary.get("regression", {})
-    print(f"Regression status={regression.get('status', 'pass')} issues={len(regression.get('issues', []))}")
+    print(
+        f"Regression status={regression.get('status', 'pass')} issues={len(regression.get('issues', []))}"
+    )
 
     artifact_dir = _benchmark_artifact_dir(args, summary)
     if artifact_dir is not None:

@@ -1,6 +1,10 @@
+import numpy as np
+
+import cauchy_generator.bench.suite as suite_mod
 from cauchy_generator.bench.micro import run_microbenchmarks
 from cauchy_generator.bench.suite import ProfileRunSpec, run_benchmark_suite
 from cauchy_generator.config import GeneratorConfig
+from cauchy_generator.types import DatasetBundle
 
 
 def _tiny_cpu_config() -> GeneratorConfig:
@@ -62,3 +66,46 @@ def test_run_microbenchmarks_returns_expected_keys() -> None:
     assert "micro_random_function_linear_ms" in res
     assert "micro_node_pipeline_ms" in res
     assert "micro_generate_one_ms" in res
+
+
+def test_collect_reproducibility_uses_streaming_generation(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[int, int, str | None]] = []
+
+    def _bundle(value: int) -> DatasetBundle:
+        x_train = np.full((2, 2), float(value), dtype=np.float32)
+        y_train = np.array([0, 1], dtype=np.int64)
+        x_test = np.full((1, 2), float(value), dtype=np.float32)
+        y_test = np.array([1], dtype=np.int64)
+        return DatasetBundle(
+            X_train=x_train,
+            y_train=y_train,
+            X_test=x_test,
+            y_test=y_test,
+            feature_types=["num", "num"],
+            metadata={"seed": value, "attempt_used": 0},
+        )
+
+    def _stub_generate_batch_iter(
+        _config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        calls.append((num_datasets, int(seed or 0), device))
+        for i in range(num_datasets):
+            yield _bundle(int(seed or 0) + i)
+
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite.generate_batch_iter",
+        _stub_generate_batch_iter,
+    )
+
+    cfg = _tiny_cpu_config()
+    out = suite_mod._collect_reproducibility(cfg, device="cpu", num_datasets=3)
+    assert out["reproducibility_datasets"] == 3
+    assert out["reproducibility_match"] is True
+    assert len(calls) == 2
+    assert calls[0] == calls[1]

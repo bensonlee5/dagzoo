@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import typing
 from typing import Literal
 
 import numpy as np
@@ -25,9 +26,7 @@ def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
     return float(np.exp(rng.uniform(np.log(low), np.log(high))))
 
 
-def _log_uniform_torch(
-    generator: torch.Generator, low: float, high: float, device: str
-) -> float:
+def _log_uniform_torch(generator: torch.Generator, low: float, high: float, device: str) -> float:
     """Sample from a log-uniform distribution using torch."""
     low_log = np.log(low)
     high_log = np.log(high)
@@ -54,9 +53,7 @@ def _sample_gaussian(m: int, k: int, rng: np.random.Generator) -> np.ndarray:
     return rng.normal(size=(m, k)).astype(np.float32)
 
 
-def _sample_gaussian_torch(
-    m: int, k: int, generator: torch.Generator, device: str
-) -> torch.Tensor:
+def _sample_gaussian_torch(m: int, k: int, generator: torch.Generator, device: str) -> torch.Tensor:
     """Sample i.i.d. Gaussian matrix in torch."""
     return torch.randn(m, k, generator=generator, device=device)
 
@@ -73,10 +70,7 @@ def _sample_weights_matrix(m: int, k: int, rng: np.random.Generator) -> np.ndarr
     shared_q = _log_uniform(rng, q_low, 6.0)
     shared_sigma = _log_uniform(rng, 1e-4, 10.0)
     rows = np.stack(
-        [
-            sample_random_weights(k, rng, q=shared_q, sigma=shared_sigma)
-            for _ in range(m)
-        ],
+        [sample_random_weights(k, rng, q=shared_q, sigma=shared_sigma) for _ in range(m)],
         axis=0,
     )
     return _row_normalize(g * rows)
@@ -92,9 +86,7 @@ def _sample_weights_matrix_torch(
     shared_sigma = _log_uniform_torch(generator, 1e-4, 10.0, device)
     rows = torch.stack(
         [
-            sample_random_weights_torch(
-                k, generator, device, q=shared_q, sigma=shared_sigma
-            )
+            sample_random_weights_torch(k, generator, device, q=shared_q, sigma=shared_sigma)
             for _ in range(m)
         ],
         dim=0,
@@ -102,9 +94,7 @@ def _sample_weights_matrix_torch(
     return _row_normalize_torch(g * rows)
 
 
-def _sample_singular_values_matrix(
-    m: int, k: int, rng: np.random.Generator
-) -> np.ndarray:
+def _sample_singular_values_matrix(m: int, k: int, rng: np.random.Generator) -> np.ndarray:
     """Sample matrix with random singular-value-like decay factors."""
 
     d = min(m, k)
@@ -203,9 +193,7 @@ def sample_random_matrix(
     """Sample one of Appendix E.10 matrix families and apply postprocessing."""
 
     if out_dim <= 0 or in_dim <= 0:
-        raise ValueError(
-            f"Matrix dimensions must be > 0. Got out_dim={out_dim}, in_dim={in_dim}"
-        )
+        raise ValueError(f"Matrix dimensions must be > 0. Got out_dim={out_dim}, in_dim={in_dim}")
 
     kinds = [
         "gaussian",
@@ -225,8 +213,8 @@ def sample_random_matrix(
     elif selected == "kernel":
         m = _sample_kernel_matrix(out_dim, in_dim, rng)
     elif selected == "activation":
-        base_kind = str(
-            rng.choice(["gaussian", "weights", "singular_values", "kernel"])
+        base_kind = typing.cast(
+            MatrixKind, rng.choice(["gaussian", "weights", "singular_values", "kernel"])
         )
         m = sample_random_matrix(out_dim, in_dim, rng, kind=base_kind)
         flat = m.reshape(out_dim, in_dim)

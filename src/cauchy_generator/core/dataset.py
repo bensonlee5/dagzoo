@@ -1,7 +1,8 @@
-"""Seeded synthetic dataset generation with NumPy default and optional torch output."""
+"""Seeded synthetic dataset generation with Torch default and NumPy fallback."""
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import asdict
 from typing import Any
 
@@ -22,32 +23,27 @@ from cauchy_generator.sampling import CorrelatedSampler
 from cauchy_generator.types import DatasetBundle
 
 
-def _resolve_backend(
-    config: GeneratorConfig, device_override: str | None
-) -> tuple[str, str]:
-    """Resolve runtime backend/device with NumPy default and optional torch."""
+def _resolve_backend(config: GeneratorConfig, device_override: str | None) -> tuple[str, str]:
+    """Resolve runtime backend/device with explicit accelerator fail-fast behavior."""
 
     requested = (device_override or config.runtime.device or "auto").lower()
-    if torch is None:
-        return "numpy", "cpu"
+    mps_ok = bool(getattr(torch.backends, "mps", None) and torch.backends.mps.is_available())
 
-    # Explicit accelerator requests opt into torch when available.
+    # Explicit accelerator requests fail fast if unavailable.
     if requested == "cuda":
-        return ("torch", "cuda") if torch.cuda.is_available() else ("numpy", "cpu")
+        if torch.cuda.is_available():
+            return "torch", "cuda"
+        raise RuntimeError("Requested device 'cuda' but CUDA is not available.")
     if requested == "mps":
-        mps_ok = (
-            getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
-        )
-        return ("torch", "mps") if mps_ok else ("numpy", "cpu")
+        if mps_ok:
+            return "torch", "mps"
+        raise RuntimeError("Requested device 'mps' but MPS is not available.")
 
     if requested == "auto":
         if config.runtime.prefer_torch:
             if torch.cuda.is_available():
                 return "torch", "cuda"
-            if (
-                getattr(torch.backends, "mps", None)
-                and torch.backends.mps.is_available()
-            ):
+            if mps_ok:
                 return "torch", "mps"
             return "torch", "cpu"
         return "numpy", "cpu"
@@ -64,6 +60,14 @@ def _torch_dtype(config: GeneratorConfig) -> torch.dtype:
     return torch.float64 if config.runtime.torch_dtype == "float64" else torch.float32
 
 
+def _to_numpy(value: Any) -> np.ndarray:
+    """Convert tensors or array-like values to NumPy arrays."""
+
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy()
+    return np.asarray(value)
+
+
 def _sample_node_count(config: GeneratorConfig, rng: np.random.Generator) -> int:
     """Sample graph node count using log-uniform bounds from config."""
 
@@ -72,9 +76,7 @@ def _sample_node_count(config: GeneratorConfig, rng: np.random.Generator) -> int
     return max(2, int(np.exp(rng.uniform(np.log(low), np.log(high)))))
 
 
-def _sample_assignments(
-    n_cols: int, n_nodes: int, rng: np.random.Generator
-) -> np.ndarray:
+def _sample_assignments(n_cols: int, n_nodes: int, rng: np.random.Generator) -> np.ndarray:
     """Assign columns to a random eligible subset of graph nodes."""
 
     eligible_count = int(rng.integers(1, n_nodes + 1))
@@ -85,9 +87,7 @@ def _sample_assignments(
 def _sample_layout(config: GeneratorConfig, rng: np.random.Generator) -> dict[str, Any]:
     """Sample dataset layout, graph, and node assignments for one dataset instance."""
 
-    n_features = int(
-        rng.integers(config.dataset.n_features_min, config.dataset.n_features_max + 1)
-    )
+    n_features = int(rng.integers(config.dataset.n_features_min, config.dataset.n_features_max + 1))
 
     corr = CorrelatedSampler(rng)
     raw_ratio = corr.sample_num(
@@ -115,9 +115,7 @@ def _sample_layout(config: GeneratorConfig, rng: np.random.Generator) -> dict[st
         int(idx): int(card) for idx, card in zip(cat_idx, cardinalities, strict=True)
     }
 
-    n_classes = int(
-        rng.integers(config.dataset.n_classes_min, config.dataset.n_classes_max + 1)
-    )
+    n_classes = int(rng.integers(config.dataset.n_classes_min, config.dataset.n_classes_max + 1))
     n_classes = max(2, n_classes)
 
     n_nodes = _sample_node_count(config, rng)
@@ -168,9 +166,7 @@ def _build_node_specs(
             else:
                 d = c
             specs.append(
-                ConverterSpec(
-                    key=f"feature_{f}", kind="cat", dim=max(1, d), cardinality=c
-                )
+                ConverterSpec(key=f"feature_{f}", kind="cat", dim=max(1, d), cardinality=c)
             )
         else:
             specs.append(ConverterSpec(key=f"feature_{f}", kind="num", dim=1))
@@ -220,9 +216,7 @@ def _generate_graph_dataset_torch(
         rng_cpu = np.random.default_rng(seed + node_idx + 1000)
         specs = _build_node_specs(node_idx, layout, task, rng_cpu)
 
-        x_node, extracted = apply_node_pipeline_torch(
-            parent_data, n_rows, specs, generator, device
-        )
+        x_node, extracted = apply_node_pipeline_torch(parent_data, n_rows, specs, generator, device)
         node_outputs[node_idx] = x_node
 
         for key, values in extracted.items():
@@ -242,18 +236,14 @@ def _generate_graph_dataset_torch(
         if v is None:
             if feature_types[i] == "cat":
                 card = int(card_by_feature[i])
-                v = torch.randint(
-                    0, card, (n_rows,), generator=generator, device=device
-                )
+                v = torch.randint(0, card, (n_rows,), generator=generator, device=device)
             else:
                 v = torch.randn(n_rows, generator=generator, device=device)
         x[:, i] = v.to(dtype)
 
     if target_values is None:
         if task == "classification":
-            y = torch.randint(
-                0, n_classes, (n_rows,), generator=generator, device=device
-            )
+            y = torch.randint(0, n_classes, (n_rows,), generator=generator, device=device)
         else:
             y = torch.randn(n_rows, generator=generator, device=device).to(dtype)
     else:
@@ -262,14 +252,8 @@ def _generate_graph_dataset_torch(
         else:
             y = target_values.to(dtype)
 
-    return (
-        x,
-        y,
-        {
-            "accepted": True,
-            "filter": {"enabled": False, "reason": "skipped_in_torch_path"},
-        },
-    )
+    accepted, filter_details = _apply_filter_torch(config, x, y, seed=seed)
+    return x, y, {"accepted": accepted, "filter": filter_details}
 
 
 def _generate_torch(
@@ -278,37 +262,87 @@ def _generate_torch(
     seed: int,
     device: str,
 ) -> DatasetBundle:
-    """Generate one dataset natively in torch."""
-    x, y, aux_meta = _generate_graph_dataset_torch(config, layout, seed, device)
+    """Generate one dataset in Torch while enforcing NumPy-path output contracts."""
 
-    # Random permutation
-    generator = torch.Generator(device=device)
-    generator.manual_seed(seed + 10_007)
-    order = torch.randperm(x.shape[0], generator=generator, device=device)
-    x = x[order]
-    y = y[order]
+    attempts = max(1, int(config.filter.max_attempts))
+    last_reason = "unknown"
+    dtype = _torch_dtype(config)
 
-    n_train = config.dataset.n_train
-    x_train, x_test = x[:n_train], x[n_train:]
-    y_train, y_test = y[:n_train], y[n_train:]
+    for attempt in range(attempts):
+        try:
+            x, y, aux_meta = _generate_graph_dataset_torch(config, layout, seed + attempt, device)
+        except Exception as exc:
+            last_reason = f"generation_exception:{exc.__class__.__name__}"
+            continue
+        if not bool(aux_meta.get("accepted", True)):
+            last_reason = "filtered_out"
+            continue
 
-    metadata = {
-        "backend": "torch",
-        "device": device,
-        "compute_backend": "torch_appendix_full",
-        "n_features": int(x_train.shape[1]),
-        "graph_nodes": int(layout["graph_nodes"]),
-        "graph_edges": int(layout["graph_edges"]),
-        "seed": seed,
-        "config": asdict(config),
-    }
-    return DatasetBundle(
-        X_train=x_train,
-        y_train=y_train,
-        X_test=x_test,
-        y_test=y_test,
-        feature_types=list(layout["feature_types"]),
-        metadata=metadata,
+        generator = torch.Generator(device=device)
+        generator.manual_seed(seed + 10_007 + attempt)
+        order = torch.randperm(x.shape[0], generator=generator, device=device)
+        x = x[order]
+        y = y[order]
+
+        n_train = config.dataset.n_train
+        x_train_t, x_test_t = x[:n_train], x[n_train:]
+        y_train_t, y_test_t = y[:n_train], y[n_train:]
+
+        # Reuse the validated NumPy postprocessing implementation to keep
+        # Appendix E.13 behavior and split constraints consistent.
+        rng = np.random.default_rng(seed + 10_007 + attempt)
+        x_train_np, y_train_np, x_test_np, y_test_np, feature_types = postprocess_dataset(
+            _to_numpy(x_train_t),
+            _to_numpy(y_train_t),
+            _to_numpy(x_test_t),
+            _to_numpy(y_test_t),
+            list(layout["feature_types"]),
+            config.dataset.task,
+            rng,
+        )
+
+        if config.dataset.task == "classification" and not _classification_split_valid(
+            y_train_np, y_test_np
+        ):
+            last_reason = "invalid_class_split"
+            continue
+
+        x_train = torch.as_tensor(np.asarray(x_train_np), device=device, dtype=dtype)
+        x_test = torch.as_tensor(np.asarray(x_test_np), device=device, dtype=dtype)
+        if config.dataset.task == "classification":
+            y_train = torch.as_tensor(np.asarray(y_train_np), device=device, dtype=torch.int64)
+            y_test = torch.as_tensor(np.asarray(y_test_np), device=device, dtype=torch.int64)
+        else:
+            y_train = torch.as_tensor(np.asarray(y_train_np), device=device, dtype=dtype)
+            y_test = torch.as_tensor(np.asarray(y_test_np), device=device, dtype=dtype)
+
+        metadata = {
+            "backend": "torch",
+            "device": device,
+            "compute_backend": "torch_appendix_full",
+            "n_features": int(x_train.shape[1]),
+            "n_categorical_features": int(sum(1 for t in feature_types if t == "cat")),
+            "n_classes": (
+                int(layout["n_classes"]) if config.dataset.task == "classification" else None
+            ),
+            "graph_nodes": int(layout["graph_nodes"]),
+            "graph_edges": int(layout["graph_edges"]),
+            "seed": seed,
+            "attempt_used": attempt,
+            "filter": aux_meta.get("filter", {}),
+            "config": asdict(config),
+        }
+        return DatasetBundle(
+            X_train=x_train,
+            y_train=y_train,
+            X_test=x_test,
+            y_test=y_test,
+            feature_types=feature_types,
+            metadata=metadata,
+        )
+
+    raise ValueError(
+        f"Failed to generate a valid dataset after {attempts} attempts. Last reason: {last_reason}."
     )
 
 
@@ -346,6 +380,23 @@ def _apply_filter_numpy(
     details.update(filter_details)
     details["accepted"] = accepted
     return accepted, details
+
+
+def _apply_filter_torch(
+    config: GeneratorConfig,
+    x: torch.Tensor,
+    y: torch.Tensor,
+    *,
+    seed: int,
+) -> tuple[bool, dict[str, Any]]:
+    """Run E.14 filtering for torch tensors via NumPy/sklearn backend."""
+
+    x_np = _to_numpy(x).astype(np.float32, copy=False)
+    if config.dataset.task == "classification":
+        y_np = _to_numpy(y).astype(np.int64, copy=False)
+    else:
+        y_np = _to_numpy(y).astype(np.float32, copy=False)
+    return _apply_filter_numpy(config, x_np, y_np, seed=seed)
 
 
 def _generate_graph_dataset_numpy(
@@ -423,9 +474,7 @@ def _generate_numpy(
 
     for attempt in range(attempts):
         try:
-            x, y, aux_meta = _generate_graph_dataset_numpy(
-                config, layout, seed + attempt
-            )
+            x, y, aux_meta = _generate_graph_dataset_numpy(config, layout, seed + attempt)
         except Exception as exc:
             last_reason = f"generation_exception:{exc.__class__.__name__}"
             continue
@@ -465,9 +514,7 @@ def _generate_numpy(
             "n_features": int(x_train.shape[1]),
             "n_categorical_features": int(sum(1 for t in feature_types if t == "cat")),
             "n_classes": (
-                int(layout["n_classes"])
-                if config.dataset.task == "classification"
-                else None
+                int(layout["n_classes"]) if config.dataset.task == "classification" else None
             ),
             "graph_nodes": int(layout["graph_nodes"]),
             "graph_edges": int(layout["graph_edges"]),
@@ -502,16 +549,10 @@ def _bundle_to_torch(
     x_train = torch.as_tensor(np.asarray(bundle.X_train), device=device, dtype=dtype)
     x_test = torch.as_tensor(np.asarray(bundle.X_test), device=device, dtype=dtype)
     if config.dataset.task == "classification":
-        y_train = torch.as_tensor(
-            np.asarray(bundle.y_train), device=device, dtype=torch.int64
-        )
-        y_test = torch.as_tensor(
-            np.asarray(bundle.y_test), device=device, dtype=torch.int64
-        )
+        y_train = torch.as_tensor(np.asarray(bundle.y_train), device=device, dtype=torch.int64)
+        y_test = torch.as_tensor(np.asarray(bundle.y_test), device=device, dtype=torch.int64)
     else:
-        y_train = torch.as_tensor(
-            np.asarray(bundle.y_train), device=device, dtype=dtype
-        )
+        y_train = torch.as_tensor(np.asarray(bundle.y_train), device=device, dtype=dtype)
         y_test = torch.as_tensor(np.asarray(bundle.y_test), device=device, dtype=dtype)
 
     metadata = dict(bundle.metadata)
@@ -561,7 +602,15 @@ def generate_one(
     backend, resolved_device = _resolve_backend(config, device)
 
     if backend == "torch":
-        bundle = _generate_torch(config, layout, data_seed, resolved_device)
+        requested = (device or config.runtime.device or "auto").lower()
+        try:
+            bundle = _generate_torch(config, layout, data_seed, resolved_device)
+        except Exception:
+            # Preserve Torch-first semantics while retaining a practical fallback
+            # for heterogeneous local environments (e.g. partially supported MPS).
+            if requested == "auto":
+                return _generate_numpy(config, layout, data_seed)
+            raise
         return bundle if config.runtime.torch_output else _bundle_to_numpy(bundle)
 
     return _generate_numpy(config, layout, data_seed)
@@ -576,9 +625,26 @@ def generate_batch(
 ) -> list[DatasetBundle]:
     """Generate a batch of datasets using deterministic per-dataset child seeds."""
 
+    return list(
+        generate_batch_iter(
+            config,
+            num_datasets=num_datasets,
+            seed=seed,
+            device=device,
+        )
+    )
+
+
+def generate_batch_iter(
+    config: GeneratorConfig,
+    *,
+    num_datasets: int,
+    seed: int | None = None,
+    device: str | None = None,
+) -> Iterator[DatasetBundle]:
+    """Yield datasets lazily using deterministic per-dataset child seeds."""
+
     run_seed = seed if seed is not None else config.seed
     manager = SeedManager(run_seed)
-    return [
-        generate_one(config, seed=manager.child("dataset", i), device=device)
-        for i in range(num_datasets)
-    ]
+    for i in range(num_datasets):
+        yield generate_one(config, seed=manager.child("dataset", i), device=device)

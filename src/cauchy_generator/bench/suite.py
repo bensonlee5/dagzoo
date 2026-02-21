@@ -18,8 +18,12 @@ from cauchy_generator.bench.metrics import (
 )
 from cauchy_generator.bench.throughput import run_throughput_benchmark
 from cauchy_generator.config import GeneratorConfig
-from cauchy_generator.core.dataset import generate_batch, generate_one
-from cauchy_generator.hardware import apply_hardware_profile, detect_hardware
+from cauchy_generator.core.dataset import generate_batch_iter, generate_one
+from cauchy_generator.hardware import (
+    HardwareInfo,
+    apply_hardware_profile,
+    detect_hardware,
+)
 from cauchy_generator.rng import SeedManager
 
 
@@ -80,9 +84,7 @@ def _profile_counts(
     return max(1, num), max(0, warmup)
 
 
-def _latency_sample_count(
-    config: GeneratorConfig, suite: str, num_datasets: int
-) -> int:
+def _latency_sample_count(config: GeneratorConfig, suite: str, num_datasets: int) -> int:
     """Choose per-profile latency sample count for the requested suite level."""
 
     n = max(1, min(int(config.benchmark.latency_num_samples), num_datasets))
@@ -119,11 +121,12 @@ def _collect_reproducibility(
 
     n = max(1, num_datasets)
     run_seed = config.seed + 91_000
-    first = generate_batch(config, num_datasets=n, seed=run_seed, device=device)
-    second = generate_batch(config, num_datasets=n, seed=run_seed, device=device)
-
-    sig_a = reproducibility_signature(first)
-    sig_b = reproducibility_signature(second)
+    sig_a = reproducibility_signature(
+        generate_batch_iter(config, num_datasets=n, seed=run_seed, device=device)
+    )
+    sig_b = reproducibility_signature(
+        generate_batch_iter(config, num_datasets=n, seed=run_seed, device=device)
+    )
     return {
         "reproducibility_datasets": n,
         "reproducibility_signature": sig_a,
@@ -136,7 +139,7 @@ def _prepare_config_for_profile(
     *,
     suite: str,
     no_hardware_aware: bool,
-) -> tuple[GeneratorConfig, str | None, object]:
+) -> tuple[GeneratorConfig, str, HardwareInfo]:
     """Clone and hardware-tune a profile config before running benchmarks."""
 
     cfg = _clone_config(spec.config)
@@ -218,20 +221,14 @@ def run_profile_benchmark(
         result["peak_rss_mb"] = max(0.0, _peak_rss_mb() - rss_before)
         if hw.backend == "cuda" and torch.cuda.is_available():
             try:
-                result["peak_cuda_allocated_mb"] = torch.cuda.max_memory_allocated() / (
-                    1024.0**2
-                )
-                result["peak_cuda_reserved_mb"] = torch.cuda.max_memory_reserved() / (
-                    1024.0**2
-                )
+                result["peak_cuda_allocated_mb"] = torch.cuda.max_memory_allocated() / (1024.0**2)
+                result["peak_cuda_reserved_mb"] = torch.cuda.max_memory_reserved() / (1024.0**2)
             except Exception:
                 result["peak_cuda_allocated_mb"] = None
                 result["peak_cuda_reserved_mb"] = None
 
     if collect_reproducibility:
-        repro_n = min(
-            num_datasets, max(1, int(config.benchmark.reproducibility_num_datasets))
-        )
+        repro_n = min(num_datasets, max(1, int(config.benchmark.reproducibility_num_datasets)))
         result.update(
             _collect_reproducibility(
                 config,
@@ -276,9 +273,7 @@ def resolve_profile_run_specs(
             config = GeneratorConfig.from_yaml(config_path)
             profile_key = config.benchmark.profile_name or "custom"
             resolved.append(
-                ProfileRunSpec(
-                    key=profile_key, config=config, device=config.runtime.device
-                )
+                ProfileRunSpec(key=profile_key, config=config, device=config.runtime.device)
             )
             continue
 
@@ -356,8 +351,6 @@ def run_benchmark_suite(
         }
 
     regression["fail_on_regression"] = bool(fail_on_regression)
-    regression["hard_fail"] = bool(
-        fail_on_regression and regression.get("status") == "fail"
-    )
+    regression["hard_fail"] = bool(fail_on_regression and regression.get("status") == "fail")
     summary["regression"] = regression
     return summary
