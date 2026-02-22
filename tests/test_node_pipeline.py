@@ -1,35 +1,28 @@
-import numpy as np
 import torch
 
 from cauchy_generator.core.node_pipeline import (
     ConverterSpec,
-    apply_node_pipeline,
     apply_node_pipeline_torch,
 )
-
-
-def _make_generator(seed: int = 42) -> torch.Generator:
-    g = torch.Generator(device="cpu")
-    g.manual_seed(seed)
-    return g
+from conftest import make_generator as _make_generator
 
 
 def test_node_pipeline_extracts_requested_columns() -> None:
-    rng = np.random.default_rng(123)
-    parents = [rng.normal(size=(128, 8)).astype(np.float32)]
+    g = _make_generator(123)
+    parents = [torch.randn(128, 8, generator=g)]
     specs = [
         ConverterSpec(key="feature_0", kind="num", dim=1),
         ConverterSpec(key="feature_1", kind="cat", dim=4, cardinality=5),
         ConverterSpec(key="target", kind="target_cls", dim=3, cardinality=3),
     ]
 
-    x_node, extracted = apply_node_pipeline(parents, 128, specs, rng)
+    x_node, extracted = apply_node_pipeline_torch(parents, 128, specs, g, "cpu")
     assert x_node.shape[0] == 128
     assert "feature_0" in extracted
     assert "feature_1" in extracted
     assert "target" in extracted
     assert extracted["feature_0"].shape == (128,)
-    assert extracted["feature_1"].dtype == np.int64
+    assert extracted["feature_1"].dtype == torch.int64
 
 
 def test_torch_output_shapes() -> None:

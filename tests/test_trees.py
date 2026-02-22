@@ -3,12 +3,7 @@
 import torch
 
 from cauchy_generator.core.trees import compute_odt_leaf_indices, sample_odt_splits
-
-
-def _make_generator(seed: int = 42) -> torch.Generator:
-    g = torch.Generator(device="cpu")
-    g.manual_seed(seed)
-    return g
+from conftest import make_generator as _make_generator
 
 
 def test_sample_odt_splits_shapes() -> None:

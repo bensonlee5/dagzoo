@@ -9,35 +9,12 @@ from cauchy_generator.functions.random_functions import (
     apply_random_function,
     apply_random_function_torch,
 )
-
-
-def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
-    """Sample from a log-uniform distribution on `[low, high]`."""
-
-    return float(np.exp(rng.uniform(np.log(low), np.log(high))))
-
-
-def _log_uniform_torch(generator: torch.Generator, low: float, high: float, device: str) -> float:
-    """Sample from a log-uniform distribution using torch."""
-    low_log = np.log(low)
-    high_log = np.log(high)
-    u = torch.empty(1, device=device).uniform_(low_log, high_log, generator=generator)
-    return float(torch.exp(u).item())
-
-
-def _standardize(x: np.ndarray) -> np.ndarray:
-    """Standardize features column-wise with epsilon-protected variance."""
-
-    mu = np.mean(x, axis=0, keepdims=True)
-    sigma = np.std(x, axis=0, keepdims=True)
-    return (x - mu) / np.clip(sigma, 1e-6, None)
-
-
-def _standardize_torch(x: torch.Tensor) -> torch.Tensor:
-    """Standardize in torch."""
-    mu = torch.mean(x, dim=0, keepdim=True)
-    sigma = torch.std(x, dim=0, keepdim=True)
-    return (x - mu) / torch.clamp(sigma, min=1e-6)
+from cauchy_generator.math_utils import (
+    log_uniform as _log_uniform,
+    log_uniform_torch as _log_uniform_torch,
+    standardize as _standardize,
+    standardize_torch as _standardize_torch,
+)
 
 
 def _softmax(x: np.ndarray) -> np.ndarray:

@@ -14,6 +14,12 @@ from cauchy_generator.linalg.random_matrices import (
     sample_random_matrix,
     sample_random_matrix_torch,
 )
+from cauchy_generator.math_utils import (
+    log_uniform as _log_uniform,
+    log_uniform_torch as _log_uniform_torch,
+    standardize as _standardize_base,
+    standardize_torch as _standardize_torch_base,
+)
 from cauchy_generator.sampling.random_weights import (
     sample_random_weights,
     sample_random_weights_torch,
@@ -22,37 +28,18 @@ from cauchy_generator.sampling.random_weights import (
 Array = np.ndarray
 
 
-def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
-    """Sample from a log-uniform distribution on `[low, high]`."""
-
-    return float(np.exp(rng.uniform(np.log(low), np.log(high))))
-
-
-def _log_uniform_torch(generator: torch.Generator, low: float, high: float, device: str) -> float:
-    """Sample from a log-uniform distribution using torch."""
-    low_log = np.log(low)
-    high_log = np.log(high)
-    u = torch.empty(1, device=device).uniform_(low_log, high_log, generator=generator)
-    return float(torch.exp(u).item())
-
-
 def _standardize(x: Array) -> Array:
     """Standardize columns after clipping non-finite/extreme values."""
-
     x = np.nan_to_num(x, nan=0.0, posinf=1e6, neginf=-1e6)
     x = np.clip(x, -1e6, 1e6)
-    mu = np.mean(x, axis=0, keepdims=True)
-    sigma = np.std(x, axis=0, keepdims=True)
-    return ((x - mu) / np.clip(sigma, 1e-6, None)).astype(np.float32)
+    return _standardize_base(x).astype(np.float32)
 
 
 def _standardize_torch(x: torch.Tensor) -> torch.Tensor:
-    """Standardize columns in torch."""
+    """Standardize columns in torch after clipping non-finite/extreme values."""
     x = torch.nan_to_num(x, nan=0.0, posinf=1e6, neginf=-1e6)
     x = torch.clamp(x, -1e6, 1e6)
-    mu = torch.mean(x, dim=0, keepdim=True)
-    sigma = torch.std(x, dim=0, keepdim=True)
-    return (x - mu) / torch.clamp(sigma, min=1e-6)
+    return _standardize_torch_base(x)
 
 
 def _softmax(x: Array) -> Array:

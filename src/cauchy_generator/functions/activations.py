@@ -5,19 +5,12 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-
-def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
-    """Sample from a log-uniform distribution on `[low, high]`."""
-
-    return float(np.exp(rng.uniform(np.log(low), np.log(high))))
-
-
-def _log_uniform_torch(generator: torch.Generator, low: float, high: float, device: str) -> float:
-    """Sample from a log-uniform distribution using torch."""
-    low_log = np.log(low)
-    high_log = np.log(high)
-    u = torch.empty(1, device=device).uniform_(low_log, high_log, generator=generator)
-    return float(torch.exp(u).item())
+from cauchy_generator.math_utils import (
+    log_uniform as _log_uniform,
+    log_uniform_torch as _log_uniform_torch,
+    standardize as _standardize,
+    standardize_torch as _standardize_torch,
+)
 
 
 def _softmax(x: np.ndarray) -> np.ndarray:
@@ -26,21 +19,6 @@ def _softmax(x: np.ndarray) -> np.ndarray:
     shifted = x - np.max(x, axis=1, keepdims=True)
     exp = np.exp(shifted)
     return exp / np.clip(exp.sum(axis=1, keepdims=True), 1e-9, None)
-
-
-def _standardize(x: np.ndarray) -> np.ndarray:
-    """Standardize columns with epsilon-protected variance."""
-
-    mu = np.mean(x, axis=0, keepdims=True)
-    sigma = np.std(x, axis=0, keepdims=True)
-    return (x - mu) / np.clip(sigma, 1e-6, None)
-
-
-def _standardize_torch(x: torch.Tensor) -> torch.Tensor:
-    """Standardize columns with epsilon-protected variance in torch."""
-    mu = torch.mean(x, dim=0, keepdim=True)
-    sigma = torch.std(x, dim=0, keepdim=True)
-    return (x - mu) / torch.clamp(sigma, min=1e-6)
 
 
 def _fixed_activation_torch(x: torch.Tensor, name: str) -> torch.Tensor:

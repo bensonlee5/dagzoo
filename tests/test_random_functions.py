@@ -5,12 +5,7 @@ from cauchy_generator.functions.random_functions import (
     _apply_tree_torch,
     apply_random_function_torch,
 )
-
-
-def _make_generator(seed: int = 42) -> torch.Generator:
-    g = torch.Generator(device="cpu")
-    g.manual_seed(seed)
-    return g
+from conftest import make_generator as _make_generator
 
 
 def test_apply_tree_torch_survives_nan_feature() -> None:

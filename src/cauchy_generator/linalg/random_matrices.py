@@ -12,26 +12,16 @@ from cauchy_generator.functions.activations import (
     apply_random_activation,
     apply_random_activation_torch,
 )
+from cauchy_generator.math_utils import (
+    log_uniform as _log_uniform,
+    log_uniform_torch as _log_uniform_torch,
+)
 from cauchy_generator.sampling.random_weights import (
     sample_random_weights,
     sample_random_weights_torch,
 )
 
 MatrixKind = Literal["gaussian", "weights", "singular_values", "kernel", "activation"]
-
-
-def _log_uniform(rng: np.random.Generator, low: float, high: float) -> float:
-    """Sample from a log-uniform distribution on `[low, high]`."""
-
-    return float(np.exp(rng.uniform(np.log(low), np.log(high))))
-
-
-def _log_uniform_torch(generator: torch.Generator, low: float, high: float, device: str) -> float:
-    """Sample from a log-uniform distribution using torch."""
-    low_log = np.log(low)
-    high_log = np.log(high)
-    u = torch.empty(1, device=device).uniform_(low_log, high_log, generator=generator)
-    return float(torch.exp(u).item())
 
 
 def _row_normalize(m: np.ndarray) -> np.ndarray:
