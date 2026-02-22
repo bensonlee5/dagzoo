@@ -18,6 +18,8 @@ These wrappers call `uv run cauchy-gen ...` from the repo root.
   - Runs `cauchy-gen benchmark` with suite/profile selection.
 - `scripts/benchmark-smoke.sh [profile]`
   - Quick smoke benchmark for a single profile.
+- `scripts/bump-version.sh <major|minor|patch> [--dry-run] [--tag]`
+  - Bump the semver version in `pyproject.toml`. Use `--tag` to commit and create a git tag.
 
 ## Examples
 
@@ -30,6 +32,8 @@ These wrappers call `uv run cauchy-gen ...` from the repo root.
 ./scripts/fetch-additional-references.sh
 ./scripts/benchmark-smoke.sh cpu
 ./scripts/benchmark-suite.sh standard all benchmarks/results/latest
+./scripts/bump-version.sh patch --dry-run
+./scripts/bump-version.sh minor --tag
 ```
 
 `benchmark-suite.sh` with profile `all` includes CUDA profiles and will hard-fail if CUDA is unavailable.

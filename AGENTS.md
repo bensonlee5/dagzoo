@@ -39,5 +39,23 @@ PRs must include:
 - test/lint/type-check evidence
 - benchmark deltas for performance-sensitive code
 
+## Versioning & Release Workflow
+The project follows semantic versioning. The single source of truth is `pyproject.toml`
+(`version = "X.Y.Z"`). Do not add `__version__` to Python source files.
+
+Bump the version:
+- `scripts/bump-version.sh patch` — e.g. 0.1.2 → 0.1.3
+- `scripts/bump-version.sh minor` — e.g. 0.1.2 → 0.2.0
+- `scripts/bump-version.sh major` — e.g. 0.1.2 → 1.0.0
+- Add `--dry-run` to preview, `--tag` to commit and create a git tag.
+
+Release:
+1. Ensure all tests pass on `main`.
+2. Run `scripts/bump-version.sh <type> --tag`.
+3. Push with `git push origin main --tags`.
+4. CI builds artifacts and creates the GitHub Release automatically.
+
+Release notes are auto-generated from commit messages by CI.
+
 ## Architecture & Performance Notes
 Primary runtime is PyTorch (CPU/CUDA/MPS) with NumPy used only where sklearn-backed postprocessing/filtering requires arrays. Keep hot paths vectorized and batch-oriented. Preserve Appendix E (`E.2`-`E.14`) behavior as the source of truth; use other papers in `reference/` only to clarify ambiguous details.
