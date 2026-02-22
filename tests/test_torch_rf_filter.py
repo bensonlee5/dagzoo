@@ -38,7 +38,7 @@ def test_torch_rf_filter_is_deterministic_for_fixed_seed() -> None:
         seed=123,
         n_trees=8,
         depth=5,
-        n_bootstrap=32,
+        n_bootstrap=33,
         threshold=0.5,
     )
     accepted_b, details_b = apply_torch_rf_filter(
@@ -48,7 +48,7 @@ def test_torch_rf_filter_is_deterministic_for_fixed_seed() -> None:
         seed=123,
         n_trees=8,
         depth=5,
-        n_bootstrap=32,
+        n_bootstrap=33,
         threshold=0.5,
     )
 
@@ -56,6 +56,25 @@ def test_torch_rf_filter_is_deterministic_for_fixed_seed() -> None:
     assert details_a["wins_ratio"] == details_b["wins_ratio"]
     assert details_a["n_valid_oob"] == details_b["n_valid_oob"]
     assert details_a["backend"] == "torch_rf"
+
+
+def test_torch_rf_filter_handles_non_divisible_bootstrap_chunks() -> None:
+    x, y = _make_regression_data(seed=17)
+    accepted, details = apply_torch_rf_filter(
+        x,
+        y,
+        task="regression",
+        seed=44,
+        n_trees=6,
+        depth=4,
+        n_bootstrap=33,
+        threshold=0.5,
+    )
+
+    assert isinstance(accepted, bool)
+    assert "wins_ratio" in details
+    assert "n_valid_oob" in details
+    assert details["backend"] == "torch_rf"
 
 
 def test_torch_rf_filter_enforces_max_leaf_nodes() -> None:
