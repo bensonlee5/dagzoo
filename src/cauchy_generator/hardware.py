@@ -73,7 +73,7 @@ def get_peak_flops(device_name: str) -> float:
     return float("inf")
 
 
-def _recommend_profile(device_name: str, total_memory_gb: float | None, backend: str) -> str:
+def _recommend_profile(device_name: str, backend: str) -> str:
     """Map detected hardware to a coarse runtime profile tier."""
 
     if backend != "cuda":
@@ -104,7 +104,7 @@ def detect_hardware(requested_device: str | None = None) -> HardwareInfo:
             device_name=name,
             total_memory_gb=mem_gb,
             peak_flops=peak,
-            profile=_recommend_profile(name, mem_gb, "cuda"),
+            profile=_recommend_profile(name, "cuda"),
         )
 
     if (

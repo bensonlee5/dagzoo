@@ -4,9 +4,39 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
+
+CurriculumStage = Literal["off", "auto", 1, 2, 3]
+CURRICULUM_STAGE_OFF: Literal["off"] = "off"
+CURRICULUM_STAGE_AUTO: Literal["auto"] = "auto"
+CURRICULUM_STAGE_DEFAULT: CurriculumStage = CURRICULUM_STAGE_OFF
+CURRICULUM_STAGE_CLI_CHOICES = (CURRICULUM_STAGE_AUTO, "1", "2", "3")
+
+_CURRICULUM_STAGE_VALUE_MAP: dict[str | int, CurriculumStage] = {
+    CURRICULUM_STAGE_OFF: CURRICULUM_STAGE_OFF,
+    CURRICULUM_STAGE_AUTO: CURRICULUM_STAGE_AUTO,
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    1: 1,
+    2: 2,
+    3: 3,
+}
+
+
+def normalize_curriculum_stage(value: str | int) -> CurriculumStage:
+    """Normalize curriculum stage config into a validated internal value."""
+
+    if isinstance(value, bool):
+        raise ValueError(f"Unsupported curriculum_stage '{value}'. Expected off, auto, 1, 2, or 3.")
+    if isinstance(value, str):
+        value = value.strip().lower()
+    result = _CURRICULUM_STAGE_VALUE_MAP.get(value)
+    if result is None:
+        raise ValueError(f"Unsupported curriculum_stage '{value}'. Expected off, auto, 1, 2, or 3.")
+    return result
 
 
 @dataclass(slots=True)
@@ -85,7 +115,7 @@ class FilterConfig:
 @dataclass(slots=True)
 class GeneratorConfig:
     seed: int = 1
-    curriculum_stage: str | int = "auto"
+    curriculum_stage: str | int = CURRICULUM_STAGE_DEFAULT
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     graph: GraphConfig = field(default_factory=GraphConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
@@ -110,7 +140,7 @@ class GeneratorConfig:
         benchmark = BenchmarkConfig(**(data.get("benchmark") or {}))
         filter_cfg = FilterConfig(**(data.get("filter") or {}))
         seed = int(data.get("seed", 1))
-        curriculum_stage: str | int = data.get("curriculum_stage", "auto")
+        curriculum_stage: str | int = data.get("curriculum_stage", CURRICULUM_STAGE_DEFAULT)
         return cls(
             seed=seed,
             curriculum_stage=curriculum_stage,

@@ -5,7 +5,7 @@ from cauchy_generator.config import GeneratorConfig
 
 def test_load_default_config() -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    assert cfg.curriculum_stage == "auto"
+    assert cfg.curriculum_stage == "off"
     assert cfg.dataset.n_train > 0
     assert cfg.dataset.n_features_min <= cfg.dataset.n_features_max
     assert cfg.output.shard_size > 0
@@ -30,6 +30,13 @@ def test_load_benchmark_profiles() -> None:
     assert cfg_desktop.runtime.device == "cuda"
     assert cfg_h100.runtime.device == "cuda"
     assert "cpu" in cfg_h100.benchmark.profiles
+
+
+def test_load_curriculum_preset() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/curriculum_tabiclv2.yaml")
+    assert cfg.curriculum_stage == "auto"
+    assert cfg.dataset.n_train > 0
+    assert cfg.dataset.n_test > 0
 
 
 def test_runtime_config_from_dict() -> None:

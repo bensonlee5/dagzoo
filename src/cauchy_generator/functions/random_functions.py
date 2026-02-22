@@ -17,6 +17,7 @@ from cauchy_generator.linalg.random_matrices import (
 from cauchy_generator.math_utils import (
     log_uniform as _log_uniform,
     log_uniform_torch as _log_uniform_torch,
+    softmax as _softmax,
     standardize as _standardize_base,
     standardize_torch as _standardize_torch_base,
 )
@@ -40,14 +41,6 @@ def _standardize_torch(x: torch.Tensor) -> torch.Tensor:
     x = torch.nan_to_num(x, nan=0.0, posinf=1e6, neginf=-1e6)
     x = torch.clamp(x, -1e6, 1e6)
     return _standardize_torch_base(x)
-
-
-def _softmax(x: Array) -> Array:
-    """Compute row-wise softmax with max-shift stabilization."""
-
-    shifted = x - np.max(x, axis=1, keepdims=True)
-    ex = np.exp(shifted)
-    return ex / np.clip(np.sum(ex, axis=1, keepdims=True), 1e-9, None)
 
 
 def _softmax_torch(x: torch.Tensor) -> torch.Tensor:

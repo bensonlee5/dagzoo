@@ -21,6 +21,8 @@ cauchy-gen = "cauchy_generator.cli:main"
 
 [dependency-groups]
 dev = [
+  "mdformat>=0.7",
+  "mdformat-gfm>=0.4",
   "mypy>=1.11",
   "pre-commit>=3.8",
   "pytest>=8.0",

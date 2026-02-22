@@ -10,7 +10,11 @@ from typing import Any
 from cauchy_generator.bench.baseline import build_baseline_payload, load_baseline, write_baseline
 from cauchy_generator.bench.report import write_suite_json, write_suite_markdown
 from cauchy_generator.bench.suite import resolve_profile_run_specs, run_benchmark_suite
-from cauchy_generator.config import GeneratorConfig
+from cauchy_generator.config import (
+    CURRICULUM_STAGE_AUTO,
+    CURRICULUM_STAGE_CLI_CHOICES,
+    GeneratorConfig,
+)
 from cauchy_generator.core.dataset import generate_batch_iter
 from cauchy_generator.hardware import (
     HardwareInfo,
@@ -71,6 +75,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-write",
         action="store_true",
         help="Generate in memory only and do not write parquet files.",
+    )
+    g.add_argument(
+        "--curriculum",
+        default=None,
+        choices=CURRICULUM_STAGE_CLI_CHOICES,
+        help="Optional staged curriculum override (auto/1/2/3) for this run.",
     )
     b = sub.add_parser("benchmark", help="Run benchmark suite across one or more profiles.")
     b.add_argument("--config", default=None, help="Optional YAML config for profile 'custom'.")
@@ -182,6 +192,12 @@ def _run_generate(args: argparse.Namespace) -> int:
         device=args.device,
         no_hardware_aware=bool(args.no_hardware_aware),
     )
+    if args.curriculum is not None:
+        config.curriculum_stage = (
+            CURRICULUM_STAGE_AUTO
+            if args.curriculum == CURRICULUM_STAGE_AUTO
+            else int(args.curriculum)
+        )
     seed = args.seed if args.seed is not None else config.seed
     out_dir = args.out or config.output.out_dir
     print(
@@ -225,7 +241,7 @@ def _default_benchmark_config(args: argparse.Namespace) -> GeneratorConfig:
     return GeneratorConfig()
 
 
-def _benchmark_artifact_dir(args: argparse.Namespace, summary: dict[str, Any]) -> Path | None:
+def _benchmark_artifact_dir(args: argparse.Namespace) -> Path | None:
     """Resolve optional output directory for benchmark summary artifacts."""
 
     if args.out_dir:
@@ -298,7 +314,7 @@ def _run_benchmark(args: argparse.Namespace) -> int:
         f"Regression status={regression.get('status', 'pass')} issues={len(regression.get('issues', []))}"
     )
 
-    artifact_dir = _benchmark_artifact_dir(args, summary)
+    artifact_dir = _benchmark_artifact_dir(args)
     if artifact_dir is not None:
         json_path = write_suite_json(summary, artifact_dir / "summary.json")
         md_path = write_suite_markdown(summary, artifact_dir / "summary.md")

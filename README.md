@@ -21,6 +21,7 @@ Use the wrappers in `scripts/` for common generation workflows:
 ./scripts/generate-h100.sh 500 cuda data/run_h100_500
 ./scripts/generate-from-config.sh configs/default.yaml 25 auto data/run_custom 42
 ./scripts/generate-smoke.sh configs/default.yaml 3 cpu
+./scripts/generate-curriculum.sh 25 cpu data/run_curriculum 42 auto
 ```
 
 See `scripts/README.md` for argument details.
@@ -28,6 +29,7 @@ See `scripts/README.md` for argument details.
 ## Presets
 
 - `configs/preset_cuda_h100.yaml`: high-throughput profile for H100-class GPUs.
+- `configs/curriculum_tabiclv2.yaml`: staged TabICLv2 curriculum preset (`auto` stage progression).
 - `configs/benchmark_cpu.yaml`: benchmark profile for CPU-only runs.
 - `configs/benchmark_cuda_desktop.yaml`: benchmark profile for desktop CUDA GPUs.
 - `configs/benchmark_cuda_h100.yaml`: benchmark profile for H100-class GPUs.
@@ -36,6 +38,22 @@ See `scripts/README.md` for argument details.
 
 - Filter config uses RF field names: `filter.n_trees` and `filter.depth`.
 - Legacy keys (`filter.n_estimators`, `filter.max_depth`) are intentionally rejected.
+- Default `configs/default.yaml` runs non-staged generation unless curriculum is explicitly enabled.
+
+## Staged Curriculum Workflow
+
+Use the TabICLv2 staged preset or CLI override flags to run staged generation without editing config files:
+
+```bash
+# Full 3-stage curriculum progression (auto)
+uv run cauchy-gen generate --config configs/curriculum_tabiclv2.yaml --num-datasets 20 --device cpu --out data/run_curriculum --curriculum auto
+
+# Run a single stage for debugging/benchmarking
+uv run cauchy-gen generate --config configs/curriculum_tabiclv2.yaml --num-datasets 5 --device cpu --out data/run_stage2 --curriculum 2
+
+# Script wrapper
+./scripts/generate-curriculum.sh 20 cpu data/run_curriculum 42 auto
+```
 
 ## Benchmark Suite
 
@@ -52,6 +70,7 @@ uv run cauchy-gen benchmark --config configs/benchmark_cuda_desktop.yaml --profi
 Each run writes `summary.json` and `summary.md` under `benchmarks/results/<timestamp>/` by default.
 
 CI automation is configured in `.github/workflows/benchmark.yml`:
+
 - PRs: smoke benchmark (`cpu`) with sticky PR comment and artifact upload.
 - Schedule/manual: standard benchmark (`cpu`) with baseline regression checks and artifact upload.
 
@@ -63,12 +82,13 @@ CI automation is configured in `.github/workflows/benchmark.yml`:
 
 ## Hardware Awareness
 
-`cauchy-gen` uses a FLOPS lookup table (model-name matching) to classify GPUs and auto-tune profile settings.  
+`cauchy-gen` uses a FLOPS lookup table (model-name matching) to classify GPUs and auto-tune profile settings.\
 Unknown GPUs fall back safely (`peak_flops=inf`) so utilization metrics do not report misleading values.
 
 ## Status
 
 This repository currently provides:
+
 - package/CLI/config scaffolding
 - Torch-required seeded batch generation (CPU/CUDA/MPS)
 - Parquet writing interface

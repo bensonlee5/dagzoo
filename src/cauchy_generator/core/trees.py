@@ -47,11 +47,11 @@ def compute_odt_leaf_indices(
     device = x.device
     depth = split_feats.shape[0]
 
-    # bits: (n_rows, depth)
+    # Evaluate each split predicate per row.
     bits = (x[:, split_feats] > thresholds.unsqueeze(0)).to(torch.int32)
 
-    # powers: (depth,)
+    # Bit weights used to encode each row's leaf index.
     powers = 2 ** torch.arange(depth, device=device, dtype=torch.int32)
 
-    # leaf_idx: (n_rows,)
+    # Pack split outcomes into leaf IDs.
     return (bits * powers.unsqueeze(0)).sum(dim=1).to(torch.long)

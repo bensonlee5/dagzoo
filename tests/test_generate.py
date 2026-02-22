@@ -21,9 +21,11 @@ def test_generate_one_shapes() -> None:
     bundle = generate_one(cfg, seed=7, device="cpu")
     curriculum = bundle.metadata["curriculum"]
     assert isinstance(bundle.X_train, torch.Tensor)
-    assert bundle.X_train.shape[0] == int(curriculum["n_train"])
-    assert bundle.X_test.shape[0] == int(curriculum["n_test"])
+    assert bundle.X_train.shape[0] == cfg.dataset.n_train
+    assert bundle.X_test.shape[0] == cfg.dataset.n_test
     assert int(curriculum["n_rows_total"]) == bundle.X_train.shape[0] + bundle.X_test.shape[0]
+    assert curriculum["mode"] == "off"
+    assert curriculum["stage"] is None
     assert bundle.X_train.shape[1] == bundle.X_test.shape[1]
     assert len(bundle.feature_types) == bundle.X_train.shape[1]
 
@@ -245,7 +247,7 @@ def test_curriculum_ceiling_applies_when_total_matches_default(
 def test_invalid_curriculum_stage_raises() -> None:
     cfg = _tiny_config()
     cfg.curriculum_stage = "stage4"
-    with pytest.raises(ValueError, match="Unsupported curriculum_stage"):
+    with pytest.raises(ValueError, match="Expected off, auto, 1, 2, or 3"):
         generate_one(cfg, seed=123, device="cpu")
 
 

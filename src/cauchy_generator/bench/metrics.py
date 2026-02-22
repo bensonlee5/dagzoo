@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Any, Iterable
+from typing import Iterable
 
 import numpy as np
 
+from cauchy_generator.math_utils import to_numpy as _to_numpy
 from cauchy_generator.types import DatasetBundle
-import torch
 
 HIGHER_IS_BETTER_METRICS = frozenset({"datasets_per_second", "datasets_per_minute"})
 LOWER_IS_BETTER_METRICS = frozenset(
@@ -22,14 +22,6 @@ LOWER_IS_BETTER_METRICS = frozenset(
         "peak_cuda_reserved_mb",
     }
 )
-
-
-def _to_numpy(value: Any) -> np.ndarray:
-    """Convert tensors or array-like inputs to a NumPy array."""
-
-    if isinstance(value, torch.Tensor):
-        return value.detach().cpu().numpy()
-    return np.asarray(value)
 
 
 def percent_change(current: float, baseline: float) -> float | None:

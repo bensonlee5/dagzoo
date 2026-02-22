@@ -31,3 +31,30 @@ def standardize_torch(x: torch.Tensor) -> torch.Tensor:
     mu = torch.mean(x, dim=0, keepdim=True)
     sigma = torch.std(x, dim=0, keepdim=True)
     return (x - mu) / torch.clamp(sigma, min=1e-6)
+
+
+def softmax(x: np.ndarray) -> np.ndarray:
+    """Compute row-wise softmax with max-shift stabilization."""
+    shifted = x - np.max(x, axis=1, keepdims=True)
+    exp = np.exp(shifted)
+    return exp / np.clip(exp.sum(axis=1, keepdims=True), 1e-9, None)
+
+
+def to_numpy(value: object) -> np.ndarray:
+    """Convert tensors or array-like values to NumPy arrays."""
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy()
+    return np.asarray(value)
+
+
+def sanitize_json(value: object) -> object:
+    """Recursively sanitize metadata for strict JSON serialization."""
+    import math
+
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: sanitize_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [sanitize_json(v) for v in value]
+    return value

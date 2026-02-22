@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Iterable, Sequence
 
 import numpy as np
-import torch
 
+from cauchy_generator.math_utils import sanitize_json as _sanitize_json, to_numpy as _to_numpy
 from cauchy_generator.types import DatasetBundle
 
 try:
@@ -20,30 +19,10 @@ except Exception:  # pragma: no cover - optional dependency
     pq = None
 
 
-def _to_numpy(value: Any) -> np.ndarray:
-    """Convert torch tensors or array-like inputs to NumPy arrays."""
-
-    if isinstance(value, torch.Tensor):
-        return value.detach().cpu().numpy()
-    return np.asarray(value)
-
-
 def _array_to_columns(x: np.ndarray) -> dict[str, np.ndarray]:
     """Convert a 2D feature matrix into Parquet column mapping."""
 
     return {f"f_{i:04d}": x[:, i] for i in range(x.shape[1])}
-
-
-def _sanitize_json(value: Any) -> Any:
-    """Recursively sanitize metadata for strict JSON serialization."""
-
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {k: _sanitize_json(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_sanitize_json(v) for v in value]
-    return value
 
 
 def _write_split(path: Path, x: np.ndarray, y: np.ndarray, compression: str) -> None:

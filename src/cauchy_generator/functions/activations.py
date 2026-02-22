@@ -8,17 +8,10 @@ import torch
 from cauchy_generator.math_utils import (
     log_uniform as _log_uniform,
     log_uniform_torch as _log_uniform_torch,
+    softmax as _softmax,
     standardize as _standardize,
     standardize_torch as _standardize_torch,
 )
-
-
-def _softmax(x: np.ndarray) -> np.ndarray:
-    """Compute row-wise softmax with max-shift stabilization."""
-
-    shifted = x - np.max(x, axis=1, keepdims=True)
-    exp = np.exp(shifted)
-    return exp / np.clip(exp.sum(axis=1, keepdims=True), 1e-9, None)
 
 
 def _fixed_activation_torch(x: torch.Tensor, name: str) -> torch.Tensor:

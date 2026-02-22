@@ -7,17 +7,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-
-def _sanitize_json(value: Any) -> Any:
-    """Recursively replace non-finite floats with ``None`` for valid JSON output."""
-
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {k: _sanitize_json(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_json(v) for v in value]
-    return value
+from cauchy_generator.math_utils import sanitize_json as _sanitize_json
 
 
 def write_suite_json(summary: dict[str, Any], out_path: str | Path) -> Path:
