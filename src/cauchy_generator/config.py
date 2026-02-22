@@ -78,6 +78,17 @@ class OutputConfig:
 
 
 @dataclass(slots=True)
+class DiagnosticsConfig:
+    enabled: bool = False
+    include_spearman: bool = False
+    histogram_bins: int = 10
+    quantiles: list[float] = field(default_factory=lambda: [0.05, 0.25, 0.50, 0.75, 0.95])
+    underrepresented_threshold: float = 0.5
+    meta_feature_targets: dict[str, list[float] | tuple[float, float]] = field(default_factory=dict)
+    out_dir: str | None = None
+
+
+@dataclass(slots=True)
 class BenchmarkConfig:
     profile_name: str = "medium_cuda"
     num_datasets: int = 2000
@@ -120,6 +131,7 @@ class GeneratorConfig:
     graph: GraphConfig = field(default_factory=GraphConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+    diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
     filter: FilterConfig = field(default_factory=FilterConfig)
 
@@ -137,6 +149,7 @@ class GeneratorConfig:
         graph = GraphConfig(**graph_data)
         runtime = RuntimeConfig(**(data.get("runtime") or {}))
         output = OutputConfig(**(data.get("output") or {}))
+        diagnostics = DiagnosticsConfig(**(data.get("diagnostics") or {}))
         benchmark = BenchmarkConfig(**(data.get("benchmark") or {}))
         filter_cfg = FilterConfig(**(data.get("filter") or {}))
         seed = int(data.get("seed", 1))
@@ -148,6 +161,7 @@ class GeneratorConfig:
             graph=graph,
             runtime=runtime,
             output=output,
+            diagnostics=diagnostics,
             benchmark=benchmark,
             filter=filter_cfg,
         )

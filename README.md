@@ -1,97 +1,88 @@
 # cauchy-generator
 
-High-performance synthetic tabular data generator scaffold targeting TabICLv2 Appendix E (`E.2`-`E.14`).
+**A high-performance causal engine for generating high-quality synthetic tabular data.**
 
-## Quickstart (uv)
+`cauchy-generator` provides the structural priors necessary for training and evaluating next-generation Tabular Foundation Models. It bridges the gap between simple statistical noise and the complex, hierarchical dependencies found in real-world data by combining **Structural Causal Models (SCMs)** with a **hardware-native execution pipeline**.
+
+______________________________________________________________________
+
+## Core Mission
+
+The project is designed to serve as a high-throughput data factory for researchers and engineers working on:
+
+- **Foundation Model Pretraining:** Providing diverse, structural priors to improve model generalization.
+- **Causal Discovery:** Generating "ground-truth" DAGs and interventional datasets for algorithm validation.
+- **Robustness Testing:** Systematically creating challenging "hard-task" regimes, distribution shifts, and adversarial data conditions.
+
+______________________________________________________________________
+
+## Strategic Pillars
+
+### 1. Causal Structural Integrity
+
+Unlike traditional synthetic generators that rely on independent feature sampling, `cauchy-generator` builds datasets through **Cauchy DAG-based execution**.
+
+- **Hierarchical Dependencies:** Features are generated as nodes in a graph, where child values are non-linear functional transforms of their parents.
+- **Deep Mechanism Families:** Functional relationships incorporate Neural Networks, Tree ensembles, GPs, and parametric activations, ensuring complex multi-order interactions.
+
+### 2. Tabular Realism
+
+The generator incorporates the "messiness" of real-world tabular data directly into its priors:
+
+- **Mixed-Type Converters:** Native support for high-cardinality categorical features and multi-scale numeric data.
+- **Post-processing Hooks:** Real-world scaling, outlier clipping, and class-permutation logic to mimic benchmark data (e.g., OpenML, Kaggle).
+- **Complexity Curriculum:** Optional staged generation that scales dataset complexity (features, nodes, samples) to support progressive learning.
+
+### 3. Hardware-Native Performance
+
+Performance is a first-class citizen. The engine is built for datacenter-scale throughput:
+
+- **Torch-Native Pipeline:** Optimized for NVIDIA CUDA and Apple Silicon (MPS), minimizing Python-level bottlenecks.
+- **Hardware-Aware Scaling:** Auto-detects GPU capabilities (e.g., H100 vs. RTX 4090) to tune generation parameters and maximize utilization.
+- **Parallel Streaming:** Native Parquet sharding for efficient data loading during model training.
+
+______________________________________________________________________
+
+## Quick Start
+
+### Installation
 
 ```bash
 uv sync --group dev
-uv run pre-commit install
-uv run cauchy-gen generate --config configs/default.yaml --out data/run1 --num-datasets 10
-uv run cauchy-gen benchmark --suite smoke --profile cpu
-uv run cauchy-gen benchmark --suite standard --profile cpu --out-dir benchmarks/results/latest
 ```
 
-## Accessible Scripts
-
-Use the wrappers in `scripts/` for common generation workflows:
+### Basic Generation
 
 ```bash
-./scripts/generate-default.sh
-./scripts/generate-h100.sh 500 cuda data/run_h100_500
-./scripts/generate-from-config.sh configs/default.yaml 25 auto data/run_custom 42
-./scripts/generate-smoke.sh configs/default.yaml 3 cpu
-./scripts/generate-curriculum.sh 25 cpu data/run_curriculum 42 auto
+# Generate 10 datasets using the default high-quality prior
+uv run cauchy-gen generate --config configs/default.yaml --num-datasets 10 --out data/run1
 ```
 
-See `scripts/README.md` for argument details.
-
-## Presets
-
-- `configs/preset_cuda_h100.yaml`: high-throughput profile for H100-class GPUs.
-- `configs/curriculum_tabiclv2.yaml`: staged TabICLv2 curriculum preset (`auto` stage progression).
-- `configs/benchmark_cpu.yaml`: benchmark profile for CPU-only runs.
-- `configs/benchmark_cuda_desktop.yaml`: benchmark profile for desktop CUDA GPUs.
-- `configs/benchmark_cuda_h100.yaml`: benchmark profile for H100-class GPUs.
-
-## Config Notes
-
-- Filter config uses RF field names: `filter.n_trees` and `filter.depth`.
-- Legacy keys (`filter.n_estimators`, `filter.max_depth`) are intentionally rejected.
-- Default `configs/default.yaml` runs non-staged generation unless curriculum is explicitly enabled.
-
-## Staged Curriculum Workflow
-
-Use the TabICLv2 staged preset or CLI override flags to run staged generation without editing config files:
+### Benchmarking Performance
 
 ```bash
-# Full 3-stage curriculum progression (auto)
-uv run cauchy-gen generate --config configs/curriculum_tabiclv2.yaml --num-datasets 20 --device cpu --out data/run_curriculum --curriculum auto
-
-# Run a single stage for debugging/benchmarking
-uv run cauchy-gen generate --config configs/curriculum_tabiclv2.yaml --num-datasets 5 --device cpu --out data/run_stage2 --curriculum 2
-
-# Script wrapper
-./scripts/generate-curriculum.sh 20 cpu data/run_curriculum 42 auto
+# Run the standard benchmark suite across all detected hardware profiles
+uv run cauchy-gen benchmark --suite standard --profile cpu
 ```
 
-## Benchmark Suite
+______________________________________________________________________
 
-Run profile-specific or matrix benchmark suites:
+## Research & Roadmap
 
-```bash
-uv run cauchy-gen benchmark --suite smoke --profile cpu
-uv run cauchy-gen benchmark --suite standard --profile all
-uv run cauchy-gen benchmark --config configs/benchmark_cuda_desktop.yaml --profile custom --baseline benchmarks/baselines/desktop.json --fail-on-regression
-```
+The development of `cauchy-generator` is strictly driven by recent literature in Tabular Deep Learning.
 
-`--profile all` includes CUDA profiles and will hard-fail on machines without CUDA.
+- **Meta-Feature Diagnostics:** A diagnostics module computes 15 structural metrics per dataset and aggregates coverage across generation runs. Next: soft steering to bias generation toward under-represented regimes.
+- **Missingness Generation:** Adding MAR/MCAR/MNAR mechanisms to simulate real-world data corruption.
+- **Shift-Aware SCMs:** Expanding the graph pipeline to support distribution shift and temporal drift.
 
-Each run writes `summary.json` and `summary.md` under `benchmarks/results/<timestamp>/` by default.
+See [docs/improvement_ideas.md](docs/improvement_ideas.md) for the prioritized research backlog.
 
-CI automation is configured in `.github/workflows/benchmark.yml`:
+______________________________________________________________________
 
-- PRs: smoke benchmark (`cpu`) with sticky PR comment and artifact upload.
-- Schedule/manual: standard benchmark (`cpu`) with baseline regression checks and artifact upload.
+## Theoretical Foundations
 
-## References
+- **TabICLv2 (2024):** Core generation prior and Appendix E implementation.
+- **TabPFN v2 (2025):** Insights into meta-feature coverage and tabular foundation model sensitivity.
+- **TabICL (2025):** Methodology for complexity-based curriculum scheduling.
 
-- Existing core papers are stored in `reference/`.
-- Additional curated papers and rationale are indexed in `reference/ADDITIONAL_PAPERS.md`.
-- Re-fetch the additional papers with `./scripts/fetch-additional-references.sh`.
-
-## Hardware Awareness
-
-`cauchy-gen` uses a FLOPS lookup table (model-name matching) to classify GPUs and auto-tune profile settings.\
-Unknown GPUs fall back safely (`peak_flops=inf`) so utilization metrics do not report misleading values.
-
-## Status
-
-This repository currently provides:
-
-- package/CLI/config scaffolding
-- Torch-required seeded batch generation (CPU/CUDA/MPS)
-- Parquet writing interface
-- benchmark harness and test scaffolding
-
-See `docs/implementation.md` for the full Appendix E implementation plan.
+Detailed implementation notes and paper mappings can be found in [docs/implementation.md](docs/implementation.md).

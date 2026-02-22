@@ -9,6 +9,8 @@ def test_load_default_config() -> None:
     assert cfg.dataset.n_train > 0
     assert cfg.dataset.n_features_min <= cfg.dataset.n_features_max
     assert cfg.output.shard_size > 0
+    assert cfg.diagnostics.enabled is False
+    assert cfg.diagnostics.histogram_bins > 0
     assert cfg.filter.n_trees > 0
     assert cfg.filter.depth >= 0
     assert cfg.filter.max_features == "auto"
@@ -47,11 +49,21 @@ def test_runtime_config_from_dict() -> None:
                 "device": "cpu",
                 "torch_dtype": "float64",
             },
+            "diagnostics": {
+                "enabled": True,
+                "histogram_bins": 12,
+                "meta_feature_targets": {
+                    "linearity_proxy": [0.2, 0.8],
+                },
+            },
         }
     )
     assert cfg.curriculum_stage == 2
     assert cfg.runtime.device == "cpu"
     assert cfg.runtime.torch_dtype == "float64"
+    assert cfg.diagnostics.enabled is True
+    assert cfg.diagnostics.histogram_bins == 12
+    assert "linearity_proxy" in cfg.diagnostics.meta_feature_targets
 
 
 def test_legacy_filter_keys_are_rejected() -> None:
