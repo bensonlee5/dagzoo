@@ -195,3 +195,44 @@ def test_generate_cli_coverage_tolerates_null_quantiles_and_targets(
     assert code == 0
     assert (tmp_path / "run" / "coverage_summary.json").exists()
     assert (tmp_path / "run" / "coverage_summary.md").exists()
+
+
+def test_generate_cli_no_write_allows_null_output_dir_when_coverage_disabled(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.device = "cpu"
+    cfg.output.out_dir = None  # type: ignore[assignment]
+    cfg.diagnostics.enabled = False
+    config_path = tmp_path / "null_output.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    def _stub_generate_batch_iter(
+        _config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        _ = seed
+        _ = device
+        for _ in range(num_datasets):
+            yield object()
+
+    monkeypatch.setattr("cauchy_generator.cli.generate_batch_iter", _stub_generate_batch_iter)
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            str(config_path),
+            "--num-datasets",
+            "1",
+            "--device",
+            "cpu",
+            "--no-hardware-aware",
+            "--no-write",
+        ]
+    )
+    assert code == 0

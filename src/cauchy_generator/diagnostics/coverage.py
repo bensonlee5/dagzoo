@@ -102,7 +102,8 @@ class _MetricAccumulator:
         target_payload = _target_band_payload(target_band)
         if target_band is not None:
             underrepresented_bins, in_target_count, in_target_fraction = _underrepresented_bins(
-                histogram["bins"],
+                values=values,
+                bins=histogram["bins"],
                 target_band=target_band,
                 underrepresented_threshold=underrepresented_threshold,
             )
@@ -311,12 +312,18 @@ def _build_histogram(values: np.ndarray, *, bins: int) -> dict[str, Any]:
 
 
 def _underrepresented_bins(
+    values: np.ndarray,
     bins: list[dict[str, Any]],
     *,
     target_band: tuple[float, float],
     underrepresented_threshold: float,
 ) -> tuple[list[dict[str, Any]], int, float]:
     lo, hi = target_band
+    in_target_mask = (values >= lo) & (values <= hi)
+    in_target_count = int(np.sum(in_target_mask))
+    total_count = int(values.size)
+    in_target_fraction = float(in_target_count / total_count) if total_count > 0 else 0.0
+
     overlapping = [
         b
         for b in bins
@@ -324,21 +331,33 @@ def _underrepresented_bins(
         and isinstance(b.get("upper"), (int, float))
         and not (float(b["upper"]) <= lo or float(b["lower"]) >= hi)
     ]
-    in_target_count = int(sum(int(b.get("count", 0)) for b in overlapping))
-    total_count = int(sum(int(b.get("count", 0)) for b in bins))
-    in_target_fraction = float(in_target_count / total_count) if total_count > 0 else 0.0
     if not overlapping:
         return [], in_target_count, in_target_fraction
     if in_target_count == 0:
         return overlapping, in_target_count, in_target_fraction
 
-    expected_fraction_per_bin = in_target_fraction / len(overlapping)
-    threshold = expected_fraction_per_bin * underrepresented_threshold
-    return (
-        [b for b in overlapping if float(b.get("fraction", 0.0)) < threshold],
-        in_target_count,
-        in_target_fraction,
+    edges = [float(bins[0]["lower"])] + [float(b["upper"]) for b in bins]
+    in_target_values = values[in_target_mask]
+    in_target_bin_counts, _ = np.histogram(
+        in_target_values, bins=np.asarray(edges, dtype=np.float64)
     )
+    expected_count_per_bin = float(in_target_count / len(overlapping))
+    threshold_count = expected_count_per_bin * underrepresented_threshold
+
+    underrepresented: list[dict[str, Any]] = []
+    for b in overlapping:
+        idx = int(b.get("index", -1))
+        if idx < 0 or idx >= int(in_target_bin_counts.size):
+            continue
+        in_target_bin_count = int(in_target_bin_counts[idx])
+        if float(in_target_bin_count) < threshold_count:
+            annotated = dict(b)
+            annotated["in_target_count"] = in_target_bin_count
+            annotated["in_target_fraction"] = (
+                float(in_target_bin_count / in_target_count) if in_target_count > 0 else 0.0
+            )
+            underrepresented.append(annotated)
+    return underrepresented, in_target_count, in_target_fraction
 
 
 def _target_band_payload(target_band: tuple[float, float] | None) -> dict[str, float] | None:

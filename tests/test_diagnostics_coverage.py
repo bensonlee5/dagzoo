@@ -123,6 +123,22 @@ def test_underrepresented_regime_detection_against_target_band() -> None:
     assert summary["metrics"]["linearity_proxy"]["target_band"]["in_target_count"] == 10
 
 
+def test_target_band_counts_do_not_inflate_for_partial_bin_overlap() -> None:
+    agg = CoverageAggregator(
+        CoverageAggregationConfig(
+            histogram_bins=2,
+            target_bands={"linearity_proxy": (0.95, 1.05)},
+        )
+    )
+    agg.update_metrics(_metric_fixture(linearity_proxy=0.9))
+    agg.update_metrics(_metric_fixture(linearity_proxy=1.1))
+
+    summary = agg.build_summary()
+    line = summary["metrics"]["linearity_proxy"]
+    assert line["target_band"]["in_target_count"] == 0
+    assert line["target_band"]["in_target_fraction"] == pytest.approx(0.0)
+
+
 def test_generate_no_write_with_coverage_enabled_emits_artifacts(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

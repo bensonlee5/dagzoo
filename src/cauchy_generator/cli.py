@@ -260,9 +260,13 @@ def _run_generate(args: argparse.Namespace) -> int:
     seed = args.seed if args.seed is not None else config.seed
     out_dir = args.out or config.output.out_dir
     coverage_enabled = bool(config.diagnostics.enabled or args.coverage)
-    coverage_out_dir = Path(args.coverage_out_dir or config.diagnostics.out_dir or out_dir)
+    coverage_out_dir: Path | None = None
     coverage_aggregator: CoverageAggregator | None = None
     if coverage_enabled:
+        coverage_root = args.coverage_out_dir or config.diagnostics.out_dir or out_dir
+        if coverage_root is None:
+            coverage_root = "coverage_artifacts"
+        coverage_out_dir = Path(coverage_root)
         coverage_aggregator = CoverageAggregator(
             CoverageAggregationConfig(
                 include_spearman=bool(config.diagnostics.include_spearman),
@@ -296,6 +300,7 @@ def _run_generate(args: argparse.Namespace) -> int:
     if args.no_write:
         generated = sum(1 for _ in stream)
         if coverage_aggregator is not None:
+            assert coverage_out_dir is not None
             summary = coverage_aggregator.build_summary()
             json_path = write_coverage_summary_json(
                 summary, coverage_out_dir / "coverage_summary.json"
@@ -314,6 +319,7 @@ def _run_generate(args: argparse.Namespace) -> int:
         compression=config.output.compression,
     )
     if coverage_aggregator is not None:
+        assert coverage_out_dir is not None
         summary = coverage_aggregator.build_summary()
         json_path = write_coverage_summary_json(summary, coverage_out_dir / "coverage_summary.json")
         md_path = write_coverage_summary_markdown(summary, coverage_out_dir / "coverage_summary.md")
