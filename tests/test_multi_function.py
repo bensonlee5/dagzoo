@@ -58,6 +58,21 @@ def test_torch_single_input() -> None:
     assert y.shape == (64, 5)
 
 
+def test_torch_multiple_inputs() -> None:
+    g = _make_generator(1)
+    a = torch.randn(64, 3, generator=g)
+    b = torch.randn(64, 2, generator=g)
+    y = apply_multi_function_torch([a, b], g, out_dim=4)
+    assert y.shape == (64, 4)
+
+
+def test_torch_deterministic() -> None:
+    x = torch.randn(32, 4, generator=_make_generator(99))
+    y1 = apply_multi_function_torch([x.clone()], _make_generator(0), out_dim=3)
+    y2 = apply_multi_function_torch([x.clone()], _make_generator(0), out_dim=3)
+    torch.testing.assert_close(y1, y2)
+
+
 def test_torch_empty_raises() -> None:
     g = _make_generator()
     with pytest.raises(ValueError, match="non-empty"):

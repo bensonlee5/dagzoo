@@ -45,8 +45,8 @@ def test_standardizes_numeric() -> None:
     combined = np.concatenate([xtp, xtep], axis=0)
     for i in range(combined.shape[1]):
         col = combined[:, i]
-        assert abs(float(np.mean(col))) < 0.5
-        assert float(np.std(col)) < 3.0
+        assert abs(float(np.mean(col))) < 0.15
+        assert float(np.std(col)) < 1.5
 
 
 def test_preserves_class_counts() -> None:

@@ -41,6 +41,17 @@ def test_sample_num_deterministic() -> None:
     assert vals_a == vals_b
 
 
+def test_sample_category_deterministic() -> None:
+    vals_a = []
+    vals_b = []
+    for seed_vals, vals in [(0, vals_a), (0, vals_b)]:
+        rng = np.random.default_rng(seed_vals)
+        cs = CorrelatedSampler(rng)
+        for _ in range(10):
+            vals.append(cs.sample_category("cat", 5))
+    assert vals_a == vals_b
+
+
 def test_sample_category_valid_index() -> None:
     rng = np.random.default_rng(3)
     cs = CorrelatedSampler(rng)

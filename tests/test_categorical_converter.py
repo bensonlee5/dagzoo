@@ -55,6 +55,14 @@ def test_torch_output_shapes() -> None:
     assert labels.shape == (64,)
 
 
+def test_torch_deterministic() -> None:
+    x = torch.randn(32, 4, generator=_make_generator(99))
+    xp1, l1 = apply_categorical_converter_torch(x.clone(), _make_generator(0), n_categories=4)
+    xp2, l2 = apply_categorical_converter_torch(x.clone(), _make_generator(0), n_categories=4)
+    torch.testing.assert_close(xp1, xp2)
+    torch.testing.assert_close(l1, l2)
+
+
 def test_torch_labels_in_range() -> None:
     g = _make_generator(1)
     n_cat = 6

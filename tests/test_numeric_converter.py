@@ -55,6 +55,14 @@ def test_torch_output_shapes() -> None:
     assert v.shape == (64,)
 
 
+def test_torch_deterministic() -> None:
+    x = torch.randn(32, 3, generator=_make_generator(99))
+    xp1, v1 = apply_numeric_converter_torch(x.clone(), _make_generator(0))
+    xp2, v2 = apply_numeric_converter_torch(x.clone(), _make_generator(0))
+    torch.testing.assert_close(xp1, xp2)
+    torch.testing.assert_close(v1, v2)
+
+
 def test_torch_1d_input() -> None:
     g = _make_generator(1)
     x = torch.randn(64, generator=g)
