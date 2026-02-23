@@ -232,7 +232,7 @@ def test_curriculum_ceiling_applies_when_total_matches_default(
     )
     monkeypatch.setattr(
         "cauchy_generator.core.dataset._sample_stage_rows",
-        lambda _stage, _rng: (60_000, 0.8),
+        lambda _stage, _gen, _dev: (60_000, 0.8),
     )
 
     bundle = generate_batch(cfg, num_datasets=1, seed=42, device="cpu")[0]

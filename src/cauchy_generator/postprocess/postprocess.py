@@ -2,56 +2,59 @@
 
 from __future__ import annotations
 
-import numpy as np
+import torch
 
 
 def _remove_constant_columns(
-    x: np.ndarray, feature_types: list[str]
-) -> tuple[np.ndarray, list[str]]:
+    x: torch.Tensor, feature_types: list[str]
+) -> tuple[torch.Tensor, list[str]]:
     """Drop columns with near-zero variance and align feature type metadata."""
 
-    keep = np.std(x, axis=0) > 1e-12
-    if not np.any(keep):
+    keep = torch.std(x, dim=0, correction=0) > 1e-12
+    if not torch.any(keep):
         raise ValueError("All columns are constant after generation.")
-    kept_types = [t for t, k in zip(feature_types, keep, strict=True) if k]
+    kept_types = [t for t, k in zip(feature_types, keep.tolist(), strict=True) if k]
     return x[:, keep], kept_types
 
 
-def _clip_and_standardize(x: np.ndarray, feature_types: list[str]) -> np.ndarray:
+def _clip_and_standardize(x: torch.Tensor, feature_types: list[str]) -> torch.Tensor:
     """Clip numeric outliers and standardize numeric columns."""
 
-    out = x.copy()
+    out = x.clone()
     for i, t in enumerate(feature_types):
         if t == "cat":
             continue
         col = out[:, i]
-        lo, hi = np.percentile(col, [1.0, 99.0])
-        col = np.clip(col, lo, hi)
-        mu = float(np.mean(col))
-        sd = float(np.std(col))
+        q = torch.quantile(col.float(), torch.tensor([0.01, 0.99], device=col.device))
+        lo, hi = q[0], q[1]
+        col = torch.clamp(col, lo.item(), hi.item())
+        mu = float(torch.mean(col))
+        sd = float(torch.std(col, correction=0))
         out[:, i] = (col - mu) / max(sd, 1e-6)
     return out
 
 
-def _permute_classes(y: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+def _permute_classes(y: torch.Tensor, generator: torch.Generator, device: str) -> torch.Tensor:
     """Permute class indices while preserving class counts."""
 
-    classes = np.unique(y)
-    perm = rng.permutation(classes)
-    mapping = {int(src): int(dst) for src, dst in zip(classes, perm, strict=True)}
-    remapped = np.array([mapping[int(v)] for v in y], dtype=np.int64)
+    classes = torch.unique(y)
+    perm = classes[torch.randperm(classes.numel(), generator=generator, device=device)]
+    remapped = torch.empty_like(y)
+    for src, dst in zip(classes.tolist(), perm.tolist(), strict=True):
+        remapped[y == src] = int(dst)
     return remapped
 
 
 def postprocess_dataset(
-    x_train: np.ndarray,
-    y_train: np.ndarray,
-    x_test: np.ndarray,
-    y_test: np.ndarray,
+    x_train: torch.Tensor,
+    y_train: torch.Tensor,
+    x_test: torch.Tensor,
+    y_test: torch.Tensor,
     feature_types: list[str],
     task: str,
-    rng: np.random.Generator,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str]]:
+    generator: torch.Generator,
+    device: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
     """
     Apply E.13-style postprocessing to train/test splits.
 
@@ -61,35 +64,36 @@ def postprocess_dataset(
     - Permute class labels for classification
     """
 
-    x_all = np.concatenate([x_train, x_test], axis=0).astype(np.float32)
+    x_all = torch.cat([x_train, x_test], dim=0).to(torch.float32)
     x_all, feature_types = _remove_constant_columns(x_all, feature_types)
     x_all = _clip_and_standardize(x_all, feature_types)
 
-    perm = rng.permutation(np.arange(x_all.shape[1]))
+    perm = torch.randperm(x_all.shape[1], generator=generator, device=device)
     x_all = x_all[:, perm]
-    feature_types = [feature_types[int(i)] for i in perm]
+    feature_types = [feature_types[int(i)] for i in perm.tolist()]
 
     n_train = x_train.shape[0]
     x_train_p = x_all[:n_train]
     x_test_p = x_all[n_train:]
 
     if task == "regression":
-        y_all = np.concatenate([y_train, y_test], axis=0).astype(np.float32)
-        lo, hi = np.percentile(y_all, [1.0, 99.0])
-        y_all = np.clip(y_all, lo, hi)
-        mu = float(np.mean(y_all))
-        sd = float(np.std(y_all))
+        y_all = torch.cat([y_train, y_test], dim=0).to(torch.float32)
+        q = torch.quantile(y_all.float(), torch.tensor([0.01, 0.99], device=y_all.device))
+        lo, hi = q[0], q[1]
+        y_all = torch.clamp(y_all, lo.item(), hi.item())
+        mu = float(torch.mean(y_all))
+        sd = float(torch.std(y_all, correction=0))
         y_all = (y_all - mu) / max(sd, 1e-6)
         return x_train_p, y_all[:n_train], x_test_p, y_all[n_train:], feature_types
 
-    y_all = np.concatenate([y_train, y_test], axis=0).astype(np.int64)
-    y_all = _permute_classes(y_all, rng)
+    y_all = torch.cat([y_train, y_test], dim=0).to(torch.int64)
+    y_all = _permute_classes(y_all, generator, device)
     y_train_p = y_all[:n_train]
     y_test_p = y_all[n_train:]
 
-    if len(np.unique(y_train_p)) < 2 or len(np.unique(y_test_p)) < 2:
+    if torch.unique(y_train_p).numel() < 2 or torch.unique(y_test_p).numel() < 2:
         # Fall back to original labels if permutation collapses effective class diversity.
-        y_train_p = y_train.astype(np.int64)
-        y_test_p = y_test.astype(np.int64)
+        y_train_p = y_train.to(torch.int64)
+        y_test_p = y_test.to(torch.int64)
 
     return x_train_p, y_train_p, x_test_p, y_test_p, feature_types

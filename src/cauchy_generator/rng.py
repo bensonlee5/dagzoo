@@ -6,6 +6,7 @@ import hashlib
 from dataclasses import dataclass
 
 import numpy as np
+import torch
 
 
 def derive_seed(base_seed: int, *components: str | int) -> int:
@@ -34,3 +35,10 @@ class SeedManager:
         """Return a NumPy Generator seeded from a deterministic child seed."""
 
         return np.random.default_rng(self.child(*components))
+
+    def torch_rng(self, *components: str | int, device: str = "cpu") -> torch.Generator:
+        """Return a torch Generator seeded from a deterministic child seed."""
+
+        g = torch.Generator(device=device)
+        g.manual_seed(self.child(*components))
+        return g
