@@ -89,6 +89,13 @@ class DiagnosticsConfig:
 
 
 @dataclass(slots=True)
+class SteeringConfig:
+    enabled: bool = False
+    max_attempts: int = 3
+    temperature: float = 0.35
+
+
+@dataclass(slots=True)
 class BenchmarkConfig:
     profile_name: str = "medium_cuda"
     num_datasets: int = 2000
@@ -127,11 +134,13 @@ class FilterConfig:
 class GeneratorConfig:
     seed: int = 1
     curriculum_stage: str | int = CURRICULUM_STAGE_DEFAULT
+    meta_feature_targets: dict[str, list[float] | tuple[float, ...]] = field(default_factory=dict)
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     graph: GraphConfig = field(default_factory=GraphConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
+    steering: SteeringConfig = field(default_factory=SteeringConfig)
     benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
     filter: FilterConfig = field(default_factory=FilterConfig)
 
@@ -150,18 +159,23 @@ class GeneratorConfig:
         runtime = RuntimeConfig(**(data.get("runtime") or {}))
         output = OutputConfig(**(data.get("output") or {}))
         diagnostics = DiagnosticsConfig(**(data.get("diagnostics") or {}))
+        steering = SteeringConfig(**(data.get("steering") or {}))
         benchmark = BenchmarkConfig(**(data.get("benchmark") or {}))
         filter_cfg = FilterConfig(**(data.get("filter") or {}))
+        raw_meta_targets = data.get("meta_feature_targets")
+        meta_feature_targets = dict(raw_meta_targets) if isinstance(raw_meta_targets, dict) else {}
         seed = int(data.get("seed", 1))
         curriculum_stage: str | int = data.get("curriculum_stage", CURRICULUM_STAGE_DEFAULT)
         return cls(
             seed=seed,
             curriculum_stage=curriculum_stage,
+            meta_feature_targets=meta_feature_targets,
             dataset=dataset,
             graph=graph,
             runtime=runtime,
             output=output,
             diagnostics=diagnostics,
+            steering=steering,
             benchmark=benchmark,
             filter=filter_cfg,
         )

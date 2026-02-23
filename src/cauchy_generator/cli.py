@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import math
+import sys
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +25,7 @@ from cauchy_generator.diagnostics import (
     write_coverage_summary_json,
     write_coverage_summary_markdown,
 )
+from cauchy_generator.diagnostics.types import DatasetMetrics
 from cauchy_generator.hardware import (
     HardwareInfo,
     apply_hardware_profile,
@@ -30,6 +34,10 @@ from cauchy_generator.hardware import (
 from cauchy_generator.io.parquet_writer import write_parquet_shards_stream
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
+META_TARGET_SUPPORTED_METRICS = frozenset(
+    field_info.name for field_info in fields(DatasetMetrics) if field_info.name != "task"
+)
+CLASSIFICATION_ONLY_METRICS = frozenset({"class_entropy", "majority_minority_ratio", "n_classes"})
 
 
 def _positive_int(value: str) -> int:
@@ -50,31 +58,130 @@ def _non_negative_int(value: str) -> int:
     return parsed
 
 
-def _coerce_target_bands(
-    raw: object,
-) -> dict[str, tuple[float, float]]:
-    """Normalize diagnostics target bands from config payload into tuple ranges."""
+def _parse_meta_target_arg(raw: str) -> tuple[str, tuple[float, float, float]]:
+    """argparse type: parse `metric=min:max[:weight]` target overrides."""
 
-    normalized: dict[str, tuple[float, float]] = {}
+    value = raw.strip()
+    if "=" not in value:
+        raise argparse.ArgumentTypeError(
+            f"Invalid --meta-target '{raw}'. Expected format: key=min:max[:weight]."
+        )
+    metric_name, band = value.split("=", maxsplit=1)
+    metric_name = metric_name.strip()
+    if not metric_name:
+        raise argparse.ArgumentTypeError(
+            f"Invalid --meta-target '{raw}'. Metric key must be non-empty."
+        )
+    if metric_name not in META_TARGET_SUPPORTED_METRICS:
+        supported = ", ".join(sorted(META_TARGET_SUPPORTED_METRICS))
+        raise argparse.ArgumentTypeError(
+            f"Unsupported --meta-target metric '{metric_name}'. Supported metrics: {supported}."
+        )
+    parts = [part.strip() for part in band.split(":")]
+    if len(parts) not in {2, 3}:
+        raise argparse.ArgumentTypeError(
+            f"Invalid --meta-target '{raw}'. Expected exactly two or three values after '='."
+        )
+    try:
+        lo = float(parts[0])
+        hi = float(parts[1])
+        weight = float(parts[2]) if len(parts) == 3 else 1.0
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid --meta-target '{raw}'. min/max/weight must be numeric."
+        ) from exc
+    if not (math.isfinite(lo) and math.isfinite(hi) and math.isfinite(weight)):
+        raise argparse.ArgumentTypeError(
+            f"Invalid --meta-target '{raw}'. min/max/weight must be finite."
+        )
+    if weight <= 0:
+        raise argparse.ArgumentTypeError(f"Invalid --meta-target '{raw}'. weight must be > 0.")
+    if lo > hi:
+        lo, hi = hi, lo
+    return metric_name, (lo, hi, weight)
+
+
+def _coerce_meta_target_specs(raw: object) -> dict[str, tuple[float, float, float]]:
+    """Normalize config target payload into `(min, max, weight)` specs."""
+
+    normalized: dict[str, tuple[float, float, float]] = {}
     if not isinstance(raw, dict):
         return normalized
     for metric_name, band in raw.items():
-        if not isinstance(metric_name, str):
+        if not isinstance(metric_name, str) or metric_name not in META_TARGET_SUPPORTED_METRICS:
             continue
-        if not isinstance(band, (list, tuple)) or len(band) != 2:
+        if not isinstance(band, (list, tuple)) or len(band) not in {2, 3}:
             continue
         try:
             lo = float(band[0])
             hi = float(band[1])
+            weight = float(band[2]) if len(band) == 3 else 1.0
         except (TypeError, ValueError):
             continue
-        if not (lo == lo and hi == hi):
+        if not (math.isfinite(lo) and math.isfinite(hi) and math.isfinite(weight)):
             continue
-        if lo <= hi:
-            normalized[metric_name] = (lo, hi)
-        else:
-            normalized[metric_name] = (hi, lo)
+        if weight <= 0:
+            continue
+        if lo > hi:
+            lo, hi = hi, lo
+        normalized[metric_name] = (lo, hi, weight)
     return normalized
+
+
+def _resolve_meta_target_specs(
+    config: GeneratorConfig,
+    cli_overrides: list[tuple[str, tuple[float, float, float]]] | None,
+) -> dict[str, tuple[float, float, float]]:
+    """Merge target specs across legacy diagnostics, top-level config, and CLI."""
+
+    resolved = _coerce_meta_target_specs(config.diagnostics.meta_feature_targets)
+    resolved.update(_coerce_meta_target_specs(config.meta_feature_targets))
+    if cli_overrides:
+        for metric_name, spec in cli_overrides:
+            resolved[metric_name] = spec
+    return resolved
+
+
+def _target_specs_to_bands(
+    target_specs: dict[str, tuple[float, float, float]],
+) -> dict[str, tuple[float, float]]:
+    """Drop steering weights for diagnostics coverage aggregation payload."""
+
+    return {metric_name: (spec[0], spec[1]) for metric_name, spec in target_specs.items()}
+
+
+def _validate_target_specs_for_task(
+    *,
+    task: str,
+    target_specs: dict[str, tuple[float, float, float]],
+) -> tuple[str, ...]:
+    """Return metrics that are incompatible with the configured task."""
+
+    normalized_task = task.strip().lower()
+    if normalized_task != "regression":
+        return ()
+    incompatible = sorted(set(target_specs).intersection(CLASSIFICATION_ONLY_METRICS))
+    return tuple(incompatible)
+
+
+def _collect_unknown_target_metrics_from_config(config: GeneratorConfig) -> tuple[str, ...]:
+    """Collect unsupported target metric keys from config payloads."""
+
+    unknown: set[str] = set()
+    for raw in (config.diagnostics.meta_feature_targets, config.meta_feature_targets):
+        if not isinstance(raw, dict):
+            continue
+        for metric_name in raw:
+            if isinstance(metric_name, str) and metric_name not in META_TARGET_SUPPORTED_METRICS:
+                unknown.add(metric_name)
+    return tuple(sorted(unknown))
+
+
+def _raise_usage_error(message: str) -> None:
+    """Exit with argparse-compatible usage error semantics."""
+
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _coerce_quantiles(raw: object) -> tuple[float, ...]:
@@ -126,14 +233,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Generate in memory only and do not write parquet files.",
     )
     g.add_argument(
-        "--coverage",
+        "--diagnostics",
         action="store_true",
         help="Enable diagnostics coverage aggregation artifacts for this run.",
     )
     g.add_argument(
-        "--coverage-out-dir",
+        "--diagnostics-out-dir",
         default=None,
-        help="Optional directory for coverage artifacts (defaults to output directory).",
+        help="Optional directory for diagnostics artifacts (defaults to output directory).",
+    )
+    g.add_argument(
+        "--steer-meta",
+        action="store_true",
+        help="Enable soft steering toward configured meta-feature target bands.",
+    )
+    g.add_argument(
+        "--meta-target",
+        action="append",
+        default=None,
+        type=_parse_meta_target_arg,
+        metavar="KEY=MIN:MAX[:WEIGHT]",
+        help=(
+            "Repeatable meta-feature target override used by diagnostics and steering. "
+            "Format: key=min:max[:weight]."
+        ),
     )
     g.add_argument(
         "--curriculum",
@@ -257,24 +380,60 @@ def _run_generate(args: argparse.Namespace) -> int:
             if args.curriculum == CURRICULUM_STAGE_AUTO
             else int(args.curriculum)
         )
+    steering_requested = bool(config.steering.enabled or args.steer_meta or bool(args.meta_target))
+    resolved_target_specs = _resolve_meta_target_specs(config, args.meta_target)
+    if steering_requested:
+        unknown_metrics = _collect_unknown_target_metrics_from_config(config)
+        if unknown_metrics:
+            unknown = ", ".join(unknown_metrics)
+            supported = ", ".join(sorted(META_TARGET_SUPPORTED_METRICS))
+            _raise_usage_error(
+                f"Unsupported steering target metric(s): {unknown}. Supported metrics: {supported}."
+            )
+        incompatible_metrics = _validate_target_specs_for_task(
+            task=str(config.dataset.task),
+            target_specs=resolved_target_specs,
+        )
+        if incompatible_metrics:
+            metrics = ", ".join(incompatible_metrics)
+            _raise_usage_error(
+                "Incompatible --meta-target metrics for regression task: "
+                f"{metrics}. Remove these metrics or switch task=classification."
+            )
+    if resolved_target_specs:
+        config.meta_feature_targets = {
+            metric_name: [lo, hi, weight]
+            for metric_name, (lo, hi, weight) in sorted(resolved_target_specs.items())
+        }
+    elif args.meta_target:
+        config.meta_feature_targets = {}
+    if args.steer_meta or bool(args.meta_target):
+        config.steering.enabled = True
+    if args.diagnostics:
+        config.diagnostics.enabled = True
+
     seed = args.seed if args.seed is not None else config.seed
     out_dir = args.out or config.output.out_dir
-    coverage_enabled = bool(config.diagnostics.enabled or args.coverage)
-    coverage_out_dir: Path | None = None
-    coverage_aggregator: CoverageAggregator | None = None
-    if coverage_enabled:
-        coverage_root = args.coverage_out_dir or config.diagnostics.out_dir or out_dir
-        if coverage_root is None:
-            coverage_root = "coverage_artifacts"
-        coverage_out_dir = Path(coverage_root)
-        coverage_aggregator = CoverageAggregator(
+    diagnostics_enabled = bool(config.diagnostics.enabled)
+    diagnostics_out_dir: Path | None = None
+    diagnostics_aggregator: CoverageAggregator | None = None
+    if diagnostics_enabled:
+        diagnostics_root = args.diagnostics_out_dir or config.diagnostics.out_dir or out_dir
+        if diagnostics_root is None:
+            diagnostics_root = "diagnostics_artifacts"
+        diagnostics_out_dir = Path(diagnostics_root)
+        diagnostics_aggregator = CoverageAggregator(
             CoverageAggregationConfig(
                 include_spearman=bool(config.diagnostics.include_spearman),
                 histogram_bins=int(config.diagnostics.histogram_bins),
                 quantiles=_coerce_quantiles(config.diagnostics.quantiles),
                 underrepresented_threshold=float(config.diagnostics.underrepresented_threshold),
-                target_bands=_coerce_target_bands(config.diagnostics.meta_feature_targets),
+                target_bands=_target_specs_to_bands(resolved_target_specs),
             )
+        )
+    if bool(config.steering.enabled) and not resolved_target_specs:
+        print(
+            "Steering enabled but no valid meta-feature targets were resolved; steering is a no-op."
         )
     print(
         f"Hardware backend={hw.backend} device='{hw.device_name}' "
@@ -287,28 +446,28 @@ def _run_generate(args: argparse.Namespace) -> int:
         seed=seed,
         device=args.device,
     )
-    if coverage_aggregator is not None:
+    if diagnostics_aggregator is not None:
         base_stream = stream
 
-        def _stream_with_coverage():
+        def _stream_with_diagnostics():
             for bundle in base_stream:
-                coverage_aggregator.update_bundle(bundle)
+                diagnostics_aggregator.update_bundle(bundle)
                 yield bundle
 
-        stream = _stream_with_coverage()
+        stream = _stream_with_diagnostics()
 
     if args.no_write:
         generated = sum(1 for _ in stream)
-        if coverage_aggregator is not None:
-            assert coverage_out_dir is not None
-            summary = coverage_aggregator.build_summary()
+        if diagnostics_aggregator is not None:
+            assert diagnostics_out_dir is not None
+            summary = diagnostics_aggregator.build_summary()
             json_path = write_coverage_summary_json(
-                summary, coverage_out_dir / "coverage_summary.json"
+                summary, diagnostics_out_dir / "coverage_summary.json"
             )
             md_path = write_coverage_summary_markdown(
-                summary, coverage_out_dir / "coverage_summary.md"
+                summary, diagnostics_out_dir / "coverage_summary.md"
             )
-            print(f"Wrote coverage artifacts: {json_path} and {md_path}")
+            print(f"Wrote diagnostics artifacts: {json_path} and {md_path}")
         print(f"Generated {generated} datasets (no-write mode).")
         return 0
 
@@ -318,12 +477,16 @@ def _run_generate(args: argparse.Namespace) -> int:
         shard_size=config.output.shard_size,
         compression=config.output.compression,
     )
-    if coverage_aggregator is not None:
-        assert coverage_out_dir is not None
-        summary = coverage_aggregator.build_summary()
-        json_path = write_coverage_summary_json(summary, coverage_out_dir / "coverage_summary.json")
-        md_path = write_coverage_summary_markdown(summary, coverage_out_dir / "coverage_summary.md")
-        print(f"Wrote coverage artifacts: {json_path} and {md_path}")
+    if diagnostics_aggregator is not None:
+        assert diagnostics_out_dir is not None
+        summary = diagnostics_aggregator.build_summary()
+        json_path = write_coverage_summary_json(
+            summary, diagnostics_out_dir / "coverage_summary.json"
+        )
+        md_path = write_coverage_summary_markdown(
+            summary, diagnostics_out_dir / "coverage_summary.md"
+        )
+        print(f"Wrote diagnostics artifacts: {json_path} and {md_path}")
     print(f"Wrote {written} datasets to: {Path(out_dir)}")
     return 0
 

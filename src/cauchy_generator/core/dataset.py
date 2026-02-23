@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import asdict
+from dataclasses import asdict, fields
+import math
 from typing import Any
 
 import numpy as np
@@ -23,6 +24,8 @@ from cauchy_generator.core.node_pipeline import (
 )
 from cauchy_generator.filtering import apply_torch_rf_filter
 from cauchy_generator.graph import sample_cauchy_dag
+from cauchy_generator.diagnostics import extract_dataset_metrics
+from cauchy_generator.diagnostics.types import DatasetMetrics
 from cauchy_generator.postprocess import postprocess_dataset
 from cauchy_generator.rng import SeedManager
 from cauchy_generator.sampling import CorrelatedSampler
@@ -38,6 +41,12 @@ _CURRICULUM_STAGE1_TRAIN_FRACTION_MAX = 0.90
 _CURRICULUM_STAGE23_TRAIN_FRACTION = 0.80
 _DEFAULT_CONFIGURED_N_TRAIN = int(DatasetConfig().n_train)
 _DEFAULT_CONFIGURED_N_TEST = int(DatasetConfig().n_test)
+_STEERING_SUPPORTED_METRICS = frozenset(
+    field_info.name for field_info in fields(DatasetMetrics) if field_info.name != "task"
+)
+_STEERING_CLASSIFICATION_ONLY_METRICS = frozenset(
+    {"class_entropy", "majority_minority_ratio", "n_classes"}
+)
 
 
 def _sample_log_uniform_int(rng: np.random.Generator, low: int, high: int) -> int:
@@ -549,6 +558,297 @@ def _generate_one_seeded(
     )
 
 
+def _coerce_meta_target_specs(raw: object) -> dict[str, tuple[float, float, float]]:
+    """Normalize target specs into `(min, max, weight)` tuples."""
+
+    normalized: dict[str, tuple[float, float, float]] = {}
+    if not isinstance(raw, dict):
+        return normalized
+    for metric_name, value in raw.items():
+        if not isinstance(metric_name, str) or metric_name not in _STEERING_SUPPORTED_METRICS:
+            continue
+        if not isinstance(value, (list, tuple)) or len(value) not in {2, 3}:
+            continue
+        try:
+            lo = float(value[0])
+            hi = float(value[1])
+            weight = float(value[2]) if len(value) == 3 else 1.0
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(lo) and math.isfinite(hi) and math.isfinite(weight)):
+            continue
+        if weight <= 0:
+            continue
+        if lo > hi:
+            lo, hi = hi, lo
+        normalized[metric_name] = (lo, hi, weight)
+    return normalized
+
+
+def _resolve_meta_target_specs(config: GeneratorConfig) -> dict[str, tuple[float, float, float]]:
+    """Merge target specs from legacy diagnostics and top-level config."""
+
+    merged = _coerce_meta_target_specs(config.diagnostics.meta_feature_targets)
+    merged.update(_coerce_meta_target_specs(config.meta_feature_targets))
+    return merged
+
+
+def _collect_unknown_steering_target_metrics(config: GeneratorConfig) -> tuple[str, ...]:
+    """Collect unsupported steering target keys from config payloads."""
+
+    unknown: set[str] = set()
+    for raw in (config.diagnostics.meta_feature_targets, config.meta_feature_targets):
+        if not isinstance(raw, dict):
+            continue
+        for metric_name in raw:
+            if isinstance(metric_name, str) and metric_name not in _STEERING_SUPPORTED_METRICS:
+                unknown.add(metric_name)
+    return tuple(sorted(unknown))
+
+
+def _validate_target_specs_for_task(
+    *,
+    task: str,
+    target_specs: dict[str, tuple[float, float, float]],
+) -> tuple[str, ...]:
+    """Return steering metrics that are incompatible with configured task."""
+
+    if task.strip().lower() != "regression":
+        return ()
+    incompatible = sorted(set(target_specs).intersection(_STEERING_CLASSIFICATION_ONLY_METRICS))
+    return tuple(incompatible)
+
+
+def _resolve_auto_stage(mode: str | int, *, seed: int) -> int:
+    """Resolve curriculum auto stage for a deterministic dataset seed."""
+
+    if mode == CURRICULUM_STAGE_AUTO:
+        stage_rng = SeedManager(seed).numpy_rng("curriculum", "stage")
+        return _sample_auto_stage(stage_rng)
+    if isinstance(mode, int):
+        return mode
+    return 1
+
+
+def _resolve_steering_settings(
+    config: GeneratorConfig,
+) -> tuple[bool, dict[str, tuple[float, float, float]], int, float, bool]:
+    """Resolve steering policy and validate runtime knobs when enabled."""
+
+    unknown_metrics = _collect_unknown_steering_target_metrics(config)
+    target_specs = _resolve_meta_target_specs(config)
+    enabled = bool(config.steering.enabled and target_specs)
+    max_attempts = max(1, int(config.steering.max_attempts))
+    temperature = float(config.steering.temperature)
+    if bool(config.steering.enabled):
+        if unknown_metrics:
+            unknown = ", ".join(unknown_metrics)
+            supported = ", ".join(sorted(_STEERING_SUPPORTED_METRICS))
+            raise ValueError(
+                f"Unsupported steering target metric(s): {unknown}. Supported metrics: {supported}."
+            )
+        incompatible = _validate_target_specs_for_task(
+            task=str(config.dataset.task),
+            target_specs=target_specs,
+        )
+        if incompatible:
+            metrics = ", ".join(incompatible)
+            raise ValueError(
+                "Incompatible steering target metrics for regression task: "
+                f"{metrics}. Remove these metrics or switch task=classification."
+            )
+        if int(config.steering.max_attempts) <= 0:
+            raise ValueError(
+                f"steering.max_attempts must be >= 1, got {config.steering.max_attempts!r}."
+            )
+        if not math.isfinite(temperature) or temperature <= 0:
+            raise ValueError(
+                f"steering.temperature must be a finite value > 0, got {temperature!r}."
+            )
+    include_spearman = bool(
+        "spearman_abs_mean" in target_specs or "spearman_abs_max" in target_specs
+    )
+    return enabled, target_specs, max_attempts, temperature, include_spearman
+
+
+def _distance_to_band(value: float, *, lo: float, hi: float) -> tuple[float, bool]:
+    """Return normalized distance to a target band and in-band flag."""
+
+    width = max(1e-6, hi - lo)
+    if value < lo:
+        return (lo - value) / width, False
+    if value > hi:
+        return (value - hi) / width, False
+    return 0.0, True
+
+
+def _score_candidate_against_targets(
+    *,
+    metrics: Any,
+    target_specs: dict[str, tuple[float, float, float]],
+    steering_state: dict[str, dict[str, int]],
+) -> tuple[float, dict[str, bool], dict[str, float | None]]:
+    """Score one candidate against target bands with under-coverage weighting."""
+
+    score_sum = 0.0
+    weight_sum = 0.0
+    in_band_flags: dict[str, bool] = {}
+    metric_values: dict[str, float | None] = {}
+    for metric_name, (lo, hi, base_weight) in sorted(target_specs.items()):
+        state = steering_state[metric_name]
+        selected_count = int(state["selected"])
+        in_band_count = int(state["in_band"])
+        in_band_fraction = float(in_band_count / selected_count) if selected_count > 0 else 0.0
+        under_coverage = max(0.0, 1.0 - in_band_fraction)
+        effective_weight = float(base_weight) * (1.0 + under_coverage)
+
+        raw_value = getattr(metrics, metric_name, None)
+        value = float(raw_value) if isinstance(raw_value, (int, float)) else None
+        if value is not None and not math.isfinite(value):
+            value = None
+
+        if value is None:
+            distance = 1.0
+            in_band = False
+        else:
+            distance, in_band = _distance_to_band(value, lo=lo, hi=hi)
+        in_band_flags[metric_name] = in_band
+        metric_values[metric_name] = value
+        score_sum += effective_weight * distance
+        weight_sum += effective_weight
+
+    score = score_sum / weight_sum if weight_sum > 0 else 0.0
+    return float(score), in_band_flags, metric_values
+
+
+def _select_softmax_candidate(
+    scores: list[float],
+    *,
+    temperature: float,
+    seed: int,
+) -> tuple[int, list[float]]:
+    """Sample one candidate index using a deterministic softmax selector."""
+
+    if not scores:
+        raise ValueError("Cannot select steering candidate from an empty score set.")
+    if len(scores) == 1:
+        return 0, [1.0]
+    score_arr = np.asarray(scores, dtype=np.float64)
+    shifted = score_arr - float(np.min(score_arr))
+    logits = -(shifted / float(temperature))
+    logits = logits - float(np.max(logits))
+    probs = np.exp(logits)
+    prob_sum = float(np.sum(probs))
+    if not math.isfinite(prob_sum) or prob_sum <= 0:
+        probs = np.full(score_arr.shape[0], 1.0 / score_arr.shape[0], dtype=np.float64)
+    else:
+        probs = probs / prob_sum
+    selector_rng = SeedManager(seed).numpy_rng("steering", "select")
+    idx = int(selector_rng.choice(np.arange(score_arr.shape[0]), p=probs))
+    return idx, probs.tolist()
+
+
+def _target_payload(
+    target_specs: dict[str, tuple[float, float, float]],
+) -> dict[str, dict[str, float]]:
+    """Build a JSON-safe target payload for steering metadata."""
+
+    return {
+        metric_name: {"min": lo, "max": hi, "weight": weight}
+        for metric_name, (lo, hi, weight) in sorted(target_specs.items())
+    }
+
+
+def _generate_one_steered(
+    config: GeneratorConfig,
+    *,
+    seed: int,
+    requested_device: str,
+    resolved_device: str,
+    mode: str | int,
+    target_specs: dict[str, tuple[float, float, float]],
+    max_attempts: int,
+    temperature: float,
+    include_spearman: bool,
+    steering_state: dict[str, dict[str, int]],
+) -> DatasetBundle:
+    """Generate bounded steering candidates and soft-select one deterministically."""
+
+    seed_manager = SeedManager(seed)
+    candidate_bundles: list[DatasetBundle] = []
+    candidate_seeds: list[int] = []
+    candidate_scores: list[float] = []
+    candidate_in_band: list[dict[str, bool]] = []
+    candidate_metric_values: list[dict[str, float | None]] = []
+    last_error = "unknown"
+
+    for candidate_idx in range(max_attempts):
+        candidate_seed = (
+            seed
+            if candidate_idx == 0
+            else seed_manager.child("steering", "candidate", candidate_idx)
+        )
+        auto_stage = _resolve_auto_stage(mode, seed=candidate_seed)
+        try:
+            bundle = _generate_one_seeded(
+                config,
+                seed=candidate_seed,
+                requested_device=requested_device,
+                resolved_device=resolved_device,
+                auto_stage=auto_stage,
+            )
+            metrics = extract_dataset_metrics(bundle, include_spearman=include_spearman)
+        except Exception as exc:
+            last_error = f"{exc.__class__.__name__}: {exc}"
+            continue
+        score, in_band_flags, metric_values = _score_candidate_against_targets(
+            metrics=metrics,
+            target_specs=target_specs,
+            steering_state=steering_state,
+        )
+        candidate_bundles.append(bundle)
+        candidate_seeds.append(candidate_seed)
+        candidate_scores.append(score)
+        candidate_in_band.append(in_band_flags)
+        candidate_metric_values.append(metric_values)
+
+    if not candidate_bundles:
+        raise ValueError(
+            "Steering failed to produce a valid candidate after "
+            f"{max_attempts} attempts. Last error: {last_error}"
+        )
+
+    selected_idx, probabilities = _select_softmax_candidate(
+        candidate_scores,
+        temperature=temperature,
+        seed=seed,
+    )
+    selected_bundle = candidate_bundles[selected_idx]
+    selected_in_band = candidate_in_band[selected_idx]
+    for metric_name, in_band in selected_in_band.items():
+        state = steering_state[metric_name]
+        state["selected"] += 1
+        if in_band:
+            state["in_band"] += 1
+
+    selected_bundle.metadata["steering"] = {
+        "enabled": True,
+        "max_attempts": int(max_attempts),
+        "temperature": float(temperature),
+        "candidate_count": len(candidate_bundles),
+        "candidate_seeds": candidate_seeds,
+        "scores": [float(score) for score in candidate_scores],
+        "probabilities": [float(prob) for prob in probabilities],
+        "selected_candidate_index": int(selected_idx),
+        "selected_candidate_seed": int(candidate_seeds[selected_idx]),
+        "selected_score": float(candidate_scores[selected_idx]),
+        "selected_in_band": dict(sorted(selected_in_band.items())),
+        "selected_metric_values": dict(sorted(candidate_metric_values[selected_idx].items())),
+        "targets": _target_payload(target_specs),
+    }
+    return selected_bundle
+
+
 def generate_one(
     config: GeneratorConfig,
     *,
@@ -558,12 +858,36 @@ def generate_one(
     """Generate one dataset bundle with deterministic per-dataset randomness."""
 
     mode = normalize_curriculum_stage(config.curriculum_stage)
+    (
+        steering_enabled,
+        target_specs,
+        steering_max_attempts,
+        steering_temperature,
+        steering_include_spearman,
+    ) = _resolve_steering_settings(config)
     auto_stage = 1
     if isinstance(mode, int):
         auto_stage = mode
     run_seed = seed if seed is not None else config.seed
     requested_device = (device or config.runtime.device or "auto").lower()
     resolved_device = _resolve_device(config, device)
+    if steering_enabled:
+        steering_mode: str | int = 1 if mode == CURRICULUM_STAGE_AUTO else mode
+        steering_state = {
+            metric_name: {"selected": 0, "in_band": 0} for metric_name in sorted(target_specs)
+        }
+        return _generate_one_steered(
+            config,
+            seed=run_seed,
+            requested_device=requested_device,
+            resolved_device=resolved_device,
+            mode=steering_mode,
+            target_specs=target_specs,
+            max_attempts=steering_max_attempts,
+            temperature=steering_temperature,
+            include_spearman=steering_include_spearman,
+            steering_state=steering_state,
+        )
     return _generate_one_seeded(
         config,
         seed=run_seed,
@@ -609,19 +933,39 @@ def generate_batch_iter(
     mode = normalize_curriculum_stage(config.curriculum_stage)
     requested_device = (device or config.runtime.device or "auto").lower()
     resolved_device = _resolve_device(config, device)
+    (
+        steering_enabled,
+        target_specs,
+        steering_max_attempts,
+        steering_temperature,
+        steering_include_spearman,
+    ) = _resolve_steering_settings(config)
+    steering_state = {
+        metric_name: {"selected": 0, "in_band": 0} for metric_name in sorted(target_specs)
+    }
     run_seed = seed if seed is not None else config.seed
     manager = SeedManager(run_seed)
     for i in range(num_datasets):
         dataset_seed = manager.child("dataset", i)
-        auto_stage = 1
-        if mode == CURRICULUM_STAGE_AUTO:
-            stage_rng = SeedManager(dataset_seed).numpy_rng("curriculum", "stage")
-            auto_stage = _sample_auto_stage(stage_rng)
+        if steering_enabled:
+            yield _generate_one_steered(
+                config,
+                seed=dataset_seed,
+                requested_device=requested_device,
+                resolved_device=resolved_device,
+                mode=mode,
+                target_specs=target_specs,
+                max_attempts=steering_max_attempts,
+                temperature=steering_temperature,
+                include_spearman=steering_include_spearman,
+                steering_state=steering_state,
+            )
+            continue
 
         yield _generate_one_seeded(
             config,
             seed=dataset_seed,
             requested_device=requested_device,
             resolved_device=resolved_device,
-            auto_stage=auto_stage,
+            auto_stage=_resolve_auto_stage(mode, seed=dataset_seed),
         )

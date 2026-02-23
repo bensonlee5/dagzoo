@@ -6,11 +6,15 @@ from cauchy_generator.config import GeneratorConfig
 def test_load_default_config() -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     assert cfg.curriculum_stage == "off"
+    assert cfg.meta_feature_targets == {}
     assert cfg.dataset.n_train > 0
     assert cfg.dataset.n_features_min <= cfg.dataset.n_features_max
     assert cfg.output.shard_size > 0
     assert cfg.diagnostics.enabled is False
     assert cfg.diagnostics.histogram_bins > 0
+    assert cfg.steering.enabled is False
+    assert cfg.steering.max_attempts == 3
+    assert cfg.steering.temperature > 0
     assert cfg.filter.n_trees > 0
     assert cfg.filter.depth >= 0
     assert cfg.filter.max_features == "auto"
@@ -45,6 +49,9 @@ def test_runtime_config_from_dict() -> None:
     cfg = GeneratorConfig.from_dict(
         {
             "curriculum_stage": 2,
+            "meta_feature_targets": {
+                "linearity_proxy": [0.1, 0.9, 1.5],
+            },
             "runtime": {
                 "device": "cpu",
                 "torch_dtype": "float64",
@@ -56,14 +63,22 @@ def test_runtime_config_from_dict() -> None:
                     "linearity_proxy": [0.2, 0.8],
                 },
             },
+            "steering": {
+                "enabled": True,
+                "max_attempts": 4,
+                "temperature": 0.25,
+            },
         }
     )
     assert cfg.curriculum_stage == 2
+    assert cfg.meta_feature_targets["linearity_proxy"] == [0.1, 0.9, 1.5]
     assert cfg.runtime.device == "cpu"
     assert cfg.runtime.torch_dtype == "float64"
     assert cfg.diagnostics.enabled is True
     assert cfg.diagnostics.histogram_bins == 12
     assert "linearity_proxy" in cfg.diagnostics.meta_feature_targets
+    assert cfg.steering.enabled is True
+    assert cfg.steering.max_attempts == 4
 
 
 def test_legacy_filter_keys_are_rejected() -> None:
