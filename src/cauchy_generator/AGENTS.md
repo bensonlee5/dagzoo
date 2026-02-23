@@ -7,6 +7,8 @@
 - `postprocess/`, `filtering/`: post-generation constraints and quality checks.
 - `io/`: output serialization.
 - `bench/`: benchmark harness and reporting.
+- Steering candidate scoring path: `core/steering_metrics.py` (torch-native subset).
+- Full diagnostics extraction path: `diagnostics/metrics.py` (reporting-focused, NumPy-based).
 
 ## Guardrails
 

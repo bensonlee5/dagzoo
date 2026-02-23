@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Architecture documentation with mermaid diagrams (`docs/architecture.md`)
+- Torch-native steering metric extractor (`core/steering_metrics.py`) — avoids NumPy conversion during candidate scoring
+
+### Changed
+
+- Eliminated NumPy bottlenecks across generation pipeline: `functions/`, `linalg/`, `converters/` now use torch-native implementations
+- Steering candidate scoring uses torch-native metric path and torch softmax selection to avoid CPU/NumPy round trips on accelerator runs
+
+### Fixed
+
+- Correlated beta sampling no longer reseeds process-wide Torch RNG state; draws now use a local seed-derived generator for reproducibility isolation
+
+## [0.1.6] - 2026-02-22
+
+### Added
+
 - Opt-in soft meta-feature steering with bounded deterministic candidate selection
 - New generation CLI controls: `--diagnostics`, `--steer-meta`, and repeatable `--meta-target key=min:max[:weight]`
 - Steering metadata payload propagation on generated bundles when steering is enabled

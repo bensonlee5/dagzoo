@@ -20,13 +20,13 @@ Related docs:
 
 ## Current Scope vs README Mission Claims
 
-| Mission/Pillar Claim from README                                | Current Scope                                                                                 | Status  | Roadmap Follow-up              |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------- | ------------------------------ |
-| Foundation model pretraining with diverse priors                | Implemented baseline generation, diagnostics extraction, coverage aggregation, and benchmarks | partial | RD-003, RD-006, RD-007, RD-008 |
-| Causal discovery with ground-truth DAGs and interventions       | DAG sampling exists in pipeline internals; interventional generation does not                 | partial | RD-001, RD-002                 |
-| Robustness testing with hard tasks, shifts, adversarial regimes | Basic filtering and diagnostics proxies exist; dedicated robustness modes do not              | planned | RD-003, RD-004, RD-005         |
-| Complexity curriculum across features/nodes/samples             | Current curriculum stages rows/split regime only                                              | partial | RD-006                         |
-| Hardware-native performance with parallel streaming             | Torch + hardware-aware tuning implemented; streaming writes are sequential                    | partial | RD-009                         |
+| Mission/Pillar Claim from README                                | Current Scope                                                                                                | Status  | Roadmap Follow-up      |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------- | ---------------------- |
+| Foundation model pretraining with diverse priors                | Implemented baseline generation, diagnostics extraction, soft steering, coverage aggregation, and benchmarks | partial | RD-003, RD-006, RD-007 |
+| Causal discovery with ground-truth DAGs and interventions       | DAG sampling exists in pipeline internals; interventional generation does not                                | partial | RD-001, RD-002         |
+| Robustness testing with hard tasks, shifts, adversarial regimes | Basic filtering and diagnostics proxies exist; dedicated robustness modes do not                             | planned | RD-003, RD-004, RD-005 |
+| Complexity curriculum across features/nodes/samples             | Current curriculum stages rows/split regime only                                                             | partial | RD-006                 |
+| Hardware-native performance with parallel streaming             | Torch + hardware-aware tuning implemented; streaming writes are sequential                                   | partial | RD-009                 |
 
 ## Known Missing Capabilities (Roadmap-Tracked)
 
@@ -37,7 +37,6 @@ Related docs:
 - RD-005: add robustness stress profiles for hard-task/adversarial regimes.
 - RD-006: extend curriculum to feature and graph complexity.
 - RD-007: expand many-class and high-cardinality support.
-- RD-008: add diagnostics-driven soft steering.
 - RD-009: add parallel/distributed generation and shard writing.
 
 ## Public Interfaces
@@ -92,8 +91,8 @@ Current metadata includes summary graph stats and config lineage. Full DAG artif
 
 ## Performance Strategy
 
-1. Current generator path runs Torch on all devices (CPU/CUDA/MPS) and uses NumPy only for postprocessing contracts.
-1. Keep kernels batch-oriented with vectorized NumPy operations and avoid Python loops in inner math paths.
+1. Current generator path runs Torch on all devices (CPU/CUDA/MPS); NumPy usage is mainly in diagnostics/reporting and serialization boundaries.
+1. Keep kernels batch-oriented with vectorized torch operations and avoid Python loops in inner math paths.
 1. Use optional filtering (`E.14`) behind config flags to avoid CPU bottlenecks in throughput benchmarks.
 1. Profile with `bench/throughput.py` and track JSON baseline regressions by preset.
 1. Next roadmap step for throughput is controlled multi-worker execution (RD-009) while preserving seeded behavior.

@@ -1,4 +1,4 @@
-import numpy as np
+import math
 
 from cauchy_generator.config import GeneratorConfig
 from cauchy_generator.hardware import HardwareInfo, apply_hardware_profile
@@ -13,7 +13,7 @@ def test_peak_flops_lookup() -> None:
 
 def test_peak_flops_fallback() -> None:
     val = get_peak_flops("Some Unknown GPU XYZ")
-    assert np.isinf(val)
+    assert math.isinf(val)
 
 
 def test_hardware_profile_not_applied_on_cpu_backend() -> None:

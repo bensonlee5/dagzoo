@@ -1,0 +1,77 @@
+from __future__ import annotations
+
+from dataclasses import fields
+
+import pytest
+
+from cauchy_generator.config import GeneratorConfig
+from cauchy_generator.core.dataset import generate_one
+from cauchy_generator.core.steering_metrics import extract_steering_metrics
+from cauchy_generator.diagnostics import extract_dataset_metrics
+from cauchy_generator.diagnostics.types import DatasetMetrics
+
+
+def _tiny_config(task: str) -> GeneratorConfig:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.device = "cpu"
+    cfg.dataset.task = task
+    cfg.dataset.n_train = 32
+    cfg.dataset.n_test = 16
+    cfg.dataset.n_features_min = 8
+    cfg.dataset.n_features_max = 12
+    cfg.graph.n_nodes_min = 2
+    cfg.graph.n_nodes_max = 6
+    cfg.filter.enabled = False
+    return cfg
+
+
+@pytest.mark.parametrize("task", ["classification", "regression"])
+def test_extract_steering_metrics_near_parity_with_diagnostics(task: str) -> None:
+    cfg = _tiny_config(task)
+    bundle = generate_one(cfg, seed=17, device="cpu")
+
+    metric_names = {
+        field_info.name for field_info in fields(DatasetMetrics) if field_info.name != "task"
+    }
+    steering_metrics = extract_steering_metrics(
+        bundle,
+        target_metric_names=metric_names,
+        include_spearman=True,
+    )
+    diagnostics = extract_dataset_metrics(bundle, include_spearman=True)
+
+    for metric_name in sorted(metric_names):
+        expected = getattr(diagnostics, metric_name)
+        actual = steering_metrics[metric_name]
+        if expected is None:
+            assert actual is None
+            continue
+        assert actual is not None
+        if metric_name in {"linearity_proxy", "nonlinearity_proxy"}:
+            assert float(actual) == pytest.approx(float(expected), rel=0.25, abs=0.05)
+        else:
+            assert float(actual) == pytest.approx(float(expected), rel=1e-3, abs=1e-3)
+
+
+def test_steering_generation_does_not_call_numpy_diagnostics_extractor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail_extract(*_args, **_kwargs):
+        raise AssertionError("steering should not call diagnostics.extract_dataset_metrics")
+
+    monkeypatch.setattr(
+        "cauchy_generator.diagnostics.metrics.extract_dataset_metrics", _fail_extract
+    )
+    monkeypatch.setattr("cauchy_generator.diagnostics.extract_dataset_metrics", _fail_extract)
+
+    cfg = _tiny_config("regression")
+    cfg.meta_feature_targets = {
+        "n_features": [8, 12, 1.0],
+        "pearson_abs_mean": [0.0, 1.0, 0.25],
+    }
+    cfg.steering.enabled = True
+    cfg.steering.max_attempts = 3
+    cfg.steering.temperature = 0.25
+
+    bundle = generate_one(cfg, seed=2027, device="cpu")
+    assert bundle.metadata["steering"]["enabled"] is True

@@ -11,6 +11,8 @@
 - Keep explicit `cuda`/`mps` requests fail-fast when unavailable.
 - Keep `generate_batch_iter` lazy; do not reintroduce full-batch materialization in CLI paths.
 - Keep Torch tensor output contracts stable (shape/type/metadata keys).
+- Keep steering candidate scoring on torch-native metric paths; do not reintroduce tensor CPU/NumPy round trips in selection flow.
+- Preserve deterministic softmax candidate selection behavior for fixed seeds.
 
 ## Testing Focus
 

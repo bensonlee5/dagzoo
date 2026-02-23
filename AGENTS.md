@@ -79,4 +79,4 @@ Changelog:
 
 ## Architecture & Performance Notes
 
-Primary runtime is PyTorch (CPU/CUDA/MPS) with NumPy used only where sklearn-backed postprocessing/filtering requires arrays. Keep hot paths vectorized and batch-oriented. Preserve Appendix E (`E.2`-`E.14`) behavior as the source of truth; use other papers in `reference/` only to clarify ambiguous details.
+Primary runtime is PyTorch (CPU/CUDA/MPS) with generation, postprocess, and filtering on torch-native paths. NumPy remains mainly in diagnostics/reporting extractors and serialization boundaries. Keep hot paths vectorized and batch-oriented. Preserve Appendix E (`E.2`-`E.14`) behavior as the source of truth; use other papers in `reference/` only to clarify ambiguous details.

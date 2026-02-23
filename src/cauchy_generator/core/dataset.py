@@ -7,7 +7,6 @@ from dataclasses import asdict, fields
 import math
 from typing import Any
 
-import numpy as np
 import torch
 
 from cauchy_generator.config import (
@@ -17,15 +16,14 @@ from cauchy_generator.config import (
     GeneratorConfig,
     normalize_curriculum_stage,
 )
-from cauchy_generator.math_utils import to_numpy as _to_numpy
 from cauchy_generator.core.node_pipeline import (
     ConverterSpec,
-    apply_node_pipeline_torch,
+    apply_node_pipeline,
 )
+from cauchy_generator.core.steering_metrics import extract_steering_metrics
+from cauchy_generator.diagnostics.types import DatasetMetrics
 from cauchy_generator.filtering import apply_torch_rf_filter
 from cauchy_generator.graph import sample_cauchy_dag
-from cauchy_generator.diagnostics import extract_dataset_metrics
-from cauchy_generator.diagnostics.types import DatasetMetrics
 from cauchy_generator.postprocess import postprocess_dataset
 from cauchy_generator.rng import SeedManager
 from cauchy_generator.sampling import CorrelatedSampler
@@ -49,11 +47,14 @@ _STEERING_CLASSIFICATION_ONLY_METRICS = frozenset(
 )
 
 
-def _sample_log_uniform_int(rng: np.random.Generator, low: int, high: int) -> int:
+def _sample_log_uniform_int(generator: torch.Generator, device: str, low: int, high: int) -> int:
     """Sample an integer from a log-uniform range [low, high]."""
 
-    sampled = int(np.exp(rng.uniform(np.log(float(low)), np.log(float(high)))))
-    return int(np.clip(sampled, low, high))
+    log_low = math.log(float(low))
+    log_high = math.log(float(high))
+    u = torch.empty(1, device=device).uniform_(log_low, log_high, generator=generator)
+    sampled = int(math.exp(u.item()))
+    return max(low, min(high, sampled))
 
 
 def _split_counts(n_total: int, train_fraction: float) -> tuple[int, int]:
@@ -66,36 +67,41 @@ def _split_counts(n_total: int, train_fraction: float) -> tuple[int, int]:
     return n_train, n_test
 
 
-def _sample_stage_rows(stage: int, rng: np.random.Generator) -> tuple[int, float]:
+def _sample_stage_rows(stage: int, generator: torch.Generator, device: str) -> tuple[int, float]:
     """Sample total rows and train fraction for one curriculum stage."""
 
     if stage == 1:
-        return (
-            _CURRICULUM_STAGE1_ROWS,
-            float(
-                rng.uniform(
-                    _CURRICULUM_STAGE1_TRAIN_FRACTION_MIN,
-                    _CURRICULUM_STAGE1_TRAIN_FRACTION_MAX,
-                )
-            ),
+        frac = (
+            torch.empty(1, device=device)
+            .uniform_(
+                _CURRICULUM_STAGE1_TRAIN_FRACTION_MIN,
+                _CURRICULUM_STAGE1_TRAIN_FRACTION_MAX,
+                generator=generator,
+            )
+            .item()
         )
+        return (_CURRICULUM_STAGE1_ROWS, float(frac))
     if stage == 2:
         return (
-            _sample_log_uniform_int(rng, _CURRICULUM_STAGE2_MIN_ROWS, _CURRICULUM_STAGE2_MAX_ROWS),
+            _sample_log_uniform_int(
+                generator, device, _CURRICULUM_STAGE2_MIN_ROWS, _CURRICULUM_STAGE2_MAX_ROWS
+            ),
             _CURRICULUM_STAGE23_TRAIN_FRACTION,
         )
     if stage == 3:
         return (
-            _sample_log_uniform_int(rng, _CURRICULUM_STAGE3_MIN_ROWS, _CURRICULUM_STAGE3_MAX_ROWS),
+            _sample_log_uniform_int(
+                generator, device, _CURRICULUM_STAGE3_MIN_ROWS, _CURRICULUM_STAGE3_MAX_ROWS
+            ),
             _CURRICULUM_STAGE23_TRAIN_FRACTION,
         )
     raise ValueError(f"Unsupported curriculum stage '{stage}'. Expected 1, 2, or 3.")
 
 
-def _sample_auto_stage(rng: np.random.Generator) -> int:
+def _sample_auto_stage(generator: torch.Generator) -> int:
     """Sample a curriculum stage uniformly from 1..3."""
 
-    return int(rng.integers(1, 4))
+    return int(torch.randint(1, 4, (1,), generator=generator).item())
 
 
 def _sample_curriculum(
@@ -121,8 +127,8 @@ def _sample_curriculum(
         }
 
     stage = auto_stage if mode == CURRICULUM_STAGE_AUTO else int(mode)
-    rows_rng = manager.numpy_rng("curriculum", "rows", stage)
-    sampled_rows_total, train_fraction = _sample_stage_rows(stage, rows_rng)
+    rows_gen = manager.torch_rng("curriculum", "rows", stage)
+    sampled_rows_total, train_fraction = _sample_stage_rows(stage, rows_gen, "cpu")
     configured_total = max(2, configured_total)
     n_rows_total = sampled_rows_total
     # Preserve caller-provided split-size knobs as a workload ceiling when
@@ -174,33 +180,45 @@ def _torch_dtype(config: GeneratorConfig) -> torch.dtype:
     return torch.float64 if config.runtime.torch_dtype == "float64" else torch.float32
 
 
-def _to_torch(arr: Any, device: str, dtype: torch.dtype) -> torch.Tensor:
-    """Convert an array-like to a torch tensor on the given device."""
-    return torch.as_tensor(np.asarray(arr), device=device, dtype=dtype)
-
-
-def _sample_node_count(config: GeneratorConfig, rng: np.random.Generator) -> int:
+def _sample_node_count(config: GeneratorConfig, generator: torch.Generator, device: str) -> int:
     """Sample graph node count using log-uniform bounds from config."""
 
     low = max(2.0, float(config.graph.n_nodes_min))
     high = max(low, float(config.graph.n_nodes_max))
-    return max(2, int(np.exp(rng.uniform(np.log(low), np.log(high)))))
+    log_low = math.log(low)
+    log_high = math.log(high)
+    u = torch.empty(1, device=device).uniform_(log_low, log_high, generator=generator)
+    return max(2, int(math.exp(u.item())))
 
 
-def _sample_assignments(n_cols: int, n_nodes: int, rng: np.random.Generator) -> np.ndarray:
+def _sample_assignments(
+    n_cols: int, n_nodes: int, generator: torch.Generator, device: str
+) -> list[int]:
     """Assign columns to a random eligible subset of graph nodes."""
 
-    eligible_count = int(rng.integers(1, n_nodes + 1))
-    eligible_nodes = rng.choice(np.arange(n_nodes), size=eligible_count, replace=False)
-    return rng.choice(eligible_nodes, size=n_cols, replace=True).astype(np.int32)
+    eligible_count = int(torch.randint(1, n_nodes + 1, (1,), generator=generator).item())
+    all_nodes = torch.randperm(n_nodes, generator=generator, device=device)
+    eligible_nodes = all_nodes[:eligible_count]
+    # Sample with replacement from eligible nodes
+    indices = torch.randint(0, eligible_count, (n_cols,), generator=generator, device=device)
+    return eligible_nodes[indices].tolist()
 
 
-def _sample_layout(config: GeneratorConfig, rng: np.random.Generator) -> dict[str, Any]:
+def _sample_layout(
+    config: GeneratorConfig, generator: torch.Generator, device: str
+) -> dict[str, Any]:
     """Sample dataset layout, graph, and node assignments for one dataset instance."""
 
-    n_features = int(rng.integers(config.dataset.n_features_min, config.dataset.n_features_max + 1))
+    n_features = int(
+        torch.randint(
+            config.dataset.n_features_min,
+            config.dataset.n_features_max + 1,
+            (1,),
+            generator=generator,
+        ).item()
+    )
 
-    corr = CorrelatedSampler(rng)
+    corr = CorrelatedSampler(generator, device)
     raw_ratio = corr.sample_num(
         "categorical_ratio",
         config.dataset.categorical_ratio_min,
@@ -208,31 +226,41 @@ def _sample_layout(config: GeneratorConfig, rng: np.random.Generator) -> dict[st
         log_scale=False,
         as_int=False,
     )
-    cat_ratio = float(np.clip(raw_ratio, 0.0, 1.0))
+    cat_ratio = float(max(0.0, min(1.0, raw_ratio)))
     n_cat = int(round(cat_ratio * n_features))
     n_cat = max(0, min(n_features, n_cat))
-    cat_idx = (
-        np.sort(rng.choice(np.arange(n_features), size=n_cat, replace=False))
-        if n_cat > 0
-        else np.array([], dtype=np.int32)
-    )
+    if n_cat > 0:
+        cat_idx_t = torch.randperm(n_features, generator=generator, device=device)[:n_cat]
+        cat_idx_t, _ = torch.sort(cat_idx_t)
+        cat_idx = cat_idx_t.tolist()
+    else:
+        cat_idx = []
 
     max_card = max(2, config.dataset.max_categorical_cardinality)
-    cardinalities = [
-        int(np.exp(rng.uniform(np.log(2.0), np.log(float(max_card))))) for _ in cat_idx
-    ]
-    cardinalities = [max(2, x) for x in cardinalities]
+    cardinalities = []
+    for _ in cat_idx:
+        log_low = math.log(2.0)
+        log_high = math.log(float(max_card))
+        u = torch.empty(1, device=device).uniform_(log_low, log_high, generator=generator)
+        cardinalities.append(max(2, int(math.exp(u.item()))))
     card_by_feature = {
         int(idx): int(card) for idx, card in zip(cat_idx, cardinalities, strict=True)
     }
 
-    n_classes = int(rng.integers(config.dataset.n_classes_min, config.dataset.n_classes_max + 1))
+    n_classes = int(
+        torch.randint(
+            config.dataset.n_classes_min,
+            config.dataset.n_classes_max + 1,
+            (1,),
+            generator=generator,
+        ).item()
+    )
     n_classes = max(2, n_classes)
 
-    n_nodes = _sample_node_count(config, rng)
-    adjacency = sample_cauchy_dag(n_nodes, rng)
-    feature_node_assignment = _sample_assignments(n_features, n_nodes, rng)
-    target_node_assignment = int(_sample_assignments(1, n_nodes, rng)[0])
+    n_nodes = _sample_node_count(config, generator, device)
+    adjacency = sample_cauchy_dag(n_nodes, generator, device)
+    feature_node_assignment = _sample_assignments(n_features, n_nodes, generator, device)
+    target_node_assignment = _sample_assignments(1, n_nodes, generator, device)[0]
 
     feature_types = ["num"] * n_features
     for i in cat_idx:
@@ -247,7 +275,7 @@ def _sample_layout(config: GeneratorConfig, rng: np.random.Generator) -> dict[st
         "n_classes": n_classes,
         "feature_types": feature_types,
         "graph_nodes": n_nodes,
-        "graph_edges": int(adjacency.sum()),
+        "graph_edges": int(adjacency.sum().item()),
         "adjacency": adjacency,
         "feature_node_assignment": feature_node_assignment,
         "target_node_assignment": target_node_assignment,
@@ -258,22 +286,21 @@ def _build_node_specs(
     node_index: int,
     layout: dict[str, Any],
     task: str,
-    rng: np.random.Generator,
+    generator: torch.Generator,
 ) -> list[ConverterSpec]:
     """Build converter specs for one node in the graph execution order."""
 
     specs: list[ConverterSpec] = []
-    feature_assignment = np.asarray(layout["feature_node_assignment"])
+    feature_assignment = layout["feature_node_assignment"]
     feature_types = list(layout["feature_types"])
     card_by_feature: dict[int, int] = layout["card_by_feature"]
 
-    feature_indices = np.where(feature_assignment == node_index)[0]
-    for f_idx in feature_indices:
-        f = int(f_idx)
+    feature_indices = [i for i, a in enumerate(feature_assignment) if a == node_index]
+    for f in feature_indices:
         if feature_types[f] == "cat":
             c = int(card_by_feature[f])
-            if c > 2 and rng.random() >= 0.5:
-                d = int(rng.integers(1, c))
+            if c > 2 and torch.empty(1).uniform_(0, 1, generator=generator).item() >= 0.5:
+                d = int(torch.randint(1, c, (1,), generator=generator).item())
             else:
                 d = c
             specs.append(
@@ -313,7 +340,9 @@ def _generate_graph_dataset_torch(
     n_features = int(layout["n_features"])
     task = config.dataset.task
     n_classes = int(layout["n_classes"])
-    adjacency = torch.as_tensor(layout["adjacency"], dtype=torch.bool, device=device)
+    adjacency = layout["adjacency"]
+    if not isinstance(adjacency, torch.Tensor):
+        adjacency = torch.as_tensor(adjacency, dtype=torch.bool, device=device)
     n_nodes = int(layout["graph_nodes"])
 
     node_outputs: dict[int, torch.Tensor] = {}
@@ -324,11 +353,12 @@ def _generate_graph_dataset_torch(
         parents = torch.where(adjacency[:, node_idx])[0].tolist()
         parent_data = [node_outputs[int(p)] for p in parents if int(p) in node_outputs]
 
-        # Build specs using CPU RNG for layout consistency
-        rng_cpu = np.random.default_rng(seed + node_idx + 1000)
-        specs = _build_node_specs(node_idx, layout, task, rng_cpu)
+        # Build specs using a deterministic per-node generator for layout consistency
+        spec_gen = torch.Generator(device="cpu")
+        spec_gen.manual_seed(seed + node_idx + 1000)
+        specs = _build_node_specs(node_idx, layout, task, spec_gen)
 
-        x_node, extracted = apply_node_pipeline_torch(parent_data, n_rows, specs, generator, device)
+        x_node, extracted = apply_node_pipeline(parent_data, n_rows, specs, generator, device)
         node_outputs[node_idx] = x_node
 
         for key, values in extracted.items():
@@ -410,30 +440,28 @@ def _generate_torch(
         x_train_t, x_test_t = x[:n_train], x[n_train:]
         y_train_t, y_test_t = y[:n_train], y[n_train:]
 
-        # Reuse the validated NumPy postprocessing implementation to keep
-        # Appendix E.13 behavior and split constraints consistent.
-        rng = np.random.default_rng(seed + 10_007 + attempt)
-        x_train_np, y_train_np, x_test_np, y_test_np, feature_types = postprocess_dataset(
-            _to_numpy(x_train_t),
-            _to_numpy(y_train_t),
-            _to_numpy(x_test_t),
-            _to_numpy(y_test_t),
+        x_train, y_train, x_test, y_test, feature_types = postprocess_dataset(
+            x_train_t,
+            y_train_t,
+            x_test_t,
+            y_test_t,
             list(layout["feature_types"]),
             config.dataset.task,
-            rng,
+            generator,
+            device,
         )
 
         if config.dataset.task == "classification" and not _classification_split_valid(
-            y_train_np, y_test_np
+            y_train, y_test
         ):
             last_reason = "invalid_class_split"
             continue
 
-        x_train = _to_torch(x_train_np, device, dtype)
-        x_test = _to_torch(x_test_np, device, dtype)
+        x_train = x_train.to(dtype)
+        x_test = x_test.to(dtype)
         y_dtype = torch.int64 if config.dataset.task == "classification" else dtype
-        y_train = _to_torch(y_train_np, device, y_dtype)
-        y_test = _to_torch(y_test_np, device, y_dtype)
+        y_train = y_train.to(y_dtype)
+        y_test = y_test.to(y_dtype)
 
         metadata = {
             "backend": "torch",
@@ -466,11 +494,11 @@ def _generate_torch(
     )
 
 
-def _classification_split_valid(y_train: np.ndarray, y_test: np.ndarray) -> bool:
+def _classification_split_valid(y_train: torch.Tensor, y_test: torch.Tensor) -> bool:
     """Validate classification split constraints from Appendix E.13."""
 
-    train_classes = set(np.unique(y_train).tolist())
-    test_classes = set(np.unique(y_test).tolist())
+    train_classes = set(torch.unique(y_train).tolist())
+    test_classes = set(torch.unique(y_test).tolist())
     return len(train_classes) >= 2 and train_classes == test_classes
 
 
@@ -518,8 +546,8 @@ def _generate_one_seeded(
 
     manager = SeedManager(seed)
     curriculum = _sample_curriculum(config, manager, auto_stage=auto_stage)
-    layout_rng = manager.numpy_rng("layout")
-    layout = _sample_layout(config, layout_rng)
+    layout_gen = manager.torch_rng("layout")
+    layout = _sample_layout(config, layout_gen, "cpu")
     data_seed = manager.child("data")
     n_train = int(curriculum["n_train"])
     n_test = int(curriculum["n_test"])
@@ -623,8 +651,8 @@ def _resolve_auto_stage(mode: str | int, *, seed: int) -> int:
     """Resolve curriculum auto stage for a deterministic dataset seed."""
 
     if mode == CURRICULUM_STAGE_AUTO:
-        stage_rng = SeedManager(seed).numpy_rng("curriculum", "stage")
-        return _sample_auto_stage(stage_rng)
+        stage_gen = SeedManager(seed).torch_rng("curriculum", "stage")
+        return _sample_auto_stage(stage_gen)
     if isinstance(mode, int):
         return mode
     return 1
@@ -702,7 +730,10 @@ def _score_candidate_against_targets(
         under_coverage = max(0.0, 1.0 - in_band_fraction)
         effective_weight = float(base_weight) * (1.0 + under_coverage)
 
-        raw_value = getattr(metrics, metric_name, None)
+        if isinstance(metrics, dict):
+            raw_value = metrics.get(metric_name)
+        else:
+            raw_value = getattr(metrics, metric_name, None)
         value = float(raw_value) if isinstance(raw_value, (int, float)) else None
         if value is not None and not math.isfinite(value):
             value = None
@@ -733,18 +764,23 @@ def _select_softmax_candidate(
         raise ValueError("Cannot select steering candidate from an empty score set.")
     if len(scores) == 1:
         return 0, [1.0]
-    score_arr = np.asarray(scores, dtype=np.float64)
-    shifted = score_arr - float(np.min(score_arr))
+    score_arr = torch.tensor(scores, dtype=torch.float64, device="cpu")
+    shifted = score_arr - torch.min(score_arr)
     logits = -(shifted / float(temperature))
-    logits = logits - float(np.max(logits))
-    probs = np.exp(logits)
-    prob_sum = float(np.sum(probs))
+    logits = logits - torch.max(logits)
+    probs = torch.exp(logits)
+    prob_sum = float(torch.sum(probs).item())
     if not math.isfinite(prob_sum) or prob_sum <= 0:
-        probs = np.full(score_arr.shape[0], 1.0 / score_arr.shape[0], dtype=np.float64)
+        probs = torch.full(
+            (score_arr.shape[0],),
+            1.0 / score_arr.shape[0],
+            dtype=torch.float64,
+            device="cpu",
+        )
     else:
         probs = probs / prob_sum
-    selector_rng = SeedManager(seed).numpy_rng("steering", "select")
-    idx = int(selector_rng.choice(np.arange(score_arr.shape[0]), p=probs))
+    selector_rng = SeedManager(seed).torch_rng("steering", "select", device="cpu")
+    idx = int(torch.multinomial(probs, 1, generator=selector_rng).item())
     return idx, probs.tolist()
 
 
@@ -797,7 +833,11 @@ def _generate_one_steered(
                 resolved_device=resolved_device,
                 auto_stage=auto_stage,
             )
-            metrics = extract_dataset_metrics(bundle, include_spearman=include_spearman)
+            metrics = extract_steering_metrics(
+                bundle,
+                target_metric_names=set(target_specs),
+                include_spearman=include_spearman,
+            )
         except Exception as exc:
             last_error = f"{exc.__class__.__name__}: {exc}"
             continue

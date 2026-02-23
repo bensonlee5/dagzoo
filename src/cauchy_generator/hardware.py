@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
-import numpy as np
 import torch
 
 from cauchy_generator.config import GeneratorConfig
@@ -79,7 +79,7 @@ def _recommend_profile(device_name: str, backend: str) -> str:
     if backend != "cuda":
         return "cpu"
     peak = get_peak_flops(device_name)
-    if not np.isfinite(peak):
+    if not math.isfinite(peak):
         return "cuda_unknown_fallback"
     if peak >= 700e12:
         return "cuda_h100"

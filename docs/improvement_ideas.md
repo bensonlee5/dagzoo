@@ -21,26 +21,29 @@ Related docs:
 
 Observed from current code/config surface:
 
-- Diagnostics extraction and coverage aggregation exist; soft steering is still missing.
+- Diagnostics extraction and coverage aggregation exist; soft steering is implemented.
 - Class support defaults remain narrow (`n_classes_max=10`) and categorical cardinality defaults are conservative.
 - Missingness mechanisms are not configurable.
 - Shift-aware SCM and interventional/counterfactual generation are not implemented.
 - Curriculum stages scale row counts and split regime only.
 - Streaming Parquet writing is sequential, not multi-worker.
 
+## Recently Implemented
+
+- RD-008: Meta-feature coverage steering (soft candidate selection with configurable target bands).
+
 ## Prioritized Queue
 
 | Rank | Roadmap ID | Item                                             | Status   | Milestone | Mission Alignment                    | Expected Impact | Effort      | Risk        | Key Repo Touchpoints                                                                                                                    |
 | ---- | ---------- | ------------------------------------------------ | -------- | --------- | ------------------------------------ | --------------- | ----------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | RD-008     | Meta-feature coverage steering                   | planned  | Now       | foundation model pretraining         | High            | Medium      | Medium      | `src/cauchy_generator/diagnostics/coverage.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/cli.py`                   |
-| 2    | RD-003     | Missingness generation (MCAR/MAR/MNAR)           | planned  | Now       | pretraining, robustness testing      | High            | Low-Medium  | Low         | `src/cauchy_generator/postprocess/postprocess.py`, `src/cauchy_generator/config.py`, `src/cauchy_generator/diagnostics/metrics.py`      |
-| 3    | RD-007     | Many-class and high-cardinality expansion        | planned  | Now       | pretraining                          | High            | Low-Medium  | Medium      | `src/cauchy_generator/config.py`, `src/cauchy_generator/converters/categorical.py`, `src/cauchy_generator/filtering/torch_rf_filter.py` |
-| 4    | RD-006     | Curriculum complexity scaling (features + graph) | planned  | Now       | pretraining                          | Medium-High     | Medium      | Medium      | `src/cauchy_generator/config.py`, `src/cauchy_generator/core/dataset.py`                                                                |
-| 5    | RD-001     | Ground-truth DAG artifact export                 | planned  | Now       | causal discovery                     | Medium-High     | Medium      | Low-Medium  | `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/types.py`                    |
-| 6    | RD-004     | Shift-aware SCM generation                       | planned  | Next      | robustness testing, causal discovery | Medium-High     | High        | Medium-High | `src/cauchy_generator/sampling/random_weights.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/config.py`             |
-| 7    | RD-005     | Robustness hard-task/adversarial profiles        | research | Next      | robustness testing                   | Medium          | Medium-High | High        | `src/cauchy_generator/functions/`, `src/cauchy_generator/postprocess/`, `src/cauchy_generator/bench/`                                   |
-| 8    | RD-009     | Parallel/distributed generation                  | research | Next      | pretraining throughput               | Low-Medium      | High        | Medium      | `src/cauchy_generator/core/`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/cli.py`                                |
-| 9    | RD-002     | Interventional and counterfactual generation     | research | Later     | causal discovery                     | Medium          | High        | High        | `src/cauchy_generator/core/node_pipeline.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/config.py`                  |
+| 1    | RD-003     | Missingness generation (MCAR/MAR/MNAR)           | planned  | Now       | pretraining, robustness testing      | High            | Low-Medium  | Low         | `src/cauchy_generator/postprocess/postprocess.py`, `src/cauchy_generator/config.py`, `src/cauchy_generator/diagnostics/metrics.py`      |
+| 2    | RD-007     | Many-class and high-cardinality expansion        | planned  | Now       | pretraining                          | High            | Low-Medium  | Medium      | `src/cauchy_generator/config.py`, `src/cauchy_generator/converters/categorical.py`, `src/cauchy_generator/filtering/torch_rf_filter.py` |
+| 3    | RD-006     | Curriculum complexity scaling (features + graph) | planned  | Now       | pretraining                          | Medium-High     | Medium      | Medium      | `src/cauchy_generator/config.py`, `src/cauchy_generator/core/dataset.py`                                                                |
+| 4    | RD-001     | Ground-truth DAG artifact export                 | planned  | Now       | causal discovery                     | Medium-High     | Medium      | Low-Medium  | `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/types.py`                    |
+| 5    | RD-004     | Shift-aware SCM generation                       | planned  | Next      | robustness testing, causal discovery | Medium-High     | High        | Medium-High | `src/cauchy_generator/sampling/random_weights.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/config.py`             |
+| 6    | RD-005     | Robustness hard-task/adversarial profiles        | research | Next      | robustness testing                   | Medium          | Medium-High | High        | `src/cauchy_generator/functions/`, `src/cauchy_generator/postprocess/`, `src/cauchy_generator/bench/`                                   |
+| 7    | RD-009     | Parallel/distributed generation                  | research | Next      | pretraining throughput               | Low-Medium      | High        | Medium      | `src/cauchy_generator/core/`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/cli.py`                                |
+| 8    | RD-002     | Interventional and counterfactual generation     | research | Later     | causal discovery                     | Medium          | High        | High        | `src/cauchy_generator/core/node_pipeline.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/config.py`                  |
 
 ## Candidate Interface Additions (Planning-Only)
 
@@ -55,8 +58,6 @@ No interface changes are implemented in this phase. Candidate future additions b
   - per-stage feature/node/depth range controls under curriculum config
 - RD-007:
   - expanded `DatasetConfig.n_classes_*` and categorical cardinality ranges
-- RD-008:
-  - steering config under diagnostics or generator scope with opt-in defaults
 - RD-002:
   - `GeneratorConfig.intervention_mode: Literal["off", "do", "counterfactual"]`
 - RD-009:
@@ -78,8 +79,6 @@ No interface changes are implemented in this phase. Candidate future additions b
    later stages have equal or greater feature and graph complexity than earlier stages.
 1. RD-007 many-class robustness:
    high-class datasets generate without excessive filter rejection and preserve label validity.
-1. RD-008 coverage steering:
-   configured target bands show improved in-band coverage versus non-steered baseline.
 1. RD-009 parallel determinism:
    multi-worker mode reproduces single-worker outputs for fixed seeds within declared tolerance.
 

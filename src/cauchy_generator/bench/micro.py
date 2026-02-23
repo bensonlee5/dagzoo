@@ -5,12 +5,11 @@ from __future__ import annotations
 import time
 from typing import Callable
 
-import numpy as np
 import torch
 
 from cauchy_generator.config import GeneratorConfig
 from cauchy_generator.core.dataset import generate_one
-from cauchy_generator.core.node_pipeline import ConverterSpec, apply_node_pipeline_torch
+from cauchy_generator.core.node_pipeline import ConverterSpec, apply_node_pipeline
 from cauchy_generator.functions.random_functions import apply_random_function
 
 
@@ -45,12 +44,14 @@ def run_microbenchmarks(
 ) -> dict[str, float | int]:
     """Run targeted microbenchmarks for core generation components."""
 
-    rng = np.random.default_rng(config.seed + 41)
-    x = rng.normal(size=(512, 64)).astype(np.float32)
+    g_rng = torch.Generator(device="cpu")
+    g_rng.manual_seed(config.seed + 41)
+    x = torch.randn(512, 64, generator=g_rng)
 
     def run_linear() -> None:
-        local_rng = np.random.default_rng(1)
-        _ = apply_random_function(x, local_rng, out_dim=64, function_type="linear")
+        local_g = torch.Generator(device="cpu")
+        local_g.manual_seed(1)
+        _ = apply_random_function(x, local_g, out_dim=64, function_type="linear")
 
     parent_data = [
         torch.randn(512, 24),
@@ -65,7 +66,7 @@ def run_microbenchmarks(
     def run_node_pipeline() -> None:
         g = torch.Generator(device="cpu")
         g.manual_seed(2)
-        _ = apply_node_pipeline_torch(parent_data, 512, specs, g, "cpu")
+        _ = apply_node_pipeline(parent_data, 512, specs, g, "cpu")
 
     micro_cfg = _micro_config(config)
 

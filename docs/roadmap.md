@@ -24,16 +24,16 @@ Related docs:
 
 ## Current Capability Matrix
 
-| README Mission/Pillar Claim                                         | Current State | Evidence in Repo                                                                                                | Gap                                                                                               | Roadmap IDs                            |
-| ------------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| Foundation model pretraining with diverse structural priors         | `partial`     | DAG-based generation, mixed-type conversion, diagnostics extraction/coverage aggregation, throughput benchmarks | Missingness/shift/hard-task regimes and steering are not implemented end-to-end                   | RD-003, RD-004, RD-005, RD-007, RD-008 |
-| Causal discovery with ground-truth DAGs and interventional datasets | `partial`     | DAG is sampled during generation                                                                                | Full adjacency is not exported as first-class artifact; no intervention/counterfactual generation | RD-001, RD-002                         |
-| Robustness testing with hard tasks, shifts, adversarial regimes     | `planned`     | Basic filtering and diagnostics proxies exist                                                                   | No explicit robustness profiles, missingness mechanisms, or drift controls                        | RD-003, RD-004, RD-005                 |
-| Causal structural integrity (hierarchical dependencies)             | `implemented` | Graph-driven node pipeline and multi-family function composition                                                | Deeper mechanism controls are not user-configurable                                               | RD-007                                 |
-| Tabular realism (mixed type + postprocess hooks)                    | `partial`     | Numeric/categorical converters and E.13 postprocessing are implemented                                          | High-cardinality/many-class limits and missingness controls are not exposed                       | RD-003, RD-006                         |
-| Complexity curriculum scales features/nodes/samples                 | `partial`     | Curriculum mode stages row/split regime                                                                         | Curriculum does not yet stage feature count or graph complexity                                   | RD-006                                 |
-| Hardware-native performance (Torch + hardware-aware tuning)         | `implemented` | Torch CPU/CUDA/MPS path, hardware detection, profile-based tuning, benchmark suite                              | Parallel/distributed generation is not implemented                                                | RD-009                                 |
-| Parallel streaming Parquet sharding                                 | `partial`     | Streaming Parquet writing exists                                                                                | Writing is currently single-process sequential                                                    | RD-009                                 |
+| README Mission/Pillar Claim                                         | Current State | Evidence in Repo                                                                                                               | Gap                                                                                               | Roadmap IDs                    |
+| ------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Foundation model pretraining with diverse structural priors         | `partial`     | DAG-based generation, mixed-type conversion, diagnostics extraction/coverage aggregation, soft steering, throughput benchmarks | Missingness/shift/hard-task regimes are not implemented end-to-end                                | RD-003, RD-004, RD-005, RD-007 |
+| Causal discovery with ground-truth DAGs and interventional datasets | `partial`     | DAG is sampled during generation                                                                                               | Full adjacency is not exported as first-class artifact; no intervention/counterfactual generation | RD-001, RD-002                 |
+| Robustness testing with hard tasks, shifts, adversarial regimes     | `planned`     | Basic filtering and diagnostics proxies exist                                                                                  | No explicit robustness profiles, missingness mechanisms, or drift controls                        | RD-003, RD-004, RD-005         |
+| Causal structural integrity (hierarchical dependencies)             | `implemented` | Graph-driven node pipeline and multi-family function composition                                                               | Deeper mechanism controls are not user-configurable                                               | RD-007                         |
+| Tabular realism (mixed type + postprocess hooks)                    | `partial`     | Numeric/categorical converters and E.13 postprocessing are implemented                                                         | High-cardinality/many-class limits and missingness controls are not exposed                       | RD-003, RD-006                 |
+| Complexity curriculum scales features/nodes/samples                 | `partial`     | Curriculum mode stages row/split regime                                                                                        | Curriculum does not yet stage feature count or graph complexity                                   | RD-006                         |
+| Hardware-native performance (Torch + hardware-aware tuning)         | `implemented` | Torch CPU/CUDA/MPS path, hardware detection, profile-based tuning, benchmark suite                                             | Parallel/distributed generation is not implemented                                                | RD-009                         |
+| Parallel streaming Parquet sharding                                 | `partial`     | Streaming Parquet writing exists                                                                                               | Writing is currently single-process sequential                                                    | RD-009                         |
 
 ## Roadmap Items
 
@@ -130,11 +130,11 @@ Related docs:
 
 ### RD-008: Meta-Feature Coverage Steering
 
-- Status: `planned`
+- Status: `implemented`
 - Milestone: `Now`
 - Mission alignment: foundation model pretraining
 - Pillar alignment: tabular realism
-- Goal: add soft steering loop using existing diagnostics coverage targets.
+- Goal: maintain and harden soft steering loop using existing diagnostics coverage targets.
 - Repo touchpoints: `src/cauchy_generator/diagnostics/coverage.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/cli.py`
 - Exit criteria:
   - Steering can be enabled/disabled without breaking existing flows.
@@ -156,13 +156,16 @@ Related docs:
 
 ## Milestone Board
 
+### Implemented
+
+- RD-008 meta-feature coverage steering
+
 ### Now
 
 - RD-001 ground-truth DAG artifact export
 - RD-003 missingness mechanisms
 - RD-006 curriculum complexity scaling
 - RD-007 many-class/high-cardinality expansion
-- RD-008 meta-feature coverage steering
 
 ### Next
 
@@ -176,7 +179,7 @@ Related docs:
 
 ## Dependencies and Sequencing
 
-- RD-008 depends on existing diagnostics aggregation (already implemented) and benefits from RD-003/RD-007 because expanded data regimes improve steering utility.
+- RD-008 is implemented and now benefits from RD-003/RD-007 because expanded data regimes improve steering utility.
 - RD-005 depends on RD-003 and RD-004 for robust, controllable stress-profile construction.
 - RD-002 depends on RD-001 for stable causal graph artifact lineage.
 - RD-009 should land after interface contracts for RD-001/RD-006 are stable to avoid repeated parallelism refactors.

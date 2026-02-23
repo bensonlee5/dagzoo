@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import numpy as np
+import math
+
+import torch
 
 
-def _sigmoid(x: np.ndarray) -> np.ndarray:
-    """Numerically stable logistic transform for edge logits."""
-
-    return 1.0 / (1.0 + np.exp(-x))
-
-
-def sample_cauchy_dag(n_nodes: int, rng: np.random.Generator) -> np.ndarray:
+def sample_cauchy_dag(n_nodes: int, generator: torch.Generator, device: str) -> torch.Tensor:
     """
     Sample a DAG adjacency matrix using Appendix E.4 style probabilities.
 
@@ -21,16 +17,24 @@ def sample_cauchy_dag(n_nodes: int, rng: np.random.Generator) -> np.ndarray:
     """
 
     if n_nodes < 2:
-        return np.zeros((n_nodes, n_nodes), dtype=bool)
+        return torch.zeros((n_nodes, n_nodes), dtype=torch.bool, device=device)
 
-    a = rng.standard_cauchy()
-    b = rng.standard_cauchy(size=n_nodes)
-    c = rng.standard_cauchy(size=n_nodes)
+    # Standard Cauchy: tan(pi * (U - 0.5)) where U ~ Uniform(0, 1)
+    u_a = torch.empty(1, device=device).uniform_(0, 1, generator=generator)
+    a = torch.tan(math.pi * (u_a - 0.5)).item()
+
+    u_b = torch.empty(n_nodes, device=device).uniform_(0, 1, generator=generator)
+    b = torch.tan(math.pi * (u_b - 0.5))
+
+    u_c = torch.empty(n_nodes, device=device).uniform_(0, 1, generator=generator)
+    c = torch.tan(math.pi * (u_c - 0.5))
 
     logits = a + b[:, None] + c[None, :]
-    probs = _sigmoid(logits)
+    probs = torch.sigmoid(logits)
 
-    upper_mask = np.triu(np.ones((n_nodes, n_nodes), dtype=bool), k=1)
-    edges = rng.random((n_nodes, n_nodes)) < probs
+    upper_mask = torch.triu(
+        torch.ones(n_nodes, n_nodes, dtype=torch.bool, device=device), diagonal=1
+    )
+    edges = torch.empty(n_nodes, n_nodes, device=device).uniform_(0, 1, generator=generator) < probs
     adjacency = edges & upper_mask
     return adjacency

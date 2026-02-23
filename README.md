@@ -77,7 +77,7 @@ uv run cauchy-gen generate --config configs/preset_steering_conservative.yaml --
 ### Benchmarking Performance
 
 ```bash
-# Run the standard benchmark suite across all detected hardware profiles
+# Run the standard benchmark suite for the CPU profile
 uv run cauchy-gen benchmark --suite standard --profile cpu
 ```
 
@@ -96,7 +96,7 @@ ______________________________________________________________________
 
 The development of `cauchy-generator` is strictly driven by recent literature in Tabular Deep Learning.
 
-- **Meta-Feature Diagnostics:** A diagnostics module computes 15 structural metrics per dataset and aggregates coverage across generation runs. Next: soft steering to bias generation toward under-represented regimes.
+- **Meta-Feature Diagnostics:** A diagnostics module computes 15 structural metrics per dataset and aggregates coverage across generation runs. Soft steering is available to bias selection toward under-represented target bands.
 - **Missingness Generation:** Adding MAR/MCAR/MNAR mechanisms to simulate real-world data corruption.
 - **Shift-Aware SCMs:** Expanding the graph pipeline to support distribution shift and temporal drift.
 
@@ -106,7 +106,7 @@ ______________________________________________________________________
 
 ## Theoretical Foundations
 
-- **TabICLv2 (2024):** Core generation prior and Appendix E implementation.
+- **TabICLv2 (2026):** Core generation prior and Appendix E implementation.
 - **TabPFN v2 (2025):** Insights into meta-feature coverage and tabular foundation model sensitivity.
 - **TabICL (2025):** Methodology for complexity-based curriculum scheduling.
 
