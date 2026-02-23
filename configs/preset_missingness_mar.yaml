@@ -1,0 +1,20 @@
+seed: 17
+
+dataset:
+  task: classification
+  missing_rate: 0.25
+  missing_mechanism: mar
+  missing_mar_observed_fraction: 0.6
+  missing_mar_logit_scale: 1.4
+
+runtime:
+  device: auto
+
+output:
+  out_dir: data/run_missingness_mar
+
+diagnostics:
+  enabled: false
+
+steering:
+  enabled: false

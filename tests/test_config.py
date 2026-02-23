@@ -1,7 +1,9 @@
 import pytest
 
 from cauchy_generator.config import (
+    MISSINGNESS_MECHANISM_MAR,
     MISSINGNESS_MECHANISM_MCAR,
+    MISSINGNESS_MECHANISM_MNAR,
     MISSINGNESS_MECHANISM_NONE,
     GeneratorConfig,
 )
@@ -57,6 +59,22 @@ def test_load_diagnostics_and_steering_presets() -> None:
     assert cfg_steering.meta_feature_targets
     for band in cfg_steering.meta_feature_targets.values():
         assert len(band) in {2, 3}
+
+
+def test_load_missingness_presets() -> None:
+    cfg_mcar = GeneratorConfig.from_yaml("configs/preset_missingness_mcar.yaml")
+    assert cfg_mcar.dataset.missing_mechanism == MISSINGNESS_MECHANISM_MCAR
+    assert cfg_mcar.dataset.missing_rate > 0.0
+
+    cfg_mar = GeneratorConfig.from_yaml("configs/preset_missingness_mar.yaml")
+    assert cfg_mar.dataset.missing_mechanism == MISSINGNESS_MECHANISM_MAR
+    assert cfg_mar.dataset.missing_rate > 0.0
+    assert cfg_mar.dataset.missing_mar_observed_fraction > 0.0
+
+    cfg_mnar = GeneratorConfig.from_yaml("configs/preset_missingness_mnar.yaml")
+    assert cfg_mnar.dataset.missing_mechanism == MISSINGNESS_MECHANISM_MNAR
+    assert cfg_mnar.dataset.missing_rate > 0.0
+    assert cfg_mnar.dataset.missing_mnar_logit_scale > 0.0
 
 
 def test_load_benchmark_profiles() -> None:

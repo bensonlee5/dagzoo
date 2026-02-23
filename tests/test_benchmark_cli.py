@@ -186,3 +186,32 @@ def test_benchmark_cli_diagnostics_pointers_resolve_when_roots_differ(tmp_path) 
     assert md_path.exists()
     assert json_path.resolve().is_relative_to(diagnostics_out.resolve())
     assert md_path.resolve().is_relative_to(diagnostics_out.resolve())
+
+
+def test_benchmark_cli_missingness_guardrails_are_emitted(tmp_path) -> None:
+    out = tmp_path / "summary_missingness.json"
+    code = main(
+        [
+            "benchmark",
+            "--config",
+            "configs/preset_missingness_mcar.yaml",
+            "--profile",
+            "custom",
+            "--suite",
+            "smoke",
+            "--num-datasets",
+            "2",
+            "--warmup",
+            "0",
+            "--no-hardware-aware",
+            "--no-memory",
+            "--json-out",
+            str(out),
+        ]
+    )
+    assert code == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    profile = payload["profile_results"][0]
+    guardrails = profile["missingness_guardrails"]
+    assert guardrails["enabled"] is True
+    assert guardrails["status"] in {"pass", "warn", "fail"}

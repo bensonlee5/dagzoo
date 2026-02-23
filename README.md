@@ -74,6 +74,26 @@ uv run cauchy-gen generate --config configs/preset_diagnostics_on.yaml --num-dat
 uv run cauchy-gen generate --config configs/preset_steering_conservative.yaml --num-datasets 25 --diagnostics --out data/run_steering
 ```
 
+```bash
+# Missingness presets (MCAR/MAR/MNAR)
+uv run cauchy-gen generate --config configs/preset_missingness_mcar.yaml --num-datasets 25 --out data/run_missing_mcar
+uv run cauchy-gen generate --config configs/preset_missingness_mar.yaml --num-datasets 25 --out data/run_missing_mar
+uv run cauchy-gen generate --config configs/preset_missingness_mnar.yaml --num-datasets 25 --out data/run_missing_mnar
+```
+
+```bash
+# Override missingness controls directly from CLI with strict validation
+uv run cauchy-gen generate \
+  --config configs/default.yaml \
+  --num-datasets 25 \
+  --device cpu \
+  --missing-rate 0.25 \
+  --missing-mechanism mar \
+  --missing-mar-observed-fraction 0.6 \
+  --missing-mar-logit-scale 1.4 \
+  --out data/run_missing_cli_mar
+```
+
 ### Benchmarking Performance
 
 ```bash
@@ -90,6 +110,19 @@ uv run cauchy-gen benchmark \
   --out-dir benchmarks/results/smoke_cpu_diag
 ```
 
+```bash
+# Benchmark a missingness-enabled custom config with runtime + acceptance guardrails
+uv run cauchy-gen benchmark \
+  --config configs/preset_missingness_mar.yaml \
+  --profile custom \
+  --suite smoke \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_missing_mar
+```
+
+When missingness is enabled, benchmark summaries include `missingness_guardrails` per profile,
+and guardrail warnings/failures are reflected in overall regression status.
+
 ______________________________________________________________________
 
 ## Research & Roadmap
@@ -97,7 +130,7 @@ ______________________________________________________________________
 The development of `cauchy-generator` is strictly driven by recent literature in Tabular Deep Learning.
 
 - **Meta-Feature Diagnostics:** A diagnostics module computes 15 structural metrics per dataset and aggregates coverage across generation runs. Soft steering is available to bias selection toward under-represented target bands.
-- **Missingness Generation:** Adding MAR/MCAR/MNAR mechanisms to simulate real-world data corruption.
+- **Missingness Generation:** Configurable MAR/MCAR/MNAR mechanisms with CLI overrides and benchmark guardrails.
 - **Shift-Aware SCMs:** Expanding the graph pipeline to support distribution shift and temporal drift.
 
 See [docs/improvement_ideas.md](docs/improvement_ideas.md) for the prioritized research backlog.

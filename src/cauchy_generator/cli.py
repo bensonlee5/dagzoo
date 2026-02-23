@@ -6,7 +6,7 @@ import argparse
 import datetime as dt
 import math
 import sys
-from dataclasses import fields
+from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,13 @@ from cauchy_generator.bench.suite import resolve_profile_run_specs, run_benchmar
 from cauchy_generator.config import (
     CURRICULUM_STAGE_AUTO,
     CURRICULUM_STAGE_CLI_CHOICES,
+    DatasetConfig,
     GeneratorConfig,
+    MISSINGNESS_MECHANISM_MAR,
+    MISSINGNESS_MECHANISM_MCAR,
+    MISSINGNESS_MECHANISM_MNAR,
+    MISSINGNESS_MECHANISM_NONE,
+    normalize_missing_mechanism,
 )
 from cauchy_generator.core.dataset import generate_batch_iter
 from cauchy_generator.diagnostics import (
@@ -34,6 +40,12 @@ from cauchy_generator.hardware import (
 from cauchy_generator.io.parquet_writer import write_parquet_shards_stream
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
+MISSINGNESS_MECHANISM_CLI_CHOICES = (
+    MISSINGNESS_MECHANISM_NONE,
+    MISSINGNESS_MECHANISM_MCAR,
+    MISSINGNESS_MECHANISM_MAR,
+    MISSINGNESS_MECHANISM_MNAR,
+)
 META_TARGET_SUPPORTED_METRICS = frozenset(
     field_info.name for field_info in fields(DatasetMetrics) if field_info.name != "task"
 )
@@ -56,6 +68,75 @@ def _non_negative_int(value: str) -> int:
     if parsed < 0:
         raise argparse.ArgumentTypeError(f"Expected a non-negative integer, got {value}.")
     return parsed
+
+
+def _parse_finite_float(raw: str, *, flag: str) -> float:
+    """argparse helper: parse a finite float."""
+
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid {flag} value '{raw}'. Expected a number."
+        ) from exc
+    if not math.isfinite(value):
+        raise argparse.ArgumentTypeError(f"Invalid {flag} value '{raw}'. Expected a finite number.")
+    return value
+
+
+def _parse_missing_rate_arg(raw: str) -> float:
+    """argparse type: parse missing rate in [0, 1]."""
+
+    value = _parse_finite_float(raw, flag="--missing-rate")
+    if not (0.0 <= value <= 1.0):
+        raise argparse.ArgumentTypeError(
+            f"Invalid --missing-rate value '{raw}'. Expected a finite value in [0, 1]."
+        )
+    return value
+
+
+def _parse_missing_positive_scale_arg(raw: str, *, flag: str) -> float:
+    """argparse helper: parse positive finite missingness scale."""
+
+    value = _parse_finite_float(raw, flag=flag)
+    if value <= 0.0:
+        raise argparse.ArgumentTypeError(
+            f"Invalid {flag} value '{raw}'. Expected a finite value > 0."
+        )
+    return value
+
+
+def _parse_missing_mar_observed_fraction_arg(raw: str) -> float:
+    """argparse type: parse MAR observed-feature fraction in (0, 1]."""
+
+    value = _parse_finite_float(raw, flag="--missing-mar-observed-fraction")
+    if not (0.0 < value <= 1.0):
+        raise argparse.ArgumentTypeError(
+            "Invalid --missing-mar-observed-fraction value "
+            f"'{raw}'. Expected a finite value in (0, 1]."
+        )
+    return value
+
+
+def _parse_missing_mar_logit_scale_arg(raw: str) -> float:
+    """argparse type: parse MAR logit scale > 0."""
+
+    return _parse_missing_positive_scale_arg(raw, flag="--missing-mar-logit-scale")
+
+
+def _parse_missing_mnar_logit_scale_arg(raw: str) -> float:
+    """argparse type: parse MNAR logit scale > 0."""
+
+    return _parse_missing_positive_scale_arg(raw, flag="--missing-mnar-logit-scale")
+
+
+def _parse_missing_mechanism_arg(raw: str) -> str:
+    """argparse type: normalize missingness mechanism values."""
+
+    try:
+        return normalize_missing_mechanism(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _parse_meta_target_arg(raw: str) -> tuple[str, tuple[float, float, float]]:
@@ -259,6 +340,37 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     g.add_argument(
+        "--missing-rate",
+        type=_parse_missing_rate_arg,
+        default=None,
+        help="Override dataset missing rate in [0, 1].",
+    )
+    g.add_argument(
+        "--missing-mechanism",
+        type=_parse_missing_mechanism_arg,
+        choices=MISSINGNESS_MECHANISM_CLI_CHOICES,
+        default=None,
+        help="Override missingness mechanism (none/mcar/mar/mnar).",
+    )
+    g.add_argument(
+        "--missing-mar-observed-fraction",
+        type=_parse_missing_mar_observed_fraction_arg,
+        default=None,
+        help="Override MAR observed-feature fraction in (0, 1].",
+    )
+    g.add_argument(
+        "--missing-mar-logit-scale",
+        type=_parse_missing_mar_logit_scale_arg,
+        default=None,
+        help="Override MAR logit scale (> 0).",
+    )
+    g.add_argument(
+        "--missing-mnar-logit-scale",
+        type=_parse_missing_mnar_logit_scale_arg,
+        default=None,
+        help="Override MNAR logit scale (> 0).",
+    )
+    g.add_argument(
         "--curriculum",
         default=None,
         choices=CURRICULUM_STAGE_CLI_CHOICES,
@@ -375,6 +487,39 @@ def _resolve_config_with_hardware(
     return config, hw
 
 
+def _apply_missingness_cli_overrides(config: GeneratorConfig, args: argparse.Namespace) -> None:
+    """Apply and validate missingness overrides from CLI arguments."""
+
+    has_missingness_override = any(
+        value is not None
+        for value in (
+            args.missing_rate,
+            args.missing_mechanism,
+            args.missing_mar_observed_fraction,
+            args.missing_mar_logit_scale,
+            args.missing_mnar_logit_scale,
+        )
+    )
+    if not has_missingness_override:
+        return
+
+    if args.missing_rate is not None:
+        config.dataset.missing_rate = float(args.missing_rate)
+    if args.missing_mechanism is not None:
+        config.dataset.missing_mechanism = args.missing_mechanism
+    if args.missing_mar_observed_fraction is not None:
+        config.dataset.missing_mar_observed_fraction = float(args.missing_mar_observed_fraction)
+    if args.missing_mar_logit_scale is not None:
+        config.dataset.missing_mar_logit_scale = float(args.missing_mar_logit_scale)
+    if args.missing_mnar_logit_scale is not None:
+        config.dataset.missing_mnar_logit_scale = float(args.missing_mnar_logit_scale)
+
+    try:
+        config.dataset = DatasetConfig(**asdict(config.dataset))
+    except ValueError as exc:
+        _raise_usage_error(str(exc))
+
+
 def _run_generate(args: argparse.Namespace) -> int:
     """Execute the ``generate`` command."""
 
@@ -390,6 +535,7 @@ def _run_generate(args: argparse.Namespace) -> int:
             if args.curriculum == CURRICULUM_STAGE_AUTO
             else int(args.curriculum)
         )
+    _apply_missingness_cli_overrides(config, args)
     steering_requested = bool(config.steering.enabled or args.steer_meta or bool(args.meta_target))
     resolved_target_specs = _resolve_meta_target_specs(config, args.meta_target)
     if steering_requested:
@@ -556,12 +702,17 @@ def _print_profile_result_line(result: dict[str, Any]) -> None:
         if isinstance(json_pointer, str) and json_pointer:
             diagnostics_hint = f" diagnostics={json_pointer}"
 
+    missingness_hint = ""
+    guardrails = result.get("missingness_guardrails")
+    if isinstance(guardrails, dict) and bool(guardrails.get("enabled")):
+        missingness_hint = f" missingness={guardrails.get('status', 'pass')}"
+
     print(
         f"[{result.get('profile_key')}] device={result.get('device')} "
         f"backend={result.get('hardware_backend')} "
         f"datasets/min={float(result.get('datasets_per_minute', 0.0)):.2f} "
         f"latency_p95_ms={float(result.get('latency_p95_ms', 0.0)):.2f}"
-        f"{diagnostics_hint}"
+        f"{diagnostics_hint}{missingness_hint}"
     )
 
 

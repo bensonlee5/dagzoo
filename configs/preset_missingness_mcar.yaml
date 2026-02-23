@@ -1,0 +1,18 @@
+seed: 13
+
+dataset:
+  task: classification
+  missing_rate: 0.2
+  missing_mechanism: mcar
+
+runtime:
+  device: auto
+
+output:
+  out_dir: data/run_missingness_mcar
+
+diagnostics:
+  enabled: false
+
+steering:
+  enabled: false

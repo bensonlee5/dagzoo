@@ -280,6 +280,111 @@ def test_generate_cli_enables_diagnostics_flag(
     assert captured["diagnostics_enabled"] is True
 
 
+def test_generate_cli_applies_missingness_overrides_no_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _stub_generate_batch_iter(
+        config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        captured["missing_rate"] = config.dataset.missing_rate
+        captured["missing_mechanism"] = config.dataset.missing_mechanism
+        captured["missing_mar_observed_fraction"] = config.dataset.missing_mar_observed_fraction
+        captured["missing_mar_logit_scale"] = config.dataset.missing_mar_logit_scale
+        captured["missing_mnar_logit_scale"] = config.dataset.missing_mnar_logit_scale
+        _ = seed
+        _ = device
+        for _ in range(num_datasets):
+            yield object()
+
+    monkeypatch.setattr("cauchy_generator.cli.generate_batch_iter", _stub_generate_batch_iter)
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            "configs/default.yaml",
+            "--num-datasets",
+            "1",
+            "--device",
+            "cpu",
+            "--missing-rate",
+            "0.3",
+            "--missing-mechanism",
+            "mar",
+            "--missing-mar-observed-fraction",
+            "0.7",
+            "--missing-mar-logit-scale",
+            "1.8",
+            "--missing-mnar-logit-scale",
+            "2.2",
+            "--no-hardware-aware",
+            "--no-write",
+        ]
+    )
+    assert code == 0
+    assert captured["missing_rate"] == pytest.approx(0.3)
+    assert captured["missing_mechanism"] == "mar"
+    assert captured["missing_mar_observed_fraction"] == pytest.approx(0.7)
+    assert captured["missing_mar_logit_scale"] == pytest.approx(1.8)
+    assert captured["missing_mnar_logit_scale"] == pytest.approx(2.2)
+
+
+def test_generate_cli_rejects_invalid_missingness_combination() -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                "configs/default.yaml",
+                "--num-datasets",
+                "1",
+                "--device",
+                "cpu",
+                "--missing-rate",
+                "0.2",
+                "--missing-mechanism",
+                "none",
+                "--no-hardware-aware",
+                "--no-write",
+            ]
+        )
+    assert int(exc.value.code) == 2
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("--missing-rate", "1.1"),
+        ("--missing-rate", "-0.1"),
+        ("--missing-mar-observed-fraction", "0"),
+        ("--missing-mar-observed-fraction", "1.1"),
+        ("--missing-mar-logit-scale", "0"),
+        ("--missing-mnar-logit-scale", "-1"),
+    ],
+)
+def test_generate_cli_rejects_invalid_missingness_scalar(flag: str, value: str) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                "configs/default.yaml",
+                "--num-datasets",
+                "1",
+                flag,
+                value,
+                "--no-write",
+            ]
+        )
+    assert int(exc.value.code) == 2
+
+
 def test_generate_cli_applies_meta_target_override_and_enables_steering(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -403,3 +508,40 @@ def test_generate_cli_rejects_unknown_config_target_key_when_steering_enabled(
             ]
         )
     assert int(exc.value.code) == 2
+
+
+def test_generate_cli_missingness_no_write_end_to_end(tmp_path) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.device = "cpu"
+    cfg.dataset.task = "classification"
+    cfg.dataset.n_train = 32
+    cfg.dataset.n_test = 8
+    cfg.dataset.n_features_min = 8
+    cfg.dataset.n_features_max = 8
+    cfg.graph.n_nodes_min = 2
+    cfg.graph.n_nodes_max = 4
+    cfg.output.out_dir = str(tmp_path / "run")
+    cfg.diagnostics.enabled = False
+    config_path = tmp_path / "missingness_e2e.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            str(config_path),
+            "--num-datasets",
+            "1",
+            "--device",
+            "cpu",
+            "--missing-rate",
+            "0.2",
+            "--missing-mechanism",
+            "mnar",
+            "--missing-mnar-logit-scale",
+            "1.5",
+            "--no-hardware-aware",
+            "--no-write",
+        ]
+    )
+    assert code == 0

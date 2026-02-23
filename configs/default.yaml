@@ -11,6 +11,11 @@ dataset:
   categorical_ratio_min: -0.5
   categorical_ratio_max: 1.2
   max_categorical_cardinality: 9
+  missing_rate: 0.0
+  missing_mechanism: none
+  missing_mar_observed_fraction: 0.5
+  missing_mar_logit_scale: 1.0
+  missing_mnar_logit_scale: 1.0
 graph:
   n_nodes_min: 2
   n_nodes_max: 32

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cauchy-generator"
-version = "0.1.10"
+version = "0.1.11"
 description = "High-performance synthetic tabular data generator"
 readme = "README.md"
 license = "MIT"
