@@ -158,6 +158,7 @@ def test_generate_cli_coverage_tolerates_null_quantiles_and_targets(
     cfg.diagnostics.enabled = True
     cfg.diagnostics.quantiles = None  # type: ignore[assignment]
     cfg.diagnostics.meta_feature_targets = None  # type: ignore[assignment]
+    cfg.diagnostics.max_values_per_metric = None
     config_path = tmp_path / "null_diagnostics.yaml"
     config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
 

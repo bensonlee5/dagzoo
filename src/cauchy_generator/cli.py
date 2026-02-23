@@ -438,6 +438,7 @@ def _run_generate(args: argparse.Namespace) -> int:
                 histogram_bins=int(config.diagnostics.histogram_bins),
                 quantiles=_coerce_quantiles(config.diagnostics.quantiles),
                 underrepresented_threshold=float(config.diagnostics.underrepresented_threshold),
+                max_values_per_metric=config.diagnostics.max_values_per_metric,
                 target_bands=_target_specs_to_bands(resolved_target_specs),
             )
         )

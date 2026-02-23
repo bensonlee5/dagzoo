@@ -92,6 +92,8 @@ def test_coverage_artifact_schema_required_keys(tmp_path) -> None:
         "observed_max",
         "mean",
         "std",
+        "sampled_count",
+        "sampled_fraction",
         "quantiles",
         "histogram",
         "underrepresented_bins",
@@ -102,6 +104,24 @@ def test_coverage_artifact_schema_required_keys(tmp_path) -> None:
     assert {"num_bins", "covered_bins", "coverage_ratio", "bins"}.issubset(
         set(line_metric["histogram"])
     )
+
+
+def test_coverage_aggregation_bounds_sample_memory() -> None:
+    agg = CoverageAggregator(
+        CoverageAggregationConfig(
+            histogram_bins=4,
+            max_values_per_metric=3,
+        )
+    )
+    for idx in range(40):
+        agg.update_metrics(_metric_fixture(linearity_proxy=float(idx) / 40.0))
+
+    summary = agg.build_summary()
+    line = summary["metrics"]["linearity_proxy"]
+    assert line["count"] == 40
+    assert line["sampled_count"] == 3
+    assert line["sampled_fraction"] == pytest.approx(3 / 40)
+    assert summary["max_values_per_metric"] == 3
 
 
 def test_underrepresented_regime_detection_against_target_band() -> None:

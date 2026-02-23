@@ -84,6 +84,7 @@ class DiagnosticsConfig:
     histogram_bins: int = 10
     quantiles: list[float] = field(default_factory=lambda: [0.05, 0.25, 0.50, 0.75, 0.95])
     underrepresented_threshold: float = 0.5
+    max_values_per_metric: int | None = 50_000
     meta_feature_targets: dict[str, list[float] | tuple[float, float]] = field(default_factory=dict)
     out_dir: str | None = None
 

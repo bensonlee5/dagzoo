@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+import random
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from .metrics import extract_dataset_metrics
 from .types import DatasetMetrics
 
 _DEFAULT_QUANTILES = (0.05, 0.25, 0.5, 0.75, 0.95)
+_DEFAULT_MAX_VALUES_PER_METRIC = 50_000
 _NON_NUMERIC_FIELDS = frozenset({"task"})
 _METRIC_FIELD_NAMES = tuple(
     field_info.name
@@ -34,6 +36,7 @@ class CoverageAggregationConfig:
     histogram_bins: int = 10
     quantiles: tuple[float, ...] = _DEFAULT_QUANTILES
     underrepresented_threshold: float = 0.5
+    max_values_per_metric: int | None = _DEFAULT_MAX_VALUES_PER_METRIC
     target_bands: dict[str, tuple[float, float]] = field(default_factory=dict)
 
 
@@ -46,6 +49,13 @@ class _MetricAccumulator:
     min_value: float = math.inf
     max_value: float = -math.inf
     values: list[float] = field(default_factory=list)
+    sample_limit: int | None = None
+    rng_seed: int = 0
+    _seen_values: int = 0
+    _rng: random.Random = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._rng = random.Random(self.rng_seed)
 
     def update(self, value: float | int | None) -> None:
         if value is None:
@@ -60,7 +70,17 @@ class _MetricAccumulator:
         self.total_sq += as_float * as_float
         self.min_value = min(self.min_value, as_float)
         self.max_value = max(self.max_value, as_float)
-        self.values.append(as_float)
+        self._seen_values += 1
+        if self.sample_limit is None:
+            self.values.append(as_float)
+            return
+        if len(self.values) < self.sample_limit:
+            self.values.append(as_float)
+            return
+        # Deterministic reservoir sampling bounds memory while preserving an unbiased sample.
+        replace_idx = self._rng.randint(0, self._seen_values - 1)
+        if replace_idx < self.sample_limit:
+            self.values[replace_idx] = as_float
 
     def finalize(
         self,
@@ -78,6 +98,8 @@ class _MetricAccumulator:
                 "observed_max": None,
                 "mean": None,
                 "std": None,
+                "sampled_count": 0,
+                "sampled_fraction": 0.0,
                 "quantiles": {f"p{int(round(q * 100)):02d}": None for q in quantiles},
                 "histogram": {
                     "num_bins": int(histogram_bins),
@@ -93,6 +115,7 @@ class _MetricAccumulator:
         mean = float(self.total / self.count)
         variance = max(0.0, float((self.total_sq / self.count) - (mean * mean)))
         std = math.sqrt(variance)
+        sampled_count = int(values.size)
         quantile_map = {
             f"p{int(round(q * 100)):02d}": float(np.quantile(values, q)) for q in quantiles
         }
@@ -122,6 +145,8 @@ class _MetricAccumulator:
             "observed_max": float(self.max_value),
             "mean": mean,
             "std": float(std),
+            "sampled_count": sampled_count,
+            "sampled_fraction": float(sampled_count / self.count) if self.count > 0 else 0.0,
             "quantiles": quantile_map,
             "histogram": histogram,
             "underrepresented_bins": underrepresented_bins,
@@ -139,11 +164,18 @@ class CoverageAggregator:
             histogram_bins=max(1, int(cfg.histogram_bins)),
             quantiles=_normalize_quantiles(cfg.quantiles),
             underrepresented_threshold=max(0.0, float(cfg.underrepresented_threshold)),
+            max_values_per_metric=_normalize_max_values_per_metric(cfg.max_values_per_metric),
             target_bands=_normalize_target_bands(cfg.target_bands),
         )
         self._num_datasets = 0
         self._task_counts: dict[str, int] = {}
-        self._metrics = {name: _MetricAccumulator() for name in _METRIC_FIELD_NAMES}
+        self._metrics = {
+            name: _MetricAccumulator(
+                sample_limit=self._config.max_values_per_metric,
+                rng_seed=idx + 1,
+            )
+            for idx, name in enumerate(_METRIC_FIELD_NAMES)
+        }
 
     @property
     def num_datasets(self) -> int:
@@ -185,6 +217,7 @@ class CoverageAggregator:
             "task_counts": dict(sorted(self._task_counts.items())),
             "histogram_bins": int(self._config.histogram_bins),
             "quantiles": list(self._config.quantiles),
+            "max_values_per_metric": self._config.max_values_per_metric,
             "metrics": summary_metrics,
         }
 
@@ -212,6 +245,7 @@ def write_coverage_summary_markdown(summary: dict[str, Any], out_path: str | Pat
         f"- Num datasets: `{summary.get('num_datasets', 0)}`",
         f"- Histogram bins: `{summary.get('histogram_bins', 0)}`",
         f"- Quantiles: `{summary.get('quantiles', [])}`",
+        f"- Max sampled values/metric: `{summary.get('max_values_per_metric', '-')}`",
     ]
     task_counts = summary.get("task_counts", {})
     if isinstance(task_counts, dict) and task_counts:
@@ -254,6 +288,29 @@ def _normalize_quantiles(quantiles: tuple[float, ...] | list[float]) -> tuple[fl
     if not normalized:
         return _DEFAULT_QUANTILES
     return tuple(sorted(set(normalized)))
+
+
+def _normalize_max_values_per_metric(raw: object) -> int | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return _DEFAULT_MAX_VALUES_PER_METRIC
+    if isinstance(raw, int):
+        value = raw
+    elif isinstance(raw, float):
+        if not math.isfinite(raw):
+            return _DEFAULT_MAX_VALUES_PER_METRIC
+        value = int(raw)
+    elif isinstance(raw, str):
+        try:
+            value = int(raw)
+        except ValueError:
+            return _DEFAULT_MAX_VALUES_PER_METRIC
+    else:
+        return _DEFAULT_MAX_VALUES_PER_METRIC
+    if value <= 0:
+        return None
+    return value
 
 
 def _normalize_target_bands(

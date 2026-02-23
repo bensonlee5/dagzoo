@@ -281,6 +281,7 @@ def run_profile_benchmark(
                 histogram_bins=max(1, int(config.diagnostics.histogram_bins)),
                 quantiles=_coerce_quantiles(config.diagnostics.quantiles),
                 underrepresented_threshold=float(config.diagnostics.underrepresented_threshold),
+                max_values_per_metric=config.diagnostics.max_values_per_metric,
                 target_bands=_resolve_target_bands(config),
             )
         )

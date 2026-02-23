@@ -14,6 +14,9 @@ def test_load_default_config() -> None:
     assert cfg.diagnostics.histogram_bins > 0
     assert cfg.diagnostics.quantiles
     assert cfg.diagnostics.underrepresented_threshold >= 0
+    assert (
+        cfg.diagnostics.max_values_per_metric is None or cfg.diagnostics.max_values_per_metric > 0
+    )
     assert cfg.diagnostics.meta_feature_targets == {}
     assert cfg.diagnostics.out_dir is None
     assert cfg.steering.enabled is False
@@ -79,6 +82,7 @@ def test_runtime_config_from_dict() -> None:
             "diagnostics": {
                 "enabled": True,
                 "histogram_bins": 12,
+                "max_values_per_metric": 1234,
                 "meta_feature_targets": {
                     "linearity_proxy": [0.2, 0.8],
                 },
@@ -96,6 +100,7 @@ def test_runtime_config_from_dict() -> None:
     assert cfg.runtime.torch_dtype == "float64"
     assert cfg.diagnostics.enabled is True
     assert cfg.diagnostics.histogram_bins == 12
+    assert cfg.diagnostics.max_values_per_metric == 1234
     assert "linearity_proxy" in cfg.diagnostics.meta_feature_targets
     assert cfg.steering.enabled is True
     assert cfg.steering.max_attempts == 4
