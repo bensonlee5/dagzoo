@@ -7,7 +7,6 @@ from dataclasses import asdict, fields
 import math
 from typing import Any
 
-import numpy as np
 import torch
 
 from cauchy_generator.config import (
@@ -21,10 +20,10 @@ from cauchy_generator.core.node_pipeline import (
     ConverterSpec,
     apply_node_pipeline,
 )
+from cauchy_generator.core.steering_metrics import extract_steering_metrics
+from cauchy_generator.diagnostics.types import DatasetMetrics
 from cauchy_generator.filtering import apply_torch_rf_filter
 from cauchy_generator.graph import sample_cauchy_dag
-from cauchy_generator.diagnostics import extract_dataset_metrics
-from cauchy_generator.diagnostics.types import DatasetMetrics
 from cauchy_generator.postprocess import postprocess_dataset
 from cauchy_generator.rng import SeedManager
 from cauchy_generator.sampling import CorrelatedSampler
@@ -731,7 +730,10 @@ def _score_candidate_against_targets(
         under_coverage = max(0.0, 1.0 - in_band_fraction)
         effective_weight = float(base_weight) * (1.0 + under_coverage)
 
-        raw_value = getattr(metrics, metric_name, None)
+        if isinstance(metrics, dict):
+            raw_value = metrics.get(metric_name)
+        else:
+            raw_value = getattr(metrics, metric_name, None)
         value = float(raw_value) if isinstance(raw_value, (int, float)) else None
         if value is not None and not math.isfinite(value):
             value = None
@@ -762,18 +764,23 @@ def _select_softmax_candidate(
         raise ValueError("Cannot select steering candidate from an empty score set.")
     if len(scores) == 1:
         return 0, [1.0]
-    score_arr = np.asarray(scores, dtype=np.float64)
-    shifted = score_arr - float(np.min(score_arr))
+    score_arr = torch.tensor(scores, dtype=torch.float64, device="cpu")
+    shifted = score_arr - torch.min(score_arr)
     logits = -(shifted / float(temperature))
-    logits = logits - float(np.max(logits))
-    probs = np.exp(logits)
-    prob_sum = float(np.sum(probs))
+    logits = logits - torch.max(logits)
+    probs = torch.exp(logits)
+    prob_sum = float(torch.sum(probs).item())
     if not math.isfinite(prob_sum) or prob_sum <= 0:
-        probs = np.full(score_arr.shape[0], 1.0 / score_arr.shape[0], dtype=np.float64)
+        probs = torch.full(
+            (score_arr.shape[0],),
+            1.0 / score_arr.shape[0],
+            dtype=torch.float64,
+            device="cpu",
+        )
     else:
         probs = probs / prob_sum
-    selector_rng = SeedManager(seed).numpy_rng("steering", "select")
-    idx = int(selector_rng.choice(np.arange(score_arr.shape[0]), p=probs))
+    selector_rng = SeedManager(seed).torch_rng("steering", "select", device="cpu")
+    idx = int(torch.multinomial(probs, 1, generator=selector_rng).item())
     return idx, probs.tolist()
 
 
@@ -826,7 +833,11 @@ def _generate_one_steered(
                 resolved_device=resolved_device,
                 auto_stage=auto_stage,
             )
-            metrics = extract_dataset_metrics(bundle, include_spearman=include_spearman)
+            metrics = extract_steering_metrics(
+                bundle,
+                target_metric_names=set(target_specs),
+                include_spearman=include_spearman,
+            )
         except Exception as exc:
             last_error = f"{exc.__class__.__name__}: {exc}"
             continue

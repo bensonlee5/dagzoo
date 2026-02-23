@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Target resolution now merges legacy `diagnostics.meta_feature_targets` with top-level targets (top-level precedence)
 - Benchmark markdown reports now surface diagnostics state and artifact pointers per profile
 - Script/README benchmark workflow examples now include diagnostics and conservative steering presets
+- Steering candidate scoring now uses a torch-native metric path and torch softmax selection to avoid full tensor CPU/NumPy round trips on accelerator runs
 
 ### Fixed
 
