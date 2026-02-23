@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Benchmark markdown reports now surface diagnostics state and artifact pointers per profile
 - Script/README benchmark workflow examples now include diagnostics and conservative steering presets
 
+### Fixed
+
+- Correlated beta sampling no longer reseeds process-wide Torch RNG state; draws now use a local seed-derived generator for reproducibility isolation
+
 ## [0.1.5] - 2025-02-22
 
 ### Added

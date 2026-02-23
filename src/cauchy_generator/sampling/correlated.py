@@ -48,19 +48,19 @@ class CorrelatedSampler:
     def _sample_beta(self, alpha: float, beta: float) -> float:
         """Sample a scalar from Beta(alpha, beta) using generator-derived seed."""
 
-        # torch.distributions.Beta.sample() uses the global RNG internally.
-        # Derive a deterministic seed from our generator, temporarily set the
-        # global RNG, sample, then restore so the global state is unaffected.
+        # Keep beta draws deterministic without touching process-wide RNG state.
+        # We derive one seed from the run generator and sample with a local
+        # CPU generator, so this method consumes one parent RNG draw per call.
         seed = int(
             torch.empty(1, dtype=torch.int64, device=self._device)
             .random_(generator=self._generator)
             .item()
         )
-        saved = torch.random.get_rng_state()
-        torch.manual_seed(seed & 0x7FFFFFFF)
-        u = float(torch.distributions.Beta(alpha, beta).sample().item())
-        torch.random.set_rng_state(saved)
-        return u
+        local_generator = torch.Generator(device="cpu")
+        local_generator.manual_seed(seed & 0x7FFFFFFF)
+        concentration = torch.tensor([alpha, beta], dtype=torch.float64, device="cpu")
+        probs = torch._sample_dirichlet(concentration, generator=local_generator)
+        return float(probs[0].item())
 
     def sample_num(
         self,

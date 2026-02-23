@@ -1,5 +1,7 @@
 """Tests for sampling/correlated.py — Appendix E.2."""
 
+import torch
+
 from cauchy_generator.sampling.correlated import CorrelatedSampler
 from conftest import make_generator as _make_generator
 
@@ -38,6 +40,17 @@ def test_sample_num_deterministic() -> None:
         for _ in range(10):
             vals.append(cs.sample_num("d", 0.0, 1.0))
     assert vals_a == vals_b
+
+
+def test_sample_num_does_not_reseed_global_rng(monkeypatch) -> None:
+    g = _make_generator(0)
+    cs = CorrelatedSampler(g, "cpu")
+
+    def _manual_seed_forbidden(seed: int) -> torch.Generator:
+        raise AssertionError(f"unexpected global reseed: {seed}")
+
+    monkeypatch.setattr(torch, "manual_seed", _manual_seed_forbidden)
+    _ = cs.sample_num("d", 0.0, 1.0)
 
 
 def test_sample_category_deterministic() -> None:
