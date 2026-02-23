@@ -58,6 +58,16 @@ uv sync --group dev
 uv run cauchy-gen generate --config configs/default.yaml --num-datasets 10 --out data/run1
 ```
 
+```bash
+# Enable diagnostics artifacts and opt-in meta-feature steering
+uv run cauchy-gen generate \
+  --config configs/default.yaml \
+  --num-datasets 50 \
+  --diagnostics \
+  --steer-meta \
+  --meta-target linearity_proxy=0.25:0.75:1.5
+```
+
 ### Benchmarking Performance
 
 ```bash

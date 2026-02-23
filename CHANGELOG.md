@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in soft meta-feature steering with bounded deterministic candidate selection
+- New generation CLI controls: `--diagnostics`, `--steer-meta`, and repeatable `--meta-target key=min:max[:weight]`
+- Steering metadata payload propagation on generated bundles when steering is enabled
+
+### Changed
+
+- Added top-level `GeneratorConfig.meta_feature_targets` and `SteeringConfig` with disabled-by-default safe defaults
+- Target resolution now merges legacy `diagnostics.meta_feature_targets` with top-level targets (top-level precedence)
+
 ## [0.1.5] - 2025-02-22
 
 ### Added

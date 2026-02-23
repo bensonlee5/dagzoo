@@ -236,3 +236,169 @@ def test_generate_cli_no_write_allows_null_output_dir_when_coverage_disabled(
         ]
     )
     assert code == 0
+
+
+def test_generate_cli_enables_diagnostics_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _stub_generate_batch_iter(
+        config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        captured["diagnostics_enabled"] = config.diagnostics.enabled
+        _ = seed
+        _ = device
+        for _ in range(num_datasets):
+            yield object()
+
+    monkeypatch.setattr("cauchy_generator.cli.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr(
+        "cauchy_generator.cli.CoverageAggregator.update_bundle",
+        lambda self, _bundle: None,
+    )
+    code = main(
+        [
+            "generate",
+            "--config",
+            "configs/default.yaml",
+            "--num-datasets",
+            "1",
+            "--device",
+            "cpu",
+            "--diagnostics",
+            "--no-hardware-aware",
+            "--no-write",
+        ]
+    )
+    assert code == 0
+    assert captured["diagnostics_enabled"] is True
+
+
+def test_generate_cli_applies_meta_target_override_and_enables_steering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _stub_generate_batch_iter(
+        config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        captured["steering_enabled"] = config.steering.enabled
+        captured["meta_feature_targets"] = config.meta_feature_targets
+        _ = seed
+        _ = device
+        for _ in range(num_datasets):
+            yield object()
+
+    monkeypatch.setattr("cauchy_generator.cli.generate_batch_iter", _stub_generate_batch_iter)
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            "configs/default.yaml",
+            "--num-datasets",
+            "1",
+            "--device",
+            "cpu",
+            "--meta-target",
+            "linearity_proxy=0.2:0.8:2.5",
+            "--no-hardware-aware",
+            "--no-write",
+        ]
+    )
+    assert code == 0
+    assert captured["steering_enabled"] is True
+    assert captured["meta_feature_targets"]["linearity_proxy"] == [0.2, 0.8, 2.5]
+
+
+@pytest.mark.parametrize(
+    "meta_target",
+    [
+        "linearity_proxy",
+        "linearity_proxy=0.2",
+        "linearity_proxy=low:0.8",
+        "linearity_proxy=0.2:0.8:0",
+        "linearity_proxy=0.2:0.8:-1",
+        "linearity_proxy=0.2:0.8:inf",
+        "unknown_metric=0.1:0.9",
+    ],
+)
+def test_generate_cli_rejects_invalid_meta_target_override(meta_target: str) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                "configs/default.yaml",
+                "--num-datasets",
+                "1",
+                "--meta-target",
+                meta_target,
+                "--no-write",
+            ]
+        )
+    assert int(exc.value.code) == 2
+
+
+def test_generate_cli_rejects_task_incompatible_meta_target(
+    tmp_path,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.dataset.task = "regression"
+    config_path = tmp_path / "regression.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                str(config_path),
+                "--num-datasets",
+                "1",
+                "--meta-target",
+                "class_entropy=0.2:1.0",
+                "--no-write",
+            ]
+        )
+    assert int(exc.value.code) == 2
+
+
+def test_generate_cli_rejects_unknown_config_target_key_when_steering_enabled(
+    tmp_path,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.dataset.task = "regression"
+    cfg.runtime.device = "cpu"
+    cfg.steering.enabled = True
+    cfg.meta_feature_targets = {
+        "linearity_proxy": [0.2, 0.8, 1.0],
+        "linarity_proxy": [0.2, 0.8, 1.0],
+    }
+    config_path = tmp_path / "unknown_target.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                str(config_path),
+                "--num-datasets",
+                "1",
+                "--device",
+                "cpu",
+                "--no-hardware-aware",
+                "--no-write",
+            ]
+        )
+    assert int(exc.value.code) == 2
