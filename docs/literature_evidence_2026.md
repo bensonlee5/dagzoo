@@ -27,7 +27,7 @@ Conventions:
 | Drift-Resilient TabPFN (2411.10634) https://arxiv.org/abs/2411.10634                          | Shift-aware constructions help drift robustness                                                     | RD-004                 | Next             | medium-high |
 | Foundation Models for Causal Inference via PFNs (2506.10914) https://arxiv.org/abs/2506.10914 | Broader SCM/noise families and interventions support causal fidelity                                | RD-002, RD-004, RD-007 | Later, Next, Now | medium-high |
 | TabPFGen (2406.05216) https://arxiv.org/abs/2406.05216                                        | Hard-regime synthetic generation can improve robustness behavior                                    | RD-005                 | Next             | medium      |
-| Scaling TabPFN (2311.10609) https://arxiv.org/abs/2311.10609                                  | Scaling regimes require broader size/diversity coverage and throughput-conscious design             | RD-009, RD-006         | Next, Now        | medium-high |
+| Scaling TabPFN (2311.10609) https://arxiv.org/abs/2311.10609                                  | Scaling regimes require broader size/diversity coverage and throughput-conscious design             | RD-009, RD-010, RD-006 | Next, Now        | medium-high |
 | TabDPT (2410.18164) https://arxiv.org/abs/2410.18164                                          | Broader synthetic diversity and scale can improve pretraining realism                               | RD-006, RD-007         | Now              | medium      |
 | Robust tabular FM direction (2512.03307) https://arxiv.org/abs/2512.03307                     | Robustness-oriented training benefits from systematic stress regimes                                | RD-005                 | Next             | medium      |
 
@@ -48,6 +48,7 @@ Conventions:
 ### RD-003: Missingness Generation (MCAR/MAR/MNAR)
 
 - Strongest sources: TabPFN v2 (Nature) and A Closer Look.
+- Implementation status (as of 2026-02-24): implemented in repo via epics/issues `#17` and `#18`.
 - Confidence: high.
 
 ### RD-004: Shift-Aware SCM Generation
@@ -80,6 +81,12 @@ Conventions:
 
 - Evidence type: scaling/throughput requirement for pretraining data factories.
 - Strongest source: Scaling TabPFN.
+- Confidence: medium.
+
+### RD-010: Hardware-Adaptive Autotuning Beyond Coarse FLOPs Tiers
+
+- Evidence type: throughput scaling requirement plus engineering observability for hardware heterogeneity.
+- Strongest source: Scaling TabPFN (`2311.10609`) with implementation-driven constraints from current coarse-tier behavior.
 - Confidence: medium.
 
 ## Evidence Limits and Assumptions

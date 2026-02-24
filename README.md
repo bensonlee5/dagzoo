@@ -23,7 +23,7 @@ ______________________________________________________________________
 Unlike traditional synthetic generators that rely on independent feature sampling, `cauchy-generator` builds datasets through **Cauchy DAG-based execution**.
 
 - **Hierarchical Dependencies:** Features are generated as nodes in a graph, where child values are non-linear functional transforms of their parents.
-- **Deep Mechanism Families:** Functional relationships incorporate Neural Networks, Tree ensembles, GPs, and parametric activations, ensuring complex multi-order interactions.
+- **Deep Mechanism Families:** Functional relationships incorporate Neural Networks, Tree ensembles, and parametric activations, ensuring complex multi-order interactions.
 
 ### 2. Tabular Realism
 
@@ -129,7 +129,7 @@ ______________________________________________________________________
 
 The development of `cauchy-generator` is strictly driven by recent literature in Tabular Deep Learning.
 
-- **Meta-Feature Diagnostics:** A diagnostics module computes 15 structural metrics per dataset and aggregates coverage across generation runs. Soft steering is available to bias selection toward under-represented target bands.
+- **Meta-Feature Diagnostics:** A diagnostics module computes 19 structural metrics per dataset and aggregates coverage across generation runs. Soft steering is available to bias selection toward under-represented target bands.
 - **Missingness Generation:** Configurable MAR/MCAR/MNAR mechanisms with CLI overrides and benchmark guardrails.
 - **Shift-Aware SCMs:** Expanding the graph pipeline to support distribution shift and temporal drift.
 

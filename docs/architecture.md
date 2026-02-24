@@ -24,6 +24,7 @@ flowchart TB
         GenCfg["GeneratorConfig.from_yaml()"]
         GenHW["detect_hardware() + apply_hardware_profile()"]
         GenIter["generate_batch_iter()"]
+        MissingInject["inject_missingness() + metadata<br/>(when configured)"]
         DiagWrap{"diagnostics enabled?"}
         DiagAgg["CoverageAggregator.update_bundle()"]
         WriteCheck{"--no-write?"}
@@ -31,7 +32,7 @@ flowchart TB
         InMem["In-memory generation only"]
         DiagArtifacts["coverage_summary.json / coverage_summary.md"]
 
-        GenCfg --> GenHW --> GenIter --> DiagWrap
+        GenCfg --> GenHW --> GenIter --> MissingInject --> DiagWrap
         DiagWrap -- yes --> DiagAgg --> WriteCheck
         DiagWrap -- no --> WriteCheck
         WriteCheck -- no --> Parquet
@@ -45,9 +46,10 @@ flowchart TB
         Specs["resolve_profile_run_specs()"]
         Suite["run_benchmark_suite()<br/>per-profile detect_hardware() + apply_hardware_profile()"]
         Baseline["load_baseline() / build_baseline_payload()"]
+        MissingGuard["missingness_guardrails<br/>(acceptance + runtime control check)"]
         Report["write_suite_json() / write_suite_markdown()"]
 
-        BenchCfg --> Specs --> Suite --> Report
+        BenchCfg --> Specs --> Suite --> MissingGuard --> Report
         Baseline --> Suite
     end
 
@@ -66,8 +68,9 @@ flowchart TB
 ### Context
 
 - `generate` streams bundles; writing and diagnostics are stream consumers, not separate generation passes.
+- Missingness injection is applied inside generation (postprocess boundary) when configured, and emitted in bundle metadata.
 - `--no-write` keeps generation in memory while still allowing diagnostics artifact output when enabled.
-- `benchmark` runs generation repeatedly through profile specs and can optionally emit diagnostics per profile.
+- `benchmark` runs generation repeatedly through profile specs, can emit diagnostics per profile, and records missingness guardrail outcomes when missingness is enabled.
 - `hardware` does not load `GeneratorConfig`.
 
 ## 2. Generation Pipeline Control Flow
@@ -115,12 +118,13 @@ flowchart TB
         Shuffle["Shuffle rows via randperm"]
         Split["Train/test split"]
         Post["postprocess_dataset()<br/>torch-native clipping/standardization/permutation"]
+        Missing["inject_missingness()<br/>MCAR/MAR/MNAR (optional)"]
         Validate{"classification split valid?"}
         Bundle["DatasetBundle<br/>(X_train, y_train, X_test, y_test, feature_types, metadata)"]
 
         GraphGen --> Filter
         Filter -- rejected --> Retry --> GraphGen
-        Filter -- accepted --> Shuffle --> Split --> Post --> Validate
+        Filter -- accepted --> Shuffle --> Split --> Post --> Missing --> Validate
         Validate -- invalid --> Retry
         Validate -- valid --> Bundle
     end
@@ -136,6 +140,7 @@ flowchart TB
 - Steering runs a bounded candidate loop per dataset, then selects one candidate probabilistically using deterministic seeded RNG.
 - The main generation path is torch-native. The NumPy diagnostics extractor is not used for steering decisions.
 - Retry behavior is inside `_generate_torch()` and applies to both steered and non-steered generation.
+- Missingness injection happens after postprocess and before final bundle emission, with deterministic seed lineage.
 
 ## 3. DAG Node Data Flow
 
@@ -227,7 +232,20 @@ flowchart TB
         Summary --> OutMD
     end
 
+    subgraph MissingnessGuardrails["Missingness Guardrails (benchmark mode)"]
+        direction TB
+        MGEnabled{"missingness enabled?"}
+        MGCollect["Collect bundle.metadata['missingness']<br/>coverage + realized-rate checks"]
+        MGBaseline["Run missingness-off control throughput"]
+        MGStatus["Emit missingness_guardrails<br/>status/issues in profile summary"]
+        MGDisabled["Emit missingness_guardrails<br/>enabled=false"]
+
+        MGEnabled -- yes --> MGCollect --> MGBaseline --> MGStatus
+        MGEnabled -- no --> MGDisabled
+    end
+
     Winner --> Stream
+    Stream --> MGEnabled
 
     subgraph StateFlow["Run-Level State"]
         direction LR
@@ -241,3 +259,4 @@ flowchart TB
 - Steering metrics are a targeted subset optimized for selection-time performance.
 - Diagnostics metrics are broader and reporting-focused; they currently remain NumPy-based.
 - Steering and diagnostics can be enabled independently, though they are often used together.
+- Missingness guardrails are benchmark-only and activate when missingness is enabled in the resolved profile config.
