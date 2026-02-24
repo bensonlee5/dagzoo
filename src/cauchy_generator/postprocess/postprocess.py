@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, overload
 
 import torch
 
@@ -17,14 +17,15 @@ from cauchy_generator.sampling import sample_missingness_mask
 
 def _remove_constant_columns(
     x: torch.Tensor, feature_types: list[str]
-) -> tuple[torch.Tensor, list[str]]:
+) -> tuple[torch.Tensor, list[str], list[int]]:
     """Drop columns with near-zero variance and align feature type metadata."""
 
     keep = torch.std(x, dim=0, correction=0) > 1e-12
     if not torch.any(keep):
         raise ValueError("All columns are constant after generation.")
-    kept_types = [t for t, k in zip(feature_types, keep.tolist(), strict=True) if k]
-    return x[:, keep], kept_types
+    keep_indices = [int(i) for i, keep_col in enumerate(keep.tolist()) if keep_col]
+    kept_types = [feature_types[i] for i in keep_indices]
+    return x[:, keep], kept_types, keep_indices
 
 
 def _clip_and_standardize(x: torch.Tensor, feature_types: list[str]) -> torch.Tensor:
@@ -55,6 +56,7 @@ def _permute_classes(y: torch.Tensor, generator: torch.Generator, device: str) -
     return remapped
 
 
+@overload
 def postprocess_dataset(
     x_train: torch.Tensor,
     y_train: torch.Tensor,
@@ -64,7 +66,41 @@ def postprocess_dataset(
     task: str,
     generator: torch.Generator,
     device: str,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+    *,
+    return_feature_index_map: Literal[False] = False,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[str]]: ...
+
+
+@overload
+def postprocess_dataset(
+    x_train: torch.Tensor,
+    y_train: torch.Tensor,
+    x_test: torch.Tensor,
+    y_test: torch.Tensor,
+    feature_types: list[str],
+    task: str,
+    generator: torch.Generator,
+    device: str,
+    *,
+    return_feature_index_map: Literal[True],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[str], list[int]]: ...
+
+
+def postprocess_dataset(
+    x_train: torch.Tensor,
+    y_train: torch.Tensor,
+    x_test: torch.Tensor,
+    y_test: torch.Tensor,
+    feature_types: list[str],
+    task: str,
+    generator: torch.Generator,
+    device: str,
+    *,
+    return_feature_index_map: bool = False,
+) -> (
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[str]]
+    | tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[str], list[int]]
+):
     """
     Apply E.13-style postprocessing to train/test splits.
 
@@ -75,12 +111,14 @@ def postprocess_dataset(
     """
 
     x_all = torch.cat([x_train, x_test], dim=0).to(torch.float32)
-    x_all, feature_types = _remove_constant_columns(x_all, feature_types)
+    x_all, feature_types, feature_index_map = _remove_constant_columns(x_all, feature_types)
     x_all = _clip_and_standardize(x_all, feature_types)
 
     perm = torch.randperm(x_all.shape[1], generator=generator, device=device)
+    perm_list = [int(i) for i in perm.tolist()]
     x_all = x_all[:, perm]
-    feature_types = [feature_types[int(i)] for i in perm.tolist()]
+    feature_types = [feature_types[i] for i in perm_list]
+    feature_index_map = [feature_index_map[i] for i in perm_list]
 
     n_train = x_train.shape[0]
     x_train_p = x_all[:n_train]
@@ -94,6 +132,15 @@ def postprocess_dataset(
         mu = float(torch.mean(y_all))
         sd = float(torch.std(y_all, correction=0))
         y_all = (y_all - mu) / max(sd, 1e-6)
+        if return_feature_index_map:
+            return (
+                x_train_p,
+                y_all[:n_train],
+                x_test_p,
+                y_all[n_train:],
+                feature_types,
+                feature_index_map,
+            )
         return x_train_p, y_all[:n_train], x_test_p, y_all[n_train:], feature_types
 
     y_all = torch.cat([y_train, y_test], dim=0).to(torch.int64)
@@ -106,6 +153,8 @@ def postprocess_dataset(
         y_train_p = y_train.to(torch.int64)
         y_test_p = y_test.to(torch.int64)
 
+    if return_feature_index_map:
+        return x_train_p, y_train_p, x_test_p, y_test_p, feature_types, feature_index_map
     return x_train_p, y_train_p, x_test_p, y_test_p, feature_types
 
 

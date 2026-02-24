@@ -287,7 +287,11 @@ def _sample_layout(
     }
 
 
-def _build_lineage_metadata(layout: dict[str, Any]) -> dict[str, Any]:
+def _build_lineage_metadata(
+    layout: dict[str, Any],
+    *,
+    feature_index_map: list[int],
+) -> dict[str, Any]:
     """Build a validated DAG lineage payload from sampled layout internals."""
 
     n_nodes = int(layout["graph_nodes"])
@@ -298,7 +302,10 @@ def _build_lineage_metadata(layout: dict[str, Any]) -> dict[str, Any]:
         adjacency_rows = torch.as_tensor(raw_adjacency, dtype=torch.int64, device="cpu").tolist()
     adjacency = [[int(value) for value in row] for row in adjacency_rows]
 
-    feature_to_node = [int(node_index) for node_index in list(layout["feature_node_assignment"])]
+    raw_feature_to_node = [
+        int(node_index) for node_index in list(layout["feature_node_assignment"])
+    ]
+    feature_to_node = [raw_feature_to_node[int(src_col)] for src_col in feature_index_map]
     target_to_node = int(layout["target_node_assignment"])
 
     payload = {
@@ -475,7 +482,7 @@ def _generate_torch(
         x_train_t, x_test_t = x[:n_train], x[n_train:]
         y_train_t, y_test_t = y[:n_train], y[n_train:]
 
-        x_train, y_train, x_test, y_test, feature_types = postprocess_dataset(
+        x_train, y_train, x_test, y_test, feature_types, feature_index_map = postprocess_dataset(
             x_train_t,
             y_train_t,
             x_test_t,
@@ -484,6 +491,7 @@ def _generate_torch(
             config.dataset.task,
             generator,
             device,
+            return_feature_index_map=True,
         )
         x_train, x_test, missingness_summary = inject_missingness(
             x_train,
@@ -517,7 +525,7 @@ def _generate_torch(
             ),
             "graph_nodes": int(layout["graph_nodes"]),
             "graph_edges": int(layout["graph_edges"]),
-            "lineage": _build_lineage_metadata(layout),
+            "lineage": _build_lineage_metadata(layout, feature_index_map=feature_index_map),
             "seed": seed,
             "attempt_used": attempt,
             "filter": aux_meta.get("filter", {}),

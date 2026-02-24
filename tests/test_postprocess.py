@@ -84,6 +84,31 @@ def test_deterministic() -> None:
     torch.testing.assert_close(out1[1], out2[1])
 
 
+def test_feature_index_map_tracks_dropped_and_permuted_columns() -> None:
+    g = _make_generator(10)
+    xt, yt, xte, yte, _, task = _make_data(g, n_feat=5, add_constant_col=True)
+    feature_types = ["num", "cat", "num", "cat", "num"]
+    xtp, _, xtep, _, ft_out, feature_index_map = postprocess_dataset(
+        xt,
+        yt,
+        xte,
+        yte,
+        feature_types,
+        task,
+        _make_generator(11),
+        "cpu",
+        return_feature_index_map=True,
+    )
+
+    assert xtp.shape[1] == xtep.shape[1]
+    assert len(feature_index_map) == xtp.shape[1]
+    assert len(feature_index_map) == len(ft_out)
+    assert len(set(feature_index_map)) == len(feature_index_map)
+    assert all(0 <= int(i) < len(feature_types) for i in feature_index_map)
+    assert 4 not in feature_index_map
+    assert [feature_types[i] for i in feature_index_map] == ft_out
+
+
 def test_inject_missingness_disabled_noop() -> None:
     g = _make_generator(5)
     x_train = torch.randn(16, 4, generator=g)

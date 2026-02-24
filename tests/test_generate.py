@@ -104,6 +104,78 @@ def test_generate_batch_reproducible_lineage_for_fixed_seed() -> None:
         assert bundle_a.metadata["lineage"] == bundle_b.metadata["lineage"]
 
 
+def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "regression"
+    cfg.filter.enabled = False
+
+    layout = {
+        "feature_types": ["num", "cat", "num", "cat"],
+        "graph_nodes": 3,
+        "graph_edges": 2,
+        "adjacency": torch.tensor(
+            [
+                [0, 1, 1],
+                [0, 0, 0],
+                [0, 0, 0],
+            ],
+            dtype=torch.bool,
+        ),
+        "feature_node_assignment": [0, 1, 2, 1],
+        "target_node_assignment": 2,
+    }
+
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset._sample_layout",
+        lambda *_args, **_kwargs: layout,
+    )
+
+    def _stub_generate_graph_dataset_torch(_config, _layout, _seed, _device, *, n_rows):
+        x = torch.arange(n_rows * 4, dtype=torch.float32).reshape(n_rows, 4)
+        y = torch.linspace(0.0, 1.0, n_rows, dtype=torch.float32)
+        return x, y, {"filter": {"enabled": False}}
+
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset._generate_graph_dataset_torch",
+        _stub_generate_graph_dataset_torch,
+    )
+
+    def _stub_postprocess_dataset(
+        x_train,
+        y_train,
+        x_test,
+        y_test,
+        feature_types,
+        _task,
+        _generator,
+        _device,
+        *,
+        return_feature_index_map=False,
+    ):
+        assert return_feature_index_map is True
+        index_map = [2, 0, 3]
+        reordered_types = [feature_types[i] for i in index_map]
+        return (
+            x_train[:, index_map],
+            y_train,
+            x_test[:, index_map],
+            y_test,
+            reordered_types,
+            index_map,
+        )
+
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset.postprocess_dataset",
+        _stub_postprocess_dataset,
+    )
+
+    bundle = generate_one(cfg, seed=777, device="cpu")
+    assert int(bundle.metadata["n_features"]) == 3
+    assert bundle.metadata["lineage"]["assignments"]["feature_to_node"] == [2, 0, 1]
+
+
 def test_generate_batch_iter_matches_batch_ordering() -> None:
     cfg = _tiny_config()
     batch = generate_batch(cfg, num_datasets=2, seed=321, device="cpu")
