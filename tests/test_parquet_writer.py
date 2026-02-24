@@ -3,7 +3,16 @@ import json
 import numpy as np
 import pytest
 
-from cauchy_generator.io.lineage_schema import LINEAGE_SCHEMA_NAME, LINEAGE_SCHEMA_VERSION
+from cauchy_generator.io.lineage_artifact import (
+    resolve_lineage_path,
+    unpack_upper_triangle_adjacency,
+)
+from cauchy_generator.io.lineage_schema import (
+    LINEAGE_ADJACENCY_ENCODING,
+    LINEAGE_SCHEMA_NAME,
+    LINEAGE_SCHEMA_VERSION,
+    LINEAGE_SCHEMA_VERSION_COMPACT,
+)
 from cauchy_generator.io.parquet_writer import write_parquet_shards, write_parquet_shards_stream
 from cauchy_generator.io.parquet_writer import _sanitize_json
 from cauchy_generator.types import DatasetBundle
@@ -108,5 +117,39 @@ def test_write_parquet_shards_stream_writes_lineage_metadata(tmp_path, monkeypat
     )
     lineage = metadata["lineage"]
     assert lineage["schema_name"] == LINEAGE_SCHEMA_NAME
-    assert lineage["schema_version"] == LINEAGE_SCHEMA_VERSION
-    assert lineage["graph"]["adjacency"] == [[0, 1], [0, 0]]
+    assert lineage["schema_version"] == LINEAGE_SCHEMA_VERSION_COMPACT
+    graph = lineage["graph"]
+    assert graph["n_nodes"] == 2
+    assert graph["edge_count"] == 1
+    adjacency_ref = graph["adjacency_ref"]
+    assert adjacency_ref["encoding"] == LINEAGE_ADJACENCY_ENCODING
+    assert adjacency_ref["dataset_index"] == 0
+    assert adjacency_ref["bit_offset"] == 0
+    assert adjacency_ref["bit_length"] == 1
+    assert isinstance(adjacency_ref["sha256"], str)
+    assert len(adjacency_ref["sha256"]) == 64
+
+    dataset_dir = tmp_path / "shard_00000" / "dataset_000000"
+    blob_path = resolve_lineage_path(dataset_dir, adjacency_ref["blob_path"])
+    index_path = resolve_lineage_path(dataset_dir, adjacency_ref["index_path"])
+    assert blob_path.exists()
+    assert index_path.exists()
+
+    byte_offset = int(adjacency_ref["bit_offset"]) // 8
+    byte_length = (int(adjacency_ref["bit_length"]) + 7) // 8
+    with blob_path.open("rb") as f:
+        f.seek(byte_offset)
+        payload = f.read(byte_length)
+    dense = unpack_upper_triangle_adjacency(
+        payload,
+        n_nodes=int(graph["n_nodes"]),
+        bit_length=int(adjacency_ref["bit_length"]),
+    )
+    assert dense.tolist() == [[0, 1], [0, 0]]
+
+    index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index_payload["schema_name"] == LINEAGE_SCHEMA_NAME
+    assert index_payload["schema_version"] == LINEAGE_SCHEMA_VERSION_COMPACT
+    assert index_payload["encoding"] == LINEAGE_ADJACENCY_ENCODING
+    assert isinstance(index_payload["records"], list)
+    assert index_payload["records"][0]["dataset_index"] == 0
