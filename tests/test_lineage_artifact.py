@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from cauchy_generator.io.lineage_artifact import (
@@ -38,6 +39,19 @@ def test_pack_upper_triangle_rejects_lower_triangle_edges() -> None:
         [0, 0, 0],
     ]
     with pytest.raises(ValueError, match="upper triangular"):
+        pack_upper_triangle_adjacency(adjacency)
+
+
+def test_pack_upper_triangle_rejects_non_integral_values() -> None:
+    adjacency = np.array(
+        [
+            [0.0, 0.9, 0.0],
+            [0.0, 0.0, 1.2],
+            [0.0, 0.0, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    with pytest.raises(ValueError, match="entries must be 0 or 1"):
         pack_upper_triangle_adjacency(adjacency)
 
 

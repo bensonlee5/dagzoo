@@ -21,15 +21,17 @@ def pack_upper_triangle_adjacency(
 ) -> tuple[int, int, bytes]:
     """Pack an upper-triangular binary adjacency matrix using little-endian bit order."""
 
-    matrix = np.asarray(adjacency, dtype=np.int8)
-    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+    matrix_raw = np.asarray(adjacency)
+    if matrix_raw.ndim != 2 or matrix_raw.shape[0] != matrix_raw.shape[1]:
         raise ValueError("adjacency must be a square matrix")
-    n_nodes = int(matrix.shape[0])
+    n_nodes = int(matrix_raw.shape[0])
     if n_nodes < 2:
         raise ValueError(f"adjacency must have n_nodes >= 2, got {n_nodes}.")
 
-    if np.any((matrix != 0) & (matrix != 1)):
+    if np.any((matrix_raw != 0) & (matrix_raw != 1)):
         raise ValueError("adjacency entries must be 0 or 1")
+
+    matrix = matrix_raw.astype(np.uint8, copy=False)
     if np.any(np.diag(matrix) != 0):
         raise ValueError("adjacency diagonal must be all zeros")
     if np.any(np.tril(matrix, k=-1) != 0):
