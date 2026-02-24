@@ -20,24 +20,24 @@ Related docs:
 
 ## Current Scope vs README Mission Claims
 
-| Mission/Pillar Claim from README                                | Current Scope                                                                                                | Status  | Roadmap Follow-up      |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------- | ---------------------- |
-| Foundation model pretraining with diverse priors                | Implemented baseline generation, diagnostics extraction, soft steering, coverage aggregation, and benchmarks | partial | RD-003, RD-006, RD-007 |
-| Causal discovery with ground-truth DAGs and interventions       | DAG sampling exists in pipeline internals; interventional generation does not                                | partial | RD-001, RD-002         |
-| Robustness testing with hard tasks, shifts, adversarial regimes | Basic filtering and diagnostics proxies exist; dedicated robustness modes do not                             | planned | RD-003, RD-004, RD-005 |
-| Complexity curriculum across features/nodes/samples             | Current curriculum stages rows/split regime only                                                             | partial | RD-006                 |
-| Hardware-native performance with parallel streaming             | Torch + hardware-aware tuning implemented; streaming writes are sequential                                   | partial | RD-009                 |
+| Mission/Pillar Claim from README                                | Current Scope                                                                                                                             | Status  | Roadmap Follow-up |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------- | ----------------- |
+| Foundation model pretraining with diverse priors                | Implemented baseline generation, diagnostics extraction, soft steering, configurable missingness, coverage aggregation, and benchmarks    | partial | RD-006, RD-007    |
+| Causal discovery with ground-truth DAGs and interventions       | DAG sampling exists in pipeline internals; interventional generation does not                                                             | partial | RD-001, RD-002    |
+| Robustness testing with hard tasks, shifts, adversarial regimes | Basic filtering and diagnostics proxies exist; missingness mechanisms and benchmark guardrails are implemented; shift/stress modes remain | partial | RD-004, RD-005    |
+| Complexity curriculum across features/nodes/samples             | Current curriculum stages rows/split regime only                                                                                          | partial | RD-006            |
+| Hardware-native performance with parallel streaming             | Torch + hardware-aware tuning implemented with coarse profile-tier overrides; streaming writes are sequential                             | partial | RD-009, RD-010    |
 
 ## Known Missing Capabilities (Roadmap-Tracked)
 
 - RD-001: export full ground-truth DAG and assignment lineage as stable artifacts.
 - RD-002: add interventional and counterfactual generation tracks.
-- RD-003: add configurable missingness mechanisms (MCAR/MAR/MNAR).
 - RD-004: add shift-aware SCM generation controls.
 - RD-005: add robustness stress profiles for hard-task/adversarial regimes.
 - RD-006: extend curriculum to feature and graph complexity.
 - RD-007: expand many-class and high-cardinality support.
 - RD-009: add parallel/distributed generation and shard writing.
+- RD-010: add bounded hardware-adaptive autotuning beyond coarse FLOPs-tier overrides.
 
 ## Public Interfaces
 
@@ -46,10 +46,17 @@ Related docs:
 - `generate_one(config: GeneratorConfig, seed: int, device: str) -> DatasetBundle`
 - `generate_batch(config: GeneratorConfig, num_datasets: int, seed: int, device: str) -> list[DatasetBundle]`
 - `write_parquet_shards(bundles, out_dir, shard_size, compression="zstd")`
+- `DatasetConfig` missingness controls:
+  - `missing_rate`
+  - `missing_mechanism` (`none|mcar|mar|mnar`)
+  - `missing_mar_observed_fraction`
+  - `missing_mar_logit_scale`
+  - `missing_mnar_logit_scale`
 
 ### CLI
 
 - `cauchy-gen generate --config ... --num-datasets ... --device cuda --seed ...`
+- `cauchy-gen generate --missing-rate ... --missing-mechanism ... --missing-mar-observed-fraction ... --missing-mar-logit-scale ... --missing-mnar-logit-scale ...`
 - `cauchy-gen benchmark --suite standard --profile all --baseline ... --fail-on-regression`
 
 ### Output Contract
@@ -58,11 +65,11 @@ Each `DatasetBundle` contains:
 
 - `X_train`, `y_train`, `X_test`, `y_test`
 - `feature_types` (`"num"` or `"cat"`)
-- metadata (seed lineage, graph stats, function selections, filter decision)
+- metadata (seed lineage, graph stats, function selections, filter decision, missingness summary when enabled)
 
 Persist generated outputs as Parquet shards with a sidecar metadata JSON per shard.
 
-Current metadata includes summary graph stats and config lineage. Full DAG artifact export is tracked under RD-001.
+Current metadata includes summary graph stats, config lineage, and optional `missingness` payload fields (configured/realized rates and per-split counts). Full DAG artifact export is tracked under RD-001.
 
 ## Runtime Profiles
 
@@ -71,7 +78,10 @@ Current metadata includes summary graph stats and config lineage. Full DAG artif
 - `configs/benchmark_cuda_desktop.yaml`: desktop CUDA benchmark profile.
 - `configs/benchmark_cuda_h100.yaml`: H100 CUDA benchmark profile.
 - `configs/preset_cuda_h100.yaml`: high-throughput datacenter preset.
-- Runtime can auto-tune from a GPU FLOPS lookup table with unknown-device fallback behavior.
+- `configs/preset_missingness_mcar.yaml`: MCAR missingness preset.
+- `configs/preset_missingness_mar.yaml`: MAR missingness preset.
+- `configs/preset_missingness_mnar.yaml`: MNAR missingness preset.
+- Runtime currently applies coarse profile-tier overrides from GPU FLOPS lookup + fallback behavior; adaptive autotuning is tracked in RD-010.
 
 ## Module Plan (Appendix Mapping)
 
@@ -95,6 +105,8 @@ Current metadata includes summary graph stats and config lineage. Full DAG artif
 1. Keep kernels batch-oriented with vectorized torch operations and avoid Python loops in inner math paths.
 1. Use optional filtering (`E.14`) behind config flags to avoid CPU bottlenecks in throughput benchmarks.
 1. Profile with `bench/throughput.py` and track JSON baseline regressions by preset.
+1. Missingness-enabled benchmark runs include acceptance/runtime guardrails against missingness-off controls.
+1. Next hardware-aware step is bounded adaptive autotuning with explicit telemetry/guardrails (RD-010).
 1. Next roadmap step for throughput is controlled multi-worker execution (RD-009) while preserving seeded behavior.
 
 ## Reproducibility Strategy
@@ -108,6 +120,7 @@ Current metadata includes summary graph stats and config lineage. Full DAG artif
 ### Correctness
 
 - Unit invariants for ranges, shapes, DAG validity, converter class ranges, and matrix normalization.
+- Unit/integration coverage for missingness mask invariants, deterministic behavior, and end-to-end metadata emission.
 - Integration tests for end-to-end classification/regression paths.
 
 ### Reproducibility
@@ -127,4 +140,4 @@ Current metadata includes summary graph stats and config lineage. Full DAG artif
 1. Implement `E.8`-`E.10` with GPU-first tensor kernels.
 1. Implement `E.11`-`E.14`, parquet writing, and integration tests.
 1. Add benchmark harness, tune bottlenecks, and lock baseline.
-1. Extend mission coverage through roadmap items RD-001..RD-009 in `docs/roadmap.md`.
+1. Extend mission coverage through roadmap items RD-001..RD-010 in `docs/roadmap.md`.

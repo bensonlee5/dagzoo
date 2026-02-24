@@ -23,35 +23,50 @@ Observed from current code/config surface:
 
 - Diagnostics extraction and coverage aggregation exist; soft steering is implemented.
 - Class support defaults remain narrow (`n_classes_max=10`) and categorical cardinality defaults are conservative.
-- Missingness mechanisms are not configurable.
+- Missingness mechanisms are configurable (MCAR/MAR/MNAR) with deterministic sampling, CLI overrides, and benchmark guardrails.
 - Shift-aware SCM and interventional/counterfactual generation are not implemented.
 - Curriculum stages scale row counts and split regime only.
+- Hardware-aware scaling is profile-tier based and coarse; no bounded adaptive autotuning loop exists yet.
 - Streaming Parquet writing is sequential, not multi-worker.
 
 ## Recently Implemented
 
+- RD-003: Missingness generation (MCAR/MAR/MNAR), completed in epics/issues `#17` and `#18`:
+  - typed config schema and strict validation
+  - deterministic missingness mask samplers
+  - end-to-end injection into generation/postprocess with metadata summaries
+  - benchmark missingness acceptance/runtime guardrails
 - RD-008: Meta-feature coverage steering (soft candidate selection with configurable target bands).
 
 ## Prioritized Queue
 
-| Rank | Roadmap ID | Item                                             | Status   | Milestone | Mission Alignment                    | Expected Impact | Effort      | Risk        | Key Repo Touchpoints                                                                                                                    |
-| ---- | ---------- | ------------------------------------------------ | -------- | --------- | ------------------------------------ | --------------- | ----------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | RD-003     | Missingness generation (MCAR/MAR/MNAR)           | planned  | Now       | pretraining, robustness testing      | High            | Low-Medium  | Low         | `src/cauchy_generator/postprocess/postprocess.py`, `src/cauchy_generator/config.py`, `src/cauchy_generator/diagnostics/metrics.py`      |
-| 2    | RD-007     | Many-class and high-cardinality expansion        | planned  | Now       | pretraining                          | High            | Low-Medium  | Medium      | `src/cauchy_generator/config.py`, `src/cauchy_generator/converters/categorical.py`, `src/cauchy_generator/filtering/torch_rf_filter.py` |
-| 3    | RD-006     | Curriculum complexity scaling (features + graph) | planned  | Now       | pretraining                          | Medium-High     | Medium      | Medium      | `src/cauchy_generator/config.py`, `src/cauchy_generator/core/dataset.py`                                                                |
-| 4    | RD-001     | Ground-truth DAG artifact export                 | planned  | Now       | causal discovery                     | Medium-High     | Medium      | Low-Medium  | `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/types.py`                    |
-| 5    | RD-004     | Shift-aware SCM generation                       | planned  | Next      | robustness testing, causal discovery | Medium-High     | High        | Medium-High | `src/cauchy_generator/sampling/random_weights.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/config.py`             |
-| 6    | RD-005     | Robustness hard-task/adversarial profiles        | research | Next      | robustness testing                   | Medium          | Medium-High | High        | `src/cauchy_generator/functions/`, `src/cauchy_generator/postprocess/`, `src/cauchy_generator/bench/`                                   |
-| 7    | RD-009     | Parallel/distributed generation                  | research | Next      | pretraining throughput               | Low-Medium      | High        | Medium      | `src/cauchy_generator/core/`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/cli.py`                                |
-| 8    | RD-002     | Interventional and counterfactual generation     | research | Later     | causal discovery                     | Medium          | High        | High        | `src/cauchy_generator/core/node_pipeline.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/config.py`                  |
+| Rank          | Roadmap ID | Item                                             | Status      | Milestone | Mission Alignment                    | Expected Impact | Effort      | Risk        | Key Repo Touchpoints                                                                                                                                                                                               |
+| ------------- | ---------- | ------------------------------------------------ | ----------- | --------- | ------------------------------------ | --------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0 (completed) | RD-003     | Missingness generation (MCAR/MAR/MNAR)           | implemented | Now       | pretraining, robustness testing      | High            | Low-Medium  | Low         | `src/cauchy_generator/config.py`, `src/cauchy_generator/sampling/missingness.py`, `src/cauchy_generator/postprocess/postprocess.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/bench/suite.py` |
+| 1             | RD-007     | Many-class and high-cardinality expansion        | planned     | Now       | pretraining                          | High            | Low-Medium  | Medium      | `src/cauchy_generator/config.py`, `src/cauchy_generator/converters/categorical.py`, `src/cauchy_generator/filtering/torch_rf_filter.py`                                                                            |
+| 2             | RD-006     | Curriculum complexity scaling (features + graph) | planned     | Now       | pretraining                          | Medium-High     | Medium      | Medium      | `src/cauchy_generator/config.py`, `src/cauchy_generator/core/dataset.py`                                                                                                                                           |
+| 3             | RD-001     | Ground-truth DAG artifact export                 | planned     | Now       | causal discovery                     | Medium-High     | Medium      | Low-Medium  | `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/types.py`                                                                                               |
+| 4             | RD-004     | Shift-aware SCM generation                       | planned     | Next      | robustness testing, causal discovery | Medium-High     | High        | Medium-High | `src/cauchy_generator/sampling/random_weights.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/config.py`                                                                                        |
+| 5             | RD-010     | Hardware-adaptive autotuning beyond coarse tiers | planned     | Next      | pretraining throughput               | Medium          | Medium      | Medium      | `src/cauchy_generator/hardware.py`, `src/cauchy_generator/config.py`, `src/cauchy_generator/cli.py`, `src/cauchy_generator/bench/suite.py`, `src/cauchy_generator/bench/report.py`                                 |
+| 6             | RD-005     | Robustness hard-task/adversarial profiles        | research    | Next      | robustness testing                   | Medium          | Medium-High | High        | `src/cauchy_generator/functions/`, `src/cauchy_generator/postprocess/`, `src/cauchy_generator/bench/`                                                                                                              |
+| 7             | RD-009     | Parallel/distributed generation                  | research    | Next      | pretraining throughput               | Low-Medium      | High        | Medium      | `src/cauchy_generator/core/`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/cli.py`                                                                                                           |
+| 8             | RD-002     | Interventional and counterfactual generation     | research    | Later     | causal discovery                     | Medium          | High        | High        | `src/cauchy_generator/core/node_pipeline.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/config.py`                                                                                             |
 
-## Candidate Interface Additions (Planning-Only)
+## Interface Additions (Implemented + Planning)
 
-No interface changes are implemented in this phase. Candidate future additions by roadmap item:
+Implemented interface additions:
 
-- RD-003:
+- RD-003 (implemented via `#17`/`#18`):
   - `DatasetConfig.missing_rate: float`
-  - `DatasetConfig.missing_mechanism: Literal["off", "mcar", "mar", "mnar"]`
+  - `DatasetConfig.missing_mechanism: Literal["none", "mcar", "mar", "mnar"]`
+  - `DatasetConfig.missing_mar_observed_fraction: float`
+  - `DatasetConfig.missing_mar_logit_scale: float`
+  - `DatasetConfig.missing_mnar_logit_scale: float`
+  - `cauchy-gen generate` missingness CLI overrides
+  - benchmark output `missingness_guardrails`
+
+Candidate future additions by roadmap item:
+
 - RD-004:
   - `GeneratorConfig.shift_profile: str | dict[str, float]`
 - RD-006:
@@ -62,6 +77,11 @@ No interface changes are implemented in this phase. Candidate future additions b
   - `GeneratorConfig.intervention_mode: Literal["off", "do", "counterfactual"]`
 - RD-009:
   - `GeneratorConfig.num_workers: int`
+- RD-010:
+  - `RuntimeConfig.autotune_mode: Literal["off", "profile", "adaptive"]`
+  - `RuntimeConfig.autotune_max_trials: int`
+  - `RuntimeConfig.autotune_time_budget_sec: float`
+  - benchmark summary `autotune` telemetry fields
 
 ## Acceptance Scenarios (Execution Contract)
 
@@ -70,7 +90,7 @@ No interface changes are implemented in this phase. Candidate future additions b
 1. RD-002 intervention/counterfactual consistency:
    intervention mode preserves causal truncation behavior under fixed intervention sets.
 1. RD-003 missingness mechanisms:
-   MCAR/MAR/MNAR targets match expected missing-rate and dependency behavior.
+   implemented in epics/issues `#17` and `#18`; MCAR/MAR/MNAR targets match expected missing-rate and dependency behavior with benchmark guardrails.
 1. RD-004 shift-aware behavior:
    enabled shift profile produces measurable drift; disabled profile matches baseline behavior.
 1. RD-005 stress profile validity:
@@ -81,6 +101,8 @@ No interface changes are implemented in this phase. Candidate future additions b
    high-class datasets generate without excessive filter rejection and preserve label validity.
 1. RD-009 parallel determinism:
    multi-worker mode reproduces single-worker outputs for fixed seeds within declared tolerance.
+1. RD-010 autotune uplift and safety:
+   adaptive mode improves throughput versus profile baseline on supported hardware without violating memory/runtime guardrails.
 
 ## Citations
 

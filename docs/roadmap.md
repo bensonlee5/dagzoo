@@ -24,16 +24,16 @@ Related docs:
 
 ## Current Capability Matrix
 
-| README Mission/Pillar Claim                                         | Current State | Evidence in Repo                                                                                                               | Gap                                                                                               | Roadmap IDs                    |
-| ------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------ |
-| Foundation model pretraining with diverse structural priors         | `partial`     | DAG-based generation, mixed-type conversion, diagnostics extraction/coverage aggregation, soft steering, throughput benchmarks | Missingness/shift/hard-task regimes are not implemented end-to-end                                | RD-003, RD-004, RD-005, RD-007 |
-| Causal discovery with ground-truth DAGs and interventional datasets | `partial`     | DAG is sampled during generation                                                                                               | Full adjacency is not exported as first-class artifact; no intervention/counterfactual generation | RD-001, RD-002                 |
-| Robustness testing with hard tasks, shifts, adversarial regimes     | `planned`     | Basic filtering and diagnostics proxies exist                                                                                  | No explicit robustness profiles, missingness mechanisms, or drift controls                        | RD-003, RD-004, RD-005         |
-| Causal structural integrity (hierarchical dependencies)             | `implemented` | Graph-driven node pipeline and multi-family function composition                                                               | Deeper mechanism controls are not user-configurable                                               | RD-007                         |
-| Tabular realism (mixed type + postprocess hooks)                    | `partial`     | Numeric/categorical converters and E.13 postprocessing are implemented                                                         | High-cardinality/many-class limits and missingness controls are not exposed                       | RD-003, RD-006                 |
-| Complexity curriculum scales features/nodes/samples                 | `partial`     | Curriculum mode stages row/split regime                                                                                        | Curriculum does not yet stage feature count or graph complexity                                   | RD-006                         |
-| Hardware-native performance (Torch + hardware-aware tuning)         | `implemented` | Torch CPU/CUDA/MPS path, hardware detection, profile-based tuning, benchmark suite                                             | Parallel/distributed generation is not implemented                                                | RD-009                         |
-| Parallel streaming Parquet sharding                                 | `partial`     | Streaming Parquet writing exists                                                                                               | Writing is currently single-process sequential                                                    | RD-009                         |
+| README Mission/Pillar Claim                                         | Current State | Evidence in Repo                                                                                                                                         | Gap                                                                                                 | Roadmap IDs            |
+| ------------------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------- |
+| Foundation model pretraining with diverse structural priors         | `partial`     | DAG-based generation, mixed-type conversion, diagnostics extraction/coverage aggregation, soft steering, configurable missingness, throughput benchmarks | Shift/hard-task regimes and many-class expansion are not implemented end-to-end                     | RD-004, RD-005, RD-007 |
+| Causal discovery with ground-truth DAGs and interventional datasets | `partial`     | DAG is sampled during generation                                                                                                                         | Full adjacency is not exported as first-class artifact; no intervention/counterfactual generation   | RD-001, RD-002         |
+| Robustness testing with hard tasks, shifts, adversarial regimes     | `partial`     | Basic filtering and diagnostics proxies exist; missingness mechanisms are implemented with deterministic controls and benchmark guardrails               | No explicit robustness profiles or shift/drift controls                                             | RD-004, RD-005         |
+| Causal structural integrity (hierarchical dependencies)             | `implemented` | Graph-driven node pipeline and multi-family function composition                                                                                         | Deeper mechanism controls are not user-configurable                                                 | RD-007                 |
+| Tabular realism (mixed type + postprocess hooks)                    | `partial`     | Numeric/categorical converters, E.13 postprocessing, and configurable missingness mechanisms are implemented                                             | High-cardinality/many-class limits remain conservative                                              | RD-006, RD-007         |
+| Complexity curriculum scales features/nodes/samples                 | `partial`     | Curriculum mode stages row/split regime                                                                                                                  | Curriculum does not yet stage feature count or graph complexity                                     | RD-006                 |
+| Hardware-native performance (Torch + hardware-aware tuning)         | `partial`     | Torch CPU/CUDA/MPS path, hardware detection, coarse profile-based tuning, and benchmark suite                                                            | Hardware-adaptive autotuning is not implemented; parallel/distributed generation is not implemented | RD-010, RD-009         |
+| Parallel streaming Parquet sharding                                 | `partial`     | Streaming Parquet writing exists                                                                                                                         | Writing is currently single-process sequential                                                      | RD-009                 |
 
 ## Roadmap Items
 
@@ -65,16 +65,21 @@ Related docs:
 
 ### RD-003: Missingness Generation (MCAR/MAR/MNAR)
 
-- Status: `planned`
-- Milestone: `Now`
+- Status: `implemented`
+- Milestone: `Now` (completed via epics/issues `#17` and `#18`)
 - Mission alignment: foundation model pretraining, robustness testing
 - Pillar alignment: tabular realism
-- Goal: add configurable missing-data mechanisms with deterministic seeded behavior.
-- Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/postprocess/postprocess.py`, `src/cauchy_generator/diagnostics/metrics.py`
-- Exit criteria:
-  - Config supports opt-in mechanism selection and missing rate controls.
-  - Generated datasets match expected missing-rate and dependency patterns.
-  - Diagnostics reports include missingness summary metrics.
+- Goal: provide configurable missing-data mechanisms with deterministic seeded behavior and benchmark-time acceptance/runtime guardrails.
+- Delivered scope:
+  - `DatasetConfig` supports missingness controls (`missing_rate`, mechanism, MAR/MNAR scales).
+  - `cauchy-gen generate` supports missingness CLI overrides.
+  - Generation path injects deterministic MCAR/MAR/MNAR masks and emits per-bundle missingness metadata.
+  - Benchmark profiles emit `missingness_guardrails` including metadata coverage, realized-rate accuracy, and runtime degradation checks.
+- Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/sampling/missingness.py`, `src/cauchy_generator/postprocess/postprocess.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/cli.py`, `src/cauchy_generator/bench/suite.py`
+- Completion evidence:
+  - Config and CLI support opt-in mechanism selection and missing rate controls.
+  - Tests validate expected missing-rate and dependency behavior for MCAR/MAR/MNAR.
+  - Benchmark summaries include missingness guardrail metrics and status.
 
 ### RD-004: Shift-Aware SCM Generation
 
@@ -154,16 +159,30 @@ Related docs:
   - Multi-worker mode matches single-worker outputs for fixed seed equivalence checks.
   - Throughput improves on supported hardware without violating fail threshold regressions.
 
+### RD-010: Hardware-Adaptive Autotuning Beyond Coarse FLOPs Tiers
+
+- Status: `planned`
+- Milestone: `Next`
+- Mission alignment: foundation model pretraining
+- Pillar alignment: hardware-native performance
+- Goal: evolve hardware-aware scaling from static coarse profile tiers to bounded adaptive tuning based on observed throughput/memory behavior.
+- Repo touchpoints: `src/cauchy_generator/hardware.py`, `src/cauchy_generator/config.py`, `src/cauchy_generator/cli.py`, `src/cauchy_generator/bench/suite.py`, `src/cauchy_generator/bench/report.py`
+- Exit criteria:
+  - Adaptive mode improves throughput versus profile baseline on at least one CUDA hardware class without violating memory guardrails.
+  - Unknown CUDA devices can run adaptive tuning without relying only on static fallback tiers.
+  - Fixed seed + fixed hardware signature reproduces selected tuning settings within declared deterministic behavior.
+  - Opt-out mode preserves current profile-only behavior.
+
 ## Milestone Board
 
 ### Implemented
 
+- RD-003 missingness generation (MCAR/MAR/MNAR), completed via `#17` and `#18`
 - RD-008 meta-feature coverage steering
 
 ### Now
 
 - RD-001 ground-truth DAG artifact export
-- RD-003 missingness mechanisms
 - RD-006 curriculum complexity scaling
 - RD-007 many-class/high-cardinality expansion
 
@@ -172,6 +191,7 @@ Related docs:
 - RD-004 shift-aware SCM generation
 - RD-005 robustness stress profiles
 - RD-009 parallel/distributed generation
+- RD-010 hardware-adaptive autotuning
 
 ### Later
 
@@ -179,10 +199,11 @@ Related docs:
 
 ## Dependencies and Sequencing
 
-- RD-008 is implemented and now benefits from RD-003/RD-007 because expanded data regimes improve steering utility.
-- RD-005 depends on RD-003 and RD-004 for robust, controllable stress-profile construction.
+- RD-003 and RD-008 are implemented and provide a stronger baseline for remaining realism and robustness roadmap work.
+- RD-005 now primarily depends on RD-004 for shift/drift controls, and can build on existing RD-003 missingness infrastructure.
 - RD-002 depends on RD-001 for stable causal graph artifact lineage.
 - RD-009 should land after interface contracts for RD-001/RD-006 are stable to avoid repeated parallelism refactors.
+- RD-010 can build on the current detection/profile baseline while remaining opt-in and benchmark-guarded.
 
 ## Guardrails
 
