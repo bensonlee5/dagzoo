@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import Any, Iterable, Sequence, cast
+from typing import Any, BinaryIO, Iterable, Sequence, cast
 
 import numpy as np
 
@@ -74,6 +74,7 @@ class _ShardLineageState:
 
     blob_path: Path
     index_path: Path
+    blob_file: BinaryIO | None = None
     byte_offset: int = 0
     records: list[dict[str, Any]] = field(default_factory=list)
 
@@ -140,6 +141,31 @@ def _build_compact_lineage_payload(
     }
 
 
+def _ensure_shard_blob_open(state: _ShardLineageState) -> BinaryIO:
+    """Return an append-ready shard blob handle, opening it once per shard."""
+
+    blob_file = state.blob_file
+    if blob_file is not None and not blob_file.closed:
+        return blob_file
+
+    opened = state.blob_path.open("ab")
+    state.blob_file = opened
+    return opened
+
+
+def _close_shard_lineage_files(lineage_states: Mapping[int, _ShardLineageState]) -> None:
+    """Close open shard blob handles."""
+
+    for state in lineage_states.values():
+        blob_file = state.blob_file
+        if blob_file is None:
+            continue
+        try:
+            blob_file.close()
+        finally:
+            state.blob_file = None
+
+
 def _persist_lineage_artifact_for_dataset(
     metadata: dict[str, Any],
     *,
@@ -173,8 +199,8 @@ def _persist_lineage_artifact_for_dataset(
     bit_offset = state.byte_offset * 8
     state.byte_offset += len(packed)
 
-    with state.blob_path.open("ab") as blob_file:
-        blob_file.write(packed)
+    blob_file = _ensure_shard_blob_open(state)
+    blob_file.write(packed)
     checksum = sha256_hex(packed)
 
     blob_path = str(Path("..") / "lineage" / state.blob_path.name)
@@ -287,18 +313,21 @@ def write_parquet_shards_stream(
 
     lineage_states: dict[int, _ShardLineageState] = {}
     written = 0
-    for idx, bundle in enumerate(bundles):
-        _write_bundle_dataset(
-            bundle,
-            out_dir=out,
-            dataset_index=idx,
-            shard_size=shard_size,
-            compression=compression,
-            lineage_states=lineage_states,
-        )
-        written = idx + 1
-    _write_shard_lineage_indexes(lineage_states)
-    return written
+    try:
+        for idx, bundle in enumerate(bundles):
+            _write_bundle_dataset(
+                bundle,
+                out_dir=out,
+                dataset_index=idx,
+                shard_size=shard_size,
+                compression=compression,
+                lineage_states=lineage_states,
+            )
+            written = idx + 1
+        _write_shard_lineage_indexes(lineage_states)
+        return written
+    finally:
+        _close_shard_lineage_files(lineage_states)
 
 
 def write_parquet_shards(
@@ -315,16 +344,19 @@ def write_parquet_shards(
     lineage_states: dict[int, _ShardLineageState] = {}
     shard_paths: list[Path] = []
 
-    for idx, bundle in enumerate(bundles):
-        dataset_dir = _write_bundle_dataset(
-            bundle,
-            out_dir=out,
-            dataset_index=idx,
-            shard_size=shard_size,
-            compression=compression,
-            lineage_states=lineage_states,
-        )
-        shard_paths.append(dataset_dir)
+    try:
+        for idx, bundle in enumerate(bundles):
+            dataset_dir = _write_bundle_dataset(
+                bundle,
+                out_dir=out,
+                dataset_index=idx,
+                shard_size=shard_size,
+                compression=compression,
+                lineage_states=lineage_states,
+            )
+            shard_paths.append(dataset_dir)
 
-    _write_shard_lineage_indexes(lineage_states)
-    return shard_paths
+        _write_shard_lineage_indexes(lineage_states)
+        return shard_paths
+    finally:
+        _close_shard_lineage_files(lineage_states)

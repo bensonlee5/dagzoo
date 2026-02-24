@@ -1,12 +1,12 @@
+import io
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from cauchy_generator.io.lineage_artifact import (
-    resolve_lineage_path,
-    unpack_upper_triangle_adjacency,
-)
+from cauchy_generator.io import resolve_lineage_path
+from cauchy_generator.io.lineage_artifact import unpack_upper_triangle_adjacency
 from cauchy_generator.io.lineage_schema import (
     LINEAGE_ADJACENCY_ENCODING,
     LINEAGE_SCHEMA_NAME,
@@ -48,6 +48,28 @@ def _bundle(seed: int) -> DatasetBundle:
         feature_types=["num", "num"],
         metadata={"seed": seed, "peak_flops": float("inf")},
     )
+
+
+def _bundle_with_dense_lineage(seed: int) -> DatasetBundle:
+    bundle = _bundle(seed)
+    bundle.metadata["lineage"] = {
+        "schema_name": LINEAGE_SCHEMA_NAME,
+        "schema_version": LINEAGE_SCHEMA_VERSION,
+        "graph": {
+            "n_nodes": 2,
+            "adjacency": [[0, 1], [0, 0]],
+        },
+        "assignments": {
+            "feature_to_node": [0, 1],
+            "target_to_node": 1,
+        },
+    }
+    return bundle
+
+
+def test_io_exports_resolve_lineage_path(tmp_path) -> None:
+    resolved = resolve_lineage_path(tmp_path, "../lineage/adjacency.bitpack.bin")
+    assert resolved == tmp_path / "../lineage/adjacency.bitpack.bin"
 
 
 def test_write_parquet_shards_stream_writes_iterable(tmp_path, monkeypatch) -> None:
@@ -96,19 +118,7 @@ def test_write_parquet_shards_stream_writes_lineage_metadata(tmp_path, monkeypat
         path.write_text("ok", encoding="utf-8")
 
     monkeypatch.setattr("cauchy_generator.io.parquet_writer._write_split", _stub_write_split)
-    bundle = _bundle(7)
-    bundle.metadata["lineage"] = {
-        "schema_name": LINEAGE_SCHEMA_NAME,
-        "schema_version": LINEAGE_SCHEMA_VERSION,
-        "graph": {
-            "n_nodes": 2,
-            "adjacency": [[0, 1], [0, 0]],
-        },
-        "assignments": {
-            "feature_to_node": [0, 1],
-            "target_to_node": 1,
-        },
-    }
+    bundle = _bundle_with_dense_lineage(7)
 
     written = write_parquet_shards_stream([bundle], tmp_path, shard_size=1, compression="zstd")
     assert written == 1
@@ -153,3 +163,86 @@ def test_write_parquet_shards_stream_writes_lineage_metadata(tmp_path, monkeypat
     assert index_payload["encoding"] == LINEAGE_ADJACENCY_ENCODING
     assert isinstance(index_payload["records"], list)
     assert index_payload["records"][0]["dataset_index"] == 0
+
+
+def test_write_parquet_shards_stream_opens_lineage_blob_once_per_shard(
+    tmp_path, monkeypatch
+) -> None:
+    def _stub_write_split(path, _x, _y, _compression):
+        path.write_text("ok", encoding="utf-8")
+
+    monkeypatch.setattr("cauchy_generator.io.parquet_writer._write_split", _stub_write_split)
+
+    original_open = Path.open
+    counters = {"open": 0, "close": 0}
+
+    class _CountingBlob(io.BytesIO):
+        def close(self) -> None:
+            counters["close"] += 1
+            super().close()
+
+    open_blobs: dict[str, _CountingBlob] = {}
+
+    def _patched_open(self: Path, mode: str = "r", *args, **kwargs):
+        if self.name == "adjacency.bitpack.bin" and mode == "ab":
+            counters["open"] += 1
+            key = str(self)
+            blob = open_blobs.get(key)
+            if blob is None or blob.closed:
+                blob = _CountingBlob()
+                open_blobs[key] = blob
+            blob.seek(0, io.SEEK_END)
+            return blob
+        return original_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", _patched_open)
+
+    bundles = [_bundle_with_dense_lineage(1), _bundle_with_dense_lineage(2)]
+    written = write_parquet_shards_stream(bundles, tmp_path, shard_size=8, compression="zstd")
+
+    assert written == 2
+    assert counters["open"] == 1
+    assert counters["close"] == 1
+
+
+def test_write_parquet_shards_stream_closes_lineage_blob_on_failure(tmp_path, monkeypatch) -> None:
+    split_calls = {"count": 0}
+
+    def _failing_write_split(path, _x, _y, _compression):
+        split_calls["count"] += 1
+        if split_calls["count"] >= 3:
+            raise RuntimeError("forced split failure")
+        path.write_text("ok", encoding="utf-8")
+
+    monkeypatch.setattr("cauchy_generator.io.parquet_writer._write_split", _failing_write_split)
+
+    original_open = Path.open
+    counters = {"open": 0, "close": 0}
+
+    class _CountingBlob(io.BytesIO):
+        def close(self) -> None:
+            counters["close"] += 1
+            super().close()
+
+    open_blobs: dict[str, _CountingBlob] = {}
+
+    def _patched_open(self: Path, mode: str = "r", *args, **kwargs):
+        if self.name == "adjacency.bitpack.bin" and mode == "ab":
+            counters["open"] += 1
+            key = str(self)
+            blob = open_blobs.get(key)
+            if blob is None or blob.closed:
+                blob = _CountingBlob()
+                open_blobs[key] = blob
+            blob.seek(0, io.SEEK_END)
+            return blob
+        return original_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", _patched_open)
+
+    bundles = [_bundle_with_dense_lineage(1), _bundle_with_dense_lineage(2)]
+    with pytest.raises(RuntimeError, match="forced split failure"):
+        write_parquet_shards_stream(bundles, tmp_path, shard_size=8, compression="zstd")
+
+    assert counters["open"] == 1
+    assert counters["close"] == 1

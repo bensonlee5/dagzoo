@@ -2,6 +2,7 @@
 
 from .lineage_artifact import (
     pack_upper_triangle_adjacency,
+    resolve_lineage_path,
     sha256_hex,
     unpack_upper_triangle_adjacency,
     upper_triangle_bit_length,
@@ -26,6 +27,7 @@ __all__ = [
     "LINEAGE_SCHEMA_VERSION_DENSE",
     "LineageValidationError",
     "pack_upper_triangle_adjacency",
+    "resolve_lineage_path",
     "sha256_hex",
     "unpack_upper_triangle_adjacency",
     "upper_triangle_bit_length",
