@@ -6,7 +6,9 @@ from typing import Any
 import pytest
 
 from cauchy_generator.io.lineage_schema import (
+    LINEAGE_ADJACENCY_ENCODING,
     LINEAGE_SCHEMA_NAME,
+    LINEAGE_SCHEMA_VERSION_COMPACT,
     LINEAGE_SCHEMA_VERSION,
     LineageValidationError,
     validate_lineage_payload,
@@ -34,8 +36,36 @@ def _valid_lineage_payload() -> dict[str, Any]:
     }
 
 
+def _valid_compact_lineage_payload() -> dict[str, Any]:
+    return {
+        "schema_name": LINEAGE_SCHEMA_NAME,
+        "schema_version": LINEAGE_SCHEMA_VERSION_COMPACT,
+        "graph": {
+            "n_nodes": 4,
+            "edge_count": 4,
+            "adjacency_ref": {
+                "encoding": LINEAGE_ADJACENCY_ENCODING,
+                "blob_path": "../lineage/adjacency.bitpack.bin",
+                "index_path": "../lineage/adjacency.index.json",
+                "dataset_index": 0,
+                "bit_offset": 0,
+                "bit_length": 6,
+                "sha256": "0" * 64,
+            },
+        },
+        "assignments": {
+            "feature_to_node": [0, 1, 1, 2, 3],
+            "target_to_node": 2,
+        },
+    }
+
+
 def test_validate_lineage_payload_accepts_valid_payload() -> None:
     validate_lineage_payload(_valid_lineage_payload())
+
+
+def test_validate_lineage_payload_accepts_valid_compact_payload() -> None:
+    validate_lineage_payload(_valid_compact_lineage_payload())
 
 
 def test_validate_metadata_lineage_accepts_absent_payload_when_optional() -> None:
@@ -169,3 +199,35 @@ def test_validate_lineage_payload_rejects_target_assignment_out_of_range() -> No
 def test_validate_metadata_lineage_rejects_non_object_payload() -> None:
     with pytest.raises(LineageValidationError, match=r"metadata\.lineage: must be an object"):
         validate_metadata_lineage({"lineage": 42}, required=False)
+
+
+def test_validate_lineage_payload_rejects_unknown_compact_encoding() -> None:
+    payload = _valid_compact_lineage_payload()
+    graph = deepcopy(payload["graph"])
+    assert isinstance(graph, dict)
+    adjacency_ref = deepcopy(graph["adjacency_ref"])
+    assert isinstance(adjacency_ref, dict)
+    adjacency_ref["encoding"] = "other"
+    graph["adjacency_ref"] = adjacency_ref
+    payload["graph"] = graph
+    with pytest.raises(
+        LineageValidationError,
+        match=r"lineage\.graph\.adjacency_ref\.encoding: must equal 'upper_triangle_bitpack_v1'",
+    ):
+        validate_lineage_payload(payload)
+
+
+def test_validate_lineage_payload_rejects_compact_bit_length_mismatch() -> None:
+    payload = _valid_compact_lineage_payload()
+    graph = deepcopy(payload["graph"])
+    assert isinstance(graph, dict)
+    adjacency_ref = deepcopy(graph["adjacency_ref"])
+    assert isinstance(adjacency_ref, dict)
+    adjacency_ref["bit_length"] = 5
+    graph["adjacency_ref"] = adjacency_ref
+    payload["graph"] = graph
+    with pytest.raises(
+        LineageValidationError,
+        match=r"lineage\.graph\.adjacency_ref\.bit_length: must equal 6 for n_nodes=4",
+    ):
+        validate_lineage_payload(payload)

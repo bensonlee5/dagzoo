@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Root docs and script docs now include recommended missingness generation and benchmark commands
 - Roadmap/backlog/implementation docs now track RD-010 hardware-adaptive autotuning beyond coarse FLOPs-tier profile tuning
 - Successful dataset generation now emits versioned DAG lineage payloads (`metadata.lineage`) with adjacency/assignment metadata derived from seeded layout sampling
+- Parquet shard persistence now rewrites dense DAG lineage adjacency into shard-level bit-packed artifacts (`adjacency.bitpack.bin` + `adjacency.index.json`) and stores compact lineage pointers in per-dataset `metadata.json`
 
 ### Fixed
 
