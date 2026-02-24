@@ -137,10 +137,7 @@ def _validate_lineage_payload(payload: object, *, root_path: str) -> None:
             if row_idx == col_idx and value != 0:
                 _raise(value_path, "must be 0 on the diagonal")
             if row_idx > col_idx and value != 0:
-                _raise(
-                    value_path,
-                    "must be 0 in the lower triangle (DAG adjacency is upper-triangular)",
-                )
+                _raise(value_path, "must be 0 for upper-triangular DAG encoding")
 
     assignments_path = f"{root_path}.assignments"
     assignments = _as_mapping(lineage["assignments"], path=assignments_path)
