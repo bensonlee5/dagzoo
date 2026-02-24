@@ -30,6 +30,11 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["suite"] == "smoke"
     assert len(payload["profile_results"]) == 1
+    lineage_guardrails = payload["profile_results"][0]["lineage_guardrails"]
+    assert isinstance(lineage_guardrails, dict)
+    assert isinstance(lineage_guardrails["enabled"], bool)
+    if lineage_guardrails["enabled"]:
+        assert lineage_guardrails["status"] in {"pass", "warn", "fail"}
 
 
 def test_benchmark_cli_fail_on_regression(tmp_path) -> None:
@@ -215,3 +220,8 @@ def test_benchmark_cli_missingness_guardrails_are_emitted(tmp_path) -> None:
     guardrails = profile["missingness_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["status"] in {"pass", "warn", "fail"}
+    lineage_guardrails = profile["lineage_guardrails"]
+    assert isinstance(lineage_guardrails, dict)
+    assert isinstance(lineage_guardrails["enabled"], bool)
+    if lineage_guardrails["enabled"]:
+        assert lineage_guardrails["status"] in {"pass", "warn", "fail"}

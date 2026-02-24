@@ -98,6 +98,14 @@ def test_load_benchmark_profiles() -> None:
     assert "cpu" in cfg_h100.benchmark.profiles
 
 
+def test_load_lineage_benchmark_smoke_preset() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/preset_lineage_benchmark_smoke.yaml")
+    assert cfg.benchmark.suite == "smoke"
+    assert cfg.benchmark.profile_name == "lineage_smoke"
+    assert "lineage_smoke" in cfg.benchmark.profiles
+    assert cfg.benchmark.latency_num_samples >= 1
+
+
 def test_load_curriculum_preset() -> None:
     cfg = GeneratorConfig.from_yaml("configs/curriculum_tabiclv2.yaml")
     assert cfg.curriculum_stage == "auto"

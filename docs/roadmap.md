@@ -27,7 +27,7 @@ Related docs:
 | README Mission/Pillar Claim                                         | Current State | Evidence in Repo                                                                                                                                         | Gap                                                                                                 | Roadmap IDs            |
 | ------------------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------- |
 | Foundation model pretraining with diverse structural priors         | `partial`     | DAG-based generation, mixed-type conversion, diagnostics extraction/coverage aggregation, soft steering, configurable missingness, throughput benchmarks | Shift/hard-task regimes and many-class expansion are not implemented end-to-end                     | RD-004, RD-005, RD-007 |
-| Causal discovery with ground-truth DAGs and interventional datasets | `partial`     | DAG is sampled during generation                                                                                                                         | Full adjacency is not exported as first-class artifact; no intervention/counterfactual generation   | RD-001, RD-002         |
+| Causal discovery with ground-truth DAGs and interventional datasets | `partial`     | DAG lineage metadata is emitted per dataset and persisted as compact shard-level artifacts with schema validation and benchmark guardrails               | Interventional/counterfactual generation semantics are not implemented                              | RD-002                 |
 | Robustness testing with hard tasks, shifts, adversarial regimes     | `partial`     | Basic filtering and diagnostics proxies exist; missingness mechanisms are implemented with deterministic controls and benchmark guardrails               | No explicit robustness profiles or shift/drift controls                                             | RD-004, RD-005         |
 | Causal structural integrity (hierarchical dependencies)             | `implemented` | Graph-driven node pipeline and multi-family function composition                                                                                         | Deeper mechanism controls are not user-configurable                                                 | RD-007                 |
 | Tabular realism (mixed type + postprocess hooks)                    | `partial`     | Numeric/categorical converters, E.13 postprocessing, and configurable missingness mechanisms are implemented                                             | High-cardinality/many-class limits remain conservative                                              | RD-006, RD-007         |
@@ -39,16 +39,21 @@ Related docs:
 
 ### RD-001: Ground-Truth DAG Artifact Export
 
-- Status: `planned`
-- Milestone: `Now`
+- Status: `implemented`
+- Milestone: `Now` (completed via epics/issues `#44`, `#45`, `#46`, `#47`, `#48`)
 - Mission alignment: causal discovery
 - Pillar alignment: causal structural integrity
 - Goal: persist full adjacency matrix and node assignment lineage as stable dataset artifacts.
 - Repo touchpoints: `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/types.py`
-- Exit criteria:
-  - Every generated dataset includes adjacency and assignment metadata.
-  - Metadata schema is documented and covered by integration tests.
-  - Existing configs remain backward-compatible.
+- Delivered scope:
+  - Every generated dataset emits lineage metadata with adjacency + assignment lineage and deterministic seed behavior.
+  - Persisted shard outputs rewrite dense adjacency into compact bit-packed artifacts with per-shard index files.
+  - Validator enforces versioned dense/compact lineage schemas and compatibility rules.
+  - Benchmark profiles report `lineage_guardrails` for export-overhead checks using warn/fail thresholds.
+- Completion evidence:
+  - Docs and config presets include lineage workflow and benchmark examples.
+  - Integration tests cover classification and regression generation + artifact persistence.
+  - Existing config defaults remain backward-compatible.
 
 ### RD-002: Interventional and Counterfactual Generation Modes
 
@@ -177,12 +182,12 @@ Related docs:
 
 ### Implemented
 
+- RD-001 ground-truth DAG artifact export, completed via `#44`, `#45`, `#46`, `#47`, and `#48`
 - RD-003 missingness generation (MCAR/MAR/MNAR), completed via `#17` and `#18`
 - RD-008 meta-feature coverage steering
 
 ### Now
 
-- RD-001 ground-truth DAG artifact export
 - RD-006 curriculum complexity scaling
 - RD-007 many-class/high-cardinality expansion
 
@@ -201,7 +206,7 @@ Related docs:
 
 - RD-003 and RD-008 are implemented and provide a stronger baseline for remaining realism and robustness roadmap work.
 - RD-005 now primarily depends on RD-004 for shift/drift controls, and can build on existing RD-003 missingness infrastructure.
-- RD-002 depends on RD-001 for stable causal graph artifact lineage.
+- RD-002 builds on completed RD-001 lineage artifacts for intervention metadata extensions.
 - RD-009 should land after interface contracts for RD-001/RD-006 are stable to avoid repeated parallelism refactors.
 - RD-010 can build on the current detection/profile baseline while remaining opt-in and benchmark-guarded.
 

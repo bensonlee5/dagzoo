@@ -120,8 +120,19 @@ uv run cauchy-gen benchmark \
   --out-dir benchmarks/results/smoke_missing_mar
 ```
 
+```bash
+# Benchmark lineage artifact export overhead guardrails on a CPU smoke preset
+uv run cauchy-gen benchmark \
+  --config configs/preset_lineage_benchmark_smoke.yaml \
+  --profile custom \
+  --suite smoke \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_lineage_guardrails
+```
+
 When missingness is enabled, benchmark summaries include `missingness_guardrails` per profile,
-and guardrail warnings/failures are reflected in overall regression status.
+lineage export checks are reported under `lineage_guardrails`, and guardrail warnings/failures
+are reflected in overall regression status.
 
 ______________________________________________________________________
 

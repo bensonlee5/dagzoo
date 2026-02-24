@@ -7,7 +7,9 @@ import hashlib
 import math
 import re
 import resource
+import statistics
 import sys
+import tempfile
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -31,6 +33,7 @@ from cauchy_generator.diagnostics import (
     write_coverage_summary_json,
     write_coverage_summary_markdown,
 )
+from cauchy_generator.io.parquet_writer import write_parquet_shards_stream
 from cauchy_generator.hardware import (
     HardwareInfo,
     apply_hardware_profile,
@@ -47,6 +50,9 @@ DEFAULT_PROFILE_CONFIGS: dict[str, str] = {
 }
 MISSINGNESS_RATE_WARN_ABS_ERROR = 0.03
 MISSINGNESS_RATE_FAIL_ABS_ERROR = 0.05
+LINEAGE_GUARDRAIL_SMOKE_SAMPLE_CAP = 5
+LINEAGE_GUARDRAIL_SEED_OFFSET = 123_000
+LINEAGE_GUARDRAIL_RUNTIME_TRIALS = 3
 
 
 @dataclass(slots=True)
@@ -262,6 +268,223 @@ def _is_missingness_enabled(config: GeneratorConfig) -> bool:
     )
 
 
+def _lineage_guardrail_sample_count(config: GeneratorConfig, suite: str, num_datasets: int) -> int:
+    """Choose dataset count used for lineage overhead guardrail checks."""
+
+    n = max(1, min(int(config.benchmark.latency_num_samples), num_datasets))
+    if suite == "smoke":
+        return min(n, LINEAGE_GUARDRAIL_SMOKE_SAMPLE_CAP)
+    return n
+
+
+def _bundle_without_lineage(bundle: DatasetBundle) -> DatasetBundle:
+    """Clone one bundle while removing lineage metadata for control persistence runs."""
+
+    metadata = dict(bundle.metadata)
+    metadata.pop("lineage", None)
+    return DatasetBundle(
+        X_train=bundle.X_train,
+        y_train=bundle.y_train,
+        X_test=bundle.X_test,
+        y_test=bundle.y_test,
+        feature_types=list(bundle.feature_types),
+        metadata=metadata,
+    )
+
+
+def _measure_persistence_datasets_per_minute(
+    bundles: list[DatasetBundle],
+    *,
+    config: GeneratorConfig,
+) -> float:
+    """Measure write-path throughput for a fixed list of bundles."""
+
+    n_bundles = len(bundles)
+    if n_bundles <= 0:
+        return 0.0
+
+    start = time.perf_counter()
+    with tempfile.TemporaryDirectory(prefix="cauchy_lineage_guardrail_") as tmp_dir:
+        out_dir = Path(tmp_dir) / "shards"
+        _ = write_parquet_shards_stream(
+            bundles,
+            out_dir=out_dir,
+            shard_size=max(1, int(config.output.shard_size)),
+            compression=str(config.output.compression),
+        )
+    elapsed = time.perf_counter() - start
+    if elapsed <= 0.0:
+        return 0.0
+    return (float(n_bundles) / elapsed) * 60.0
+
+
+def _measure_lineage_persistence_trials(
+    bundles: list[DatasetBundle],
+    *,
+    config: GeneratorConfig,
+    trials: int,
+) -> tuple[list[float], list[float]]:
+    """Collect paired baseline/lineage persistence throughput trials."""
+
+    n_trials = max(1, int(trials))
+    baseline_bundles = [_bundle_without_lineage(bundle) for bundle in bundles]
+    baseline_trials: list[float] = []
+    current_trials: list[float] = []
+    for _ in range(n_trials):
+        baseline_trials.append(
+            _measure_persistence_datasets_per_minute(
+                baseline_bundles,
+                config=config,
+            )
+        )
+        current_trials.append(
+            _measure_persistence_datasets_per_minute(
+                bundles,
+                config=config,
+            )
+        )
+    return baseline_trials, current_trials
+
+
+def _median_throughput(values: list[float]) -> float:
+    """Return robust median throughput across trial values."""
+
+    finite = [float(value) for value in values if math.isfinite(float(value))]
+    if not finite:
+        return 0.0
+    return float(statistics.median(finite))
+
+
+def _build_lineage_guardrail_issue(
+    *,
+    metric: str,
+    severity: str,
+    current: float | None,
+    baseline: float | None,
+    degradation_pct: float | None,
+    detail: str,
+) -> dict[str, Any]:
+    """Create a normalized lineage guardrail issue payload."""
+
+    return {
+        "metric": metric,
+        "severity": severity,
+        "current": current,
+        "baseline": baseline,
+        "degradation_pct": degradation_pct,
+        "detail": detail,
+    }
+
+
+def _collect_lineage_guardrails(
+    config: GeneratorConfig,
+    *,
+    suite: str,
+    num_datasets: int,
+    device: str | None,
+    warn_threshold_pct: float,
+    fail_threshold_pct: float,
+) -> dict[str, Any]:
+    """Measure lineage export overhead and convert it into guardrail metrics."""
+
+    sample_n = _lineage_guardrail_sample_count(config, suite=suite, num_datasets=num_datasets)
+    if sample_n <= 0:
+        return {"enabled": False}
+
+    try:
+        sample_bundles = list(
+            generate_batch_iter(
+                config,
+                num_datasets=sample_n,
+                seed=int(config.seed + LINEAGE_GUARDRAIL_SEED_OFFSET),
+                device=device,
+            )
+        )
+    except Exception as exc:
+        return {
+            "enabled": False,
+            "reason": "sampling_failed",
+            "detail": str(exc),
+        }
+    if not sample_bundles:
+        return {"enabled": False}
+
+    bundles_with_lineage = sum(
+        1 for bundle in sample_bundles if isinstance(bundle.metadata.get("lineage"), dict)
+    )
+    lineage_coverage_rate = float(bundles_with_lineage) / float(len(sample_bundles))
+
+    try:
+        baseline_trials, current_trials = _measure_lineage_persistence_trials(
+            sample_bundles,
+            config=config,
+            trials=LINEAGE_GUARDRAIL_RUNTIME_TRIALS,
+        )
+    except RuntimeError as exc:
+        return {
+            "enabled": False,
+            "reason": "unavailable",
+            "detail": str(exc),
+        }
+    baseline_dpm = _median_throughput(baseline_trials)
+    current_dpm = _median_throughput(current_trials)
+
+    runtime_degradation = degradation_percent("datasets_per_minute", current_dpm, baseline_dpm)
+    runtime_degradation_value = (
+        float(runtime_degradation) if runtime_degradation is not None else 0.0
+    )
+    runtime_severity = _severity_from_thresholds(
+        runtime_degradation_value,
+        warn=float(warn_threshold_pct),
+        fail=float(fail_threshold_pct),
+    )
+
+    issues: list[dict[str, Any]] = []
+    if bundles_with_lineage != len(sample_bundles):
+        issues.append(
+            _build_lineage_guardrail_issue(
+                metric="lineage_metadata_coverage",
+                severity="fail",
+                current=float(lineage_coverage_rate),
+                baseline=1.0,
+                degradation_pct=float(max(0.0, (1.0 - lineage_coverage_rate) * 100.0)),
+                detail="Lineage metadata must be present for all generated bundles.",
+            )
+        )
+    if runtime_severity != "pass":
+        issues.append(
+            _build_lineage_guardrail_issue(
+                metric="lineage_export_runtime_degradation_pct",
+                severity=runtime_severity,
+                current=float(current_dpm),
+                baseline=float(baseline_dpm),
+                degradation_pct=float(runtime_degradation_value),
+                detail=(
+                    "Lineage-enabled shard persistence throughput regressed versus a "
+                    "lineage-stripped control persistence run."
+                ),
+            )
+        )
+
+    return {
+        "enabled": True,
+        "sample_datasets": int(sample_n),
+        "runtime_trials": int(max(1, LINEAGE_GUARDRAIL_RUNTIME_TRIALS)),
+        "runtime_baseline_trials_dpm": baseline_trials,
+        "runtime_with_lineage_trials_dpm": current_trials,
+        "lineage_metadata_coverage_rate": float(lineage_coverage_rate),
+        "runtime_baseline_datasets_per_minute": float(baseline_dpm),
+        "runtime_with_lineage_datasets_per_minute": float(current_dpm),
+        "runtime_degradation_pct": (
+            float(runtime_degradation) if runtime_degradation is not None else None
+        ),
+        "runtime_warn_threshold_pct": float(warn_threshold_pct),
+        "runtime_fail_threshold_pct": float(fail_threshold_pct),
+        "issues": issues,
+        "status": _status_from_issues(issues),
+    }
+
+
 def _matrix_cell_count(matrix: Any) -> int:
     """Return cell count for a rank-2 matrix-like payload."""
 
@@ -443,6 +666,28 @@ def _collect_missingness_regression_issues(
     return issues
 
 
+def _collect_lineage_regression_issues(
+    profile_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Flatten per-profile lineage guardrail issues into regression issue payloads."""
+
+    issues: list[dict[str, Any]] = []
+    for result in profile_results:
+        guardrails = result.get("lineage_guardrails")
+        if not isinstance(guardrails, dict) or not bool(guardrails.get("enabled")):
+            continue
+        raw_issues = guardrails.get("issues")
+        if not isinstance(raw_issues, list):
+            continue
+        for issue in raw_issues:
+            if not isinstance(issue, dict):
+                continue
+            merged = dict(issue)
+            merged["profile"] = str(result.get("profile_key"))
+            issues.append(merged)
+    return issues
+
+
 def run_profile_benchmark(
     spec: ProfileRunSpec,
     *,
@@ -524,6 +769,7 @@ def run_profile_benchmark(
     result["diagnostics_enabled"] = diagnostics_enabled
     result["diagnostics_artifacts"] = None
     result["missingness_guardrails"] = {"enabled": False}
+    result["lineage_guardrails"] = {"enabled": False}
 
     latency_stats = _collect_latency(
         config,
@@ -635,6 +881,15 @@ def run_profile_benchmark(
             "issues": issues,
             "status": _status_from_issues(issues),
         }
+
+    result["lineage_guardrails"] = _collect_lineage_guardrails(
+        config,
+        suite=suite,
+        num_datasets=num_datasets,
+        device=requested_device,
+        warn_threshold_pct=float(warn_threshold_pct),
+        fail_threshold_pct=float(fail_threshold_pct),
+    )
 
     if (
         diagnostics_enabled
@@ -782,11 +1037,13 @@ def run_benchmark_suite(
         }
 
     missingness_issues = _collect_missingness_regression_issues(profile_results)
-    if missingness_issues:
+    lineage_issues = _collect_lineage_regression_issues(profile_results)
+    additional_issues = [*missingness_issues, *lineage_issues]
+    if additional_issues:
         existing_issues = regression.get("issues", [])
         if not isinstance(existing_issues, list):
             existing_issues = []
-        all_issues = [*existing_issues, *missingness_issues]
+        all_issues = [*existing_issues, *additional_issues]
         regression["issues"] = sorted(all_issues, key=_issue_sort_key)
         regression["status"] = _status_from_issues(regression["issues"])
 

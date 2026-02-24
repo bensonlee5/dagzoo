@@ -1,0 +1,44 @@
+seed: 29
+
+dataset:
+  task: classification
+  n_train: 128
+  n_test: 32
+  n_features_min: 8
+  n_features_max: 16
+  n_classes_min: 2
+  n_classes_max: 6
+
+runtime:
+  device: cpu
+
+output:
+  out_dir: data/run_lineage_benchmark_smoke
+  shard_size: 16
+  compression: zstd
+
+diagnostics:
+  enabled: false
+
+steering:
+  enabled: false
+
+benchmark:
+  profile_name: lineage_smoke
+  suite: smoke
+  num_datasets: 20
+  warmup_datasets: 0
+  warn_threshold_pct: 10.0
+  fail_threshold_pct: 20.0
+  collect_memory: false
+  collect_reproducibility: false
+  reproducibility_num_datasets: 1
+  latency_num_samples: 4
+  profiles:
+    lineage_smoke:
+      device: cpu
+      num_datasets: 20
+      warmup_datasets: 0
+
+filter:
+  enabled: false

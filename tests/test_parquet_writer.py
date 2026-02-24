@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from cauchy_generator.config import GeneratorConfig
+from cauchy_generator.core.dataset import generate_one
 from cauchy_generator.io import resolve_lineage_path
 from cauchy_generator.io.lineage_artifact import unpack_upper_triangle_adjacency
 from cauchy_generator.io.lineage_schema import (
@@ -12,6 +14,7 @@ from cauchy_generator.io.lineage_schema import (
     LINEAGE_SCHEMA_NAME,
     LINEAGE_SCHEMA_VERSION,
     LINEAGE_SCHEMA_VERSION_COMPACT,
+    validate_lineage_payload,
 )
 from cauchy_generator.io.parquet_writer import write_parquet_shards, write_parquet_shards_stream
 from cauchy_generator.io.parquet_writer import _sanitize_json
@@ -65,6 +68,26 @@ def _bundle_with_dense_lineage(seed: int) -> DatasetBundle:
         },
     }
     return bundle
+
+
+def _generate_one_with_retries(
+    config: GeneratorConfig,
+    *,
+    seed: int,
+    device: str,
+    max_attempts: int = 12,
+) -> DatasetBundle:
+    """Generate one bundle with bounded retry on stochastic invalid splits."""
+
+    last_exc: Exception | None = None
+    for offset in range(max_attempts):
+        try:
+            return generate_one(config, seed=seed + offset, device=device)
+        except ValueError as exc:
+            last_exc = exc
+    if last_exc is not None:
+        raise last_exc
+    raise AssertionError("unreachable")
 
 
 def test_io_exports_resolve_lineage_path(tmp_path) -> None:
@@ -162,6 +185,58 @@ def test_write_parquet_shards_stream_writes_lineage_metadata(tmp_path, monkeypat
     assert index_payload["schema_version"] == LINEAGE_SCHEMA_VERSION_COMPACT
     assert index_payload["encoding"] == LINEAGE_ADJACENCY_ENCODING
     assert isinstance(index_payload["records"], list)
+    assert index_payload["records"][0]["dataset_index"] == 0
+
+
+@pytest.mark.parametrize("task", ["classification", "regression"])
+def test_generate_and_persist_compact_lineage_for_task(
+    task: str,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.dataset.task = task
+    cfg.runtime.device = "cpu"
+    cfg.filter.enabled = False
+    cfg.dataset.n_train = 32
+    cfg.dataset.n_test = 8
+    cfg.dataset.n_features_min = 8
+    cfg.dataset.n_features_max = 8
+    cfg.graph.n_nodes_min = 2
+    cfg.graph.n_nodes_max = 6
+
+    bundle = _generate_one_with_retries(cfg, seed=919, device="cpu")
+
+    def _stub_write_split(path, _x, _y, _compression):
+        path.write_text("ok", encoding="utf-8")
+
+    monkeypatch.setattr("cauchy_generator.io.parquet_writer._write_split", _stub_write_split)
+    written = write_parquet_shards_stream([bundle], tmp_path, shard_size=1, compression="zstd")
+    assert written == 1
+
+    dataset_dir = tmp_path / "shard_00000" / "dataset_000000"
+    metadata = json.loads((dataset_dir / "metadata.json").read_text(encoding="utf-8"))
+    lineage = metadata["lineage"]
+    assert lineage["schema_version"] == LINEAGE_SCHEMA_VERSION_COMPACT
+    validate_lineage_payload(lineage)
+
+    graph = lineage["graph"]
+    adjacency_ref = graph["adjacency_ref"]
+    blob_path = resolve_lineage_path(dataset_dir, adjacency_ref["blob_path"])
+    index_path = resolve_lineage_path(dataset_dir, adjacency_ref["index_path"])
+
+    n_nodes = int(graph["n_nodes"])
+    with blob_path.open("rb") as f:
+        f.seek(int(adjacency_ref["bit_offset"]) // 8)
+        payload = f.read((int(adjacency_ref["bit_length"]) + 7) // 8)
+    decoded = unpack_upper_triangle_adjacency(
+        payload,
+        n_nodes=n_nodes,
+        bit_length=int(adjacency_ref["bit_length"]),
+    )
+    assert decoded.shape == (n_nodes, n_nodes)
+
+    index_payload = json.loads(index_path.read_text(encoding="utf-8"))
     assert index_payload["records"][0]["dataset_index"] == 0
 
 

@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Missingness wrapper script: `scripts/generate-missingness.sh`
 - Missingness benchmark guardrails (runtime vs missingness-off control + acceptance checks) surfaced in profile summaries and regression issues
 - Versioned DAG lineage schema validator for `metadata.lineage` (`schema_name=cauchy_generator.dag_lineage`, `schema_version=1.0.0`) with strict adjacency/assignment checks and backward-compatible optional metadata mode
+- Benchmark lineage-export guardrails (`lineage_guardrails`) that compare shard persistence throughput against lineage-stripped controls and surface warn/fail issues in regression summaries
+- Lineage benchmark smoke preset: `configs/preset_lineage_benchmark_smoke.yaml`
 
 ### Changed
 
@@ -28,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Roadmap/backlog/implementation docs now track RD-010 hardware-adaptive autotuning beyond coarse FLOPs-tier profile tuning
 - Successful dataset generation now emits versioned DAG lineage payloads (`metadata.lineage`) with adjacency/assignment metadata derived from seeded layout sampling
 - Parquet shard persistence now rewrites dense DAG lineage adjacency into shard-level bit-packed artifacts (`adjacency.bitpack.bin` + `adjacency.index.json`) and stores compact lineage pointers in per-dataset `metadata.json`
+- Benchmark CLI/report outputs now include lineage guardrail status in per-profile summaries
+- README/roadmap/implementation docs now document compact lineage artifact workflows and lineage-overhead benchmark guardrails
 
 ### Fixed
 

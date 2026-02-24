@@ -45,7 +45,7 @@ Observed from current code/config surface:
 | 0 (completed) | RD-003     | Missingness generation (MCAR/MAR/MNAR)           | implemented | Now       | pretraining, robustness testing      | High            | Low-Medium  | Low         | `src/cauchy_generator/config.py`, `src/cauchy_generator/sampling/missingness.py`, `src/cauchy_generator/postprocess/postprocess.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/bench/suite.py` |
 | 1             | RD-007     | Many-class and high-cardinality expansion        | planned     | Now       | pretraining                          | High            | Low-Medium  | Medium      | `src/cauchy_generator/config.py`, `src/cauchy_generator/converters/categorical.py`, `src/cauchy_generator/filtering/torch_rf_filter.py`                                                                            |
 | 2             | RD-006     | Curriculum complexity scaling (features + graph) | planned     | Now       | pretraining                          | Medium-High     | Medium      | Medium      | `src/cauchy_generator/config.py`, `src/cauchy_generator/core/dataset.py`                                                                                                                                           |
-| 3             | RD-001     | Ground-truth DAG artifact export                 | planned     | Now       | causal discovery                     | Medium-High     | Medium      | Low-Medium  | `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/types.py`                                                                                               |
+| 3             | RD-001     | Ground-truth DAG artifact export                 | implemented | Now       | causal discovery                     | Medium-High     | Medium      | Low-Medium  | `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/types.py`                                                                                               |
 | 4             | RD-004     | Shift-aware SCM generation                       | planned     | Next      | robustness testing, causal discovery | Medium-High     | High        | Medium-High | `src/cauchy_generator/sampling/random_weights.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/config.py`                                                                                        |
 | 5             | RD-010     | Hardware-adaptive autotuning beyond coarse tiers | planned     | Next      | pretraining throughput               | Medium          | Medium      | Medium      | `src/cauchy_generator/hardware.py`, `src/cauchy_generator/config.py`, `src/cauchy_generator/cli.py`, `src/cauchy_generator/bench/suite.py`, `src/cauchy_generator/bench/report.py`                                 |
 | 6             | RD-005     | Robustness hard-task/adversarial profiles        | research    | Next      | robustness testing                   | Medium          | Medium-High | High        | `src/cauchy_generator/functions/`, `src/cauchy_generator/postprocess/`, `src/cauchy_generator/bench/`                                                                                                              |
@@ -85,8 +85,8 @@ Candidate future additions by roadmap item:
 
 ## Acceptance Scenarios (Execution Contract)
 
-1. RD-001 ground-truth DAG artifacts:
-   generated outputs include adjacency and node assignment lineage with schema validation tests.
+1. RD-001 ground-truth DAG artifacts (completed via `#44`, `#45`, `#46`, `#47`, `#48`):
+   generated outputs include adjacency and node assignment lineage with schema validation tests and compact shard artifact persistence.
 1. RD-002 intervention/counterfactual consistency:
    intervention mode preserves causal truncation behavior under fixed intervention sets.
 1. RD-003 missingness mechanisms:

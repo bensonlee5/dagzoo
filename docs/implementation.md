@@ -30,7 +30,6 @@ Related docs:
 
 ## Known Missing Capabilities (Roadmap-Tracked)
 
-- RD-001: export full ground-truth DAG and assignment lineage as stable artifacts.
 - RD-002: add interventional and counterfactual generation tracks.
 - RD-004: add shift-aware SCM generation controls.
 - RD-005: add robustness stress profiles for hard-task/adversarial regimes.
@@ -69,20 +68,24 @@ Each `DatasetBundle` contains:
 
 Persist generated outputs as Parquet shards with a sidecar metadata JSON per shard.
 
-Current metadata includes summary graph stats, versioned DAG lineage (`metadata.lineage`), config lineage, and optional `missingness` payload fields (configured/realized rates and per-split counts). Full DAG artifact persistence/guardrails rollout remains tracked under RD-001.
+Current metadata includes summary graph stats, versioned DAG lineage (`metadata.lineage`), config lineage, and optional `missingness` payload fields (configured/realized rates and per-split counts). Persisted shard metadata rewrites dense lineage adjacency into compact shard-level artifact pointers (`adjacency.bitpack.bin` + `adjacency.index.json`), and benchmark profile summaries include `lineage_guardrails` to measure export overhead.
 
-#### DAG Lineage Schema (v1)
+#### DAG Lineage Schema (v1.0 + v1.1 compact persistence)
 
-RD-001 issue #45 defines the versioned lineage schema and validator API, without changing current emission defaults.
+RD-001 rollout defines versioned lineage payloads with strict validation and compact persistence.
 
 - Location: `metadata.lineage`
 - Envelope:
   - `schema_name`: must equal `cauchy_generator.dag_lineage`
-  - `schema_version`: must equal `1.0.0`
-- Graph payload:
+  - `schema_version`: one of `1.0.0` (dense) or `1.1.0` (compact persisted form)
+- Dense graph payload (`1.0.0`):
   - `graph.n_nodes`: integer, `>= 2`
   - `graph.adjacency`: dense square `n_nodes x n_nodes` matrix of integer `0/1` values
   - Validation enforces diagonal zeros and upper-triangular encoding (topological-order DAG form)
+- Compact graph payload (`1.1.0`):
+  - `graph.n_nodes`, `graph.edge_count`
+  - `graph.adjacency_ref`: `{encoding, blob_path, index_path, dataset_index, bit_offset, bit_length, sha256}`
+  - Encoding is fixed at `upper_triangle_bitpack_v1`; `bit_length` must match `n_nodes`.
 - Assignment payload:
   - `assignments.feature_to_node`: list of node indices in `[0, n_nodes - 1]`
   - `assignments.target_to_node`: node index in `[0, n_nodes - 1]`
@@ -102,6 +105,7 @@ Compatibility contract:
 - `configs/preset_missingness_mcar.yaml`: MCAR missingness preset.
 - `configs/preset_missingness_mar.yaml`: MAR missingness preset.
 - `configs/preset_missingness_mnar.yaml`: MNAR missingness preset.
+- `configs/preset_lineage_benchmark_smoke.yaml`: CPU smoke benchmark preset for lineage export guardrail checks.
 - Runtime currently applies coarse profile-tier overrides from GPU FLOPS lookup + fallback behavior; adaptive autotuning is tracked in RD-010.
 
 ## Module Plan (Appendix Mapping)
@@ -127,6 +131,7 @@ Compatibility contract:
 1. Use optional filtering (`E.14`) behind config flags to avoid CPU bottlenecks in throughput benchmarks.
 1. Profile with `bench/throughput.py` and track JSON baseline regressions by preset.
 1. Missingness-enabled benchmark runs include acceptance/runtime guardrails against missingness-off controls.
+1. Benchmark profile summaries include lineage-export persistence overhead guardrails (`lineage_guardrails`) against lineage-stripped control persistence runs.
 1. Next hardware-aware step is bounded adaptive autotuning with explicit telemetry/guardrails (RD-010).
 1. Next roadmap step for throughput is controlled multi-worker execution (RD-009) while preserving seeded behavior.
 
