@@ -7,6 +7,7 @@ from cauchy_generator.config import (
     MISSINGNESS_MECHANISM_NONE,
     GeneratorConfig,
 )
+from cauchy_generator.io.lineage_schema import validate_metadata_lineage
 
 
 def test_load_default_config() -> None:
@@ -37,6 +38,15 @@ def test_load_default_config() -> None:
     assert cfg.dataset.missing_mar_observed_fraction == 0.5
     assert cfg.dataset.missing_mar_logit_scale == 1.0
     assert cfg.dataset.missing_mnar_logit_scale == 1.0
+
+
+def test_default_config_metadata_is_compatible_with_optional_lineage() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    metadata = {
+        "seed": int(cfg.seed),
+        "config": cfg.to_dict(),
+    }
+    validate_metadata_lineage(metadata, required=False)
 
 
 def test_load_cuda_presets() -> None:

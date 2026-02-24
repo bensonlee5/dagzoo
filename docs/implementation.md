@@ -71,6 +71,27 @@ Persist generated outputs as Parquet shards with a sidecar metadata JSON per sha
 
 Current metadata includes summary graph stats, config lineage, and optional `missingness` payload fields (configured/realized rates and per-split counts). Full DAG artifact export is tracked under RD-001.
 
+#### DAG Lineage Schema (v1)
+
+RD-001 issue #45 defines the versioned lineage schema and validator API, without changing current emission defaults.
+
+- Location: `metadata.lineage`
+- Envelope:
+  - `schema_name`: must equal `cauchy_generator.dag_lineage`
+  - `schema_version`: must equal `1.0.0`
+- Graph payload:
+  - `graph.n_nodes`: integer, `>= 2`
+  - `graph.adjacency`: dense square `n_nodes x n_nodes` matrix of integer `0/1` values
+  - Validation enforces diagonal zeros and upper-triangular encoding (topological-order DAG form)
+- Assignment payload:
+  - `assignments.feature_to_node`: list of node indices in `[0, n_nodes - 1]`
+  - `assignments.target_to_node`: node index in `[0, n_nodes - 1]`
+
+Compatibility contract:
+
+- Validation accepts metadata without `lineage` by default (`required=False`) so existing configs/runs stay valid.
+- Consumers can require lineage explicitly (`required=True`) when later rollout phases make emission mandatory.
+
 ## Runtime Profiles
 
 - `configs/default.yaml`: balanced local development profile.
