@@ -336,6 +336,66 @@ def test_collect_lineage_guardrails_uses_median_of_three_trials(
     )
 
 
+def test_collect_lineage_guardrails_reports_unavailable_for_non_runtime_persistence_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_cpu_config()
+
+    def _stub_generate_batch_iter(
+        _config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        _ = seed
+        _ = device
+        for i in range(num_datasets):
+            yield DatasetBundle(
+                X_train=np.zeros((3, 4), dtype=np.float32),
+                y_train=np.zeros(3, dtype=np.int64),
+                X_test=np.zeros((1, 4), dtype=np.float32),
+                y_test=np.zeros(1, dtype=np.int64),
+                feature_types=["num", "num", "num", "num"],
+                metadata={
+                    "seed": i,
+                    "attempt_used": 0,
+                    "lineage": {"schema_name": "cauchy_generator.dag_lineage"},
+                },
+            )
+
+    def _stub_trials(
+        _bundles: list[DatasetBundle],
+        *,
+        config: GeneratorConfig,
+        trials: int,
+    ) -> tuple[list[float], list[float]]:
+        _ = config
+        _ = trials
+        raise ValueError("codec unavailable")
+
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite.generate_batch_iter", _stub_generate_batch_iter
+    )
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite._measure_lineage_persistence_trials",
+        _stub_trials,
+    )
+
+    guardrails = suite_mod._collect_lineage_guardrails(
+        cfg,
+        suite="smoke",
+        num_datasets=2,
+        device="cpu",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+    )
+
+    assert guardrails["enabled"] is False
+    assert guardrails["reason"] == "unavailable"
+    assert "codec unavailable" in guardrails["detail"]
+
+
 def test_run_microbenchmarks_returns_expected_keys() -> None:
     cfg = _tiny_cpu_config()
     res = run_microbenchmarks(cfg, device="cpu", repeats=1)

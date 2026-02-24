@@ -420,7 +420,7 @@ def _collect_lineage_guardrails(
             config=config,
             trials=LINEAGE_GUARDRAIL_RUNTIME_TRIALS,
         )
-    except RuntimeError as exc:
+    except Exception as exc:
         return {
             "enabled": False,
             "reason": "unavailable",
