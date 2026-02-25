@@ -298,11 +298,14 @@ def test_collect_lineage_guardrails_uses_median_of_three_trials_with_runtime_gat
     trial_values = iter([100.0, 90.0, 1000.0, 100.0, 100.0, 90.0])
 
     def _stub_measure(
-        _bundles: list[DatasetBundle],
+        _bundles,
         *,
         config: GeneratorConfig,
+        num_bundles: int,
     ) -> float:
         _ = config
+        assert not isinstance(_bundles, list)
+        assert num_bundles > 0
         return float(next(trial_values))
 
     monkeypatch.setattr(
@@ -371,11 +374,14 @@ def test_collect_lineage_guardrails_emits_runtime_issue_when_sample_is_sufficien
     trial_values = iter([100.0, 70.0, 100.0, 70.0, 100.0, 70.0])
 
     def _stub_measure(
-        _bundles: list[DatasetBundle],
+        _bundles,
         *,
         config: GeneratorConfig,
+        num_bundles: int,
     ) -> float:
         _ = config
+        assert not isinstance(_bundles, list)
+        assert num_bundles > 0
         return float(next(trial_values))
 
     monkeypatch.setattr(
@@ -436,11 +442,16 @@ def test_collect_lineage_guardrails_reports_unavailable_for_non_runtime_persiste
             )
 
     def _stub_trials(
-        _bundles: list[DatasetBundle],
         *,
+        baseline_stage_dir: Path,
+        current_stage_dir: Path,
+        num_bundles: int,
         config: GeneratorConfig,
         trials: int,
     ) -> tuple[list[float], list[float]]:
+        _ = baseline_stage_dir
+        _ = current_stage_dir
+        _ = num_bundles
         _ = config
         _ = trials
         raise ValueError("codec unavailable")
@@ -465,6 +476,66 @@ def test_collect_lineage_guardrails_reports_unavailable_for_non_runtime_persiste
     assert guardrails["enabled"] is False
     assert guardrails["reason"] == "unavailable"
     assert "codec unavailable" in guardrails["detail"]
+
+
+def test_measure_lineage_persistence_trials_replays_staged_bundles_without_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_cpu_config()
+    baseline_stage_dir = tmp_path / "baseline"
+    current_stage_dir = tmp_path / "current"
+    baseline_stage_dir.mkdir(parents=True, exist_ok=True)
+    current_stage_dir.mkdir(parents=True, exist_ok=True)
+
+    bundle = DatasetBundle(
+        X_train=np.zeros((3, 4), dtype=np.float32),
+        y_train=np.zeros(3, dtype=np.int64),
+        X_test=np.zeros((1, 4), dtype=np.float32),
+        y_test=np.zeros(1, dtype=np.int64),
+        feature_types=["num", "num", "num", "num"],
+        metadata={"seed": 0, "attempt_used": 0, "lineage": {"schema_name": "x"}},
+    )
+    for idx in range(2):
+        file_name = f"bundle_{idx:06d}.pkl"
+        suite_mod._stage_bundle(current_stage_dir / file_name, bundle, strip_lineage=False)
+        suite_mod._stage_bundle(baseline_stage_dir / file_name, bundle, strip_lineage=True)
+
+    def _unexpected_generate(*_args, **_kwargs):
+        raise AssertionError("generate_batch_iter must not run during timed persistence trials")
+
+    call_counts: list[int] = []
+
+    def _stub_measure(
+        bundles,
+        *,
+        config: GeneratorConfig,
+        num_bundles: int,
+    ) -> float:
+        _ = config
+        seen = sum(1 for _ in bundles)
+        call_counts.append(seen)
+        assert num_bundles == 2
+        assert seen == 2
+        return 100.0 if len(call_counts) % 2 == 1 else 90.0
+
+    monkeypatch.setattr("cauchy_generator.bench.suite.generate_batch_iter", _unexpected_generate)
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite._measure_persistence_datasets_per_minute",
+        _stub_measure,
+    )
+
+    baseline_trials, current_trials = suite_mod._measure_lineage_persistence_trials(
+        baseline_stage_dir=baseline_stage_dir,
+        current_stage_dir=current_stage_dir,
+        num_bundles=2,
+        config=cfg,
+        trials=3,
+    )
+
+    assert baseline_trials == [100.0, 100.0, 100.0]
+    assert current_trials == [90.0, 90.0, 90.0]
+    assert call_counts == [2, 2, 2, 2, 2, 2]
 
 
 def test_run_microbenchmarks_returns_expected_keys() -> None:

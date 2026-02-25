@@ -103,7 +103,7 @@ def test_load_lineage_benchmark_smoke_preset() -> None:
     assert cfg.benchmark.suite == "smoke"
     assert cfg.benchmark.profile_name == "lineage_smoke"
     assert "lineage_smoke" in cfg.benchmark.profiles
-    assert cfg.benchmark.latency_num_samples >= 1
+    assert cfg.benchmark.latency_num_samples >= 5
 
 
 def test_load_curriculum_preset() -> None:

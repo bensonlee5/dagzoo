@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import math
+import pickle
 import re
 import resource
 import statistics
@@ -12,6 +13,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -39,6 +41,7 @@ from cauchy_generator.hardware import (
     apply_hardware_profile,
     detect_hardware,
 )
+from cauchy_generator.math_utils import to_numpy as _to_numpy
 from cauchy_generator.rng import SeedManager
 from cauchy_generator.types import DatasetBundle
 
@@ -294,14 +297,14 @@ def _bundle_without_lineage(bundle: DatasetBundle) -> DatasetBundle:
 
 
 def _measure_persistence_datasets_per_minute(
-    bundles: list[DatasetBundle],
+    bundles: Iterable[DatasetBundle],
     *,
     config: GeneratorConfig,
+    num_bundles: int,
 ) -> float:
-    """Measure write-path throughput for a fixed list of bundles."""
+    """Measure write-path throughput for a fixed number of streamed bundles."""
 
-    n_bundles = len(bundles)
-    if n_bundles <= 0:
+    if num_bundles <= 0:
         return 0.0
 
     start = time.perf_counter()
@@ -316,32 +319,116 @@ def _measure_persistence_datasets_per_minute(
     elapsed = time.perf_counter() - start
     if elapsed <= 0.0:
         return 0.0
-    return (float(n_bundles) / elapsed) * 60.0
+    return (float(num_bundles) / elapsed) * 60.0
+
+
+def _stage_bundle(path: Path, bundle: DatasetBundle, *, strip_lineage: bool) -> None:
+    """Serialize one bundle to disk for later replay in persistence timing."""
+
+    staged_bundle = _bundle_without_lineage(bundle) if strip_lineage else bundle
+    payload: dict[str, Any] = {
+        "X_train": _to_numpy(staged_bundle.X_train),
+        "y_train": _to_numpy(staged_bundle.y_train),
+        "X_test": _to_numpy(staged_bundle.X_test),
+        "y_test": _to_numpy(staged_bundle.y_test),
+        "feature_types": list(staged_bundle.feature_types),
+        "metadata": dict(staged_bundle.metadata),
+    }
+    with path.open("wb") as f:
+        pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def _iter_staged_bundles(stage_dir: Path, *, num_bundles: int) -> Iterable[DatasetBundle]:
+    """Replay staged bundles from disk as a streaming iterator."""
+
+    for idx in range(max(0, num_bundles)):
+        bundle_path = stage_dir / f"bundle_{idx:06d}.pkl"
+        with bundle_path.open("rb") as f:
+            payload = pickle.load(f)
+        if not isinstance(payload, dict):
+            raise ValueError(f"Invalid staged bundle payload at {bundle_path}.")
+
+        feature_types_raw = payload.get("feature_types")
+        metadata_raw = payload.get("metadata")
+        if not isinstance(feature_types_raw, list):
+            raise ValueError(f"Staged feature_types must be a list at {bundle_path}.")
+        if not isinstance(metadata_raw, dict):
+            raise ValueError(f"Staged metadata must be an object at {bundle_path}.")
+        feature_types = [str(value) for value in feature_types_raw]
+        metadata = dict(metadata_raw)
+
+        yield DatasetBundle(
+            X_train=payload["X_train"],
+            y_train=payload["y_train"],
+            X_test=payload["X_test"],
+            y_test=payload["y_test"],
+            feature_types=feature_types,
+            metadata=metadata,
+        )
+
+
+def _stage_lineage_trial_bundles(
+    config: GeneratorConfig,
+    *,
+    sample_n: int,
+    seed: int,
+    device: str | None,
+    baseline_stage_dir: Path,
+    current_stage_dir: Path,
+) -> tuple[int, int]:
+    """Generate and stage baseline/current trial bundles once outside timed sections."""
+
+    baseline_stage_dir.mkdir(parents=True, exist_ok=True)
+    current_stage_dir.mkdir(parents=True, exist_ok=True)
+
+    seen = 0
+    with_lineage = 0
+    for idx, bundle in enumerate(
+        generate_batch_iter(
+            config,
+            num_datasets=sample_n,
+            seed=seed,
+            device=device,
+        )
+    ):
+        has_lineage = isinstance(bundle.metadata.get("lineage"), dict)
+        if has_lineage:
+            with_lineage += 1
+        file_name = f"bundle_{idx:06d}.pkl"
+        _stage_bundle(current_stage_dir / file_name, bundle, strip_lineage=False)
+        _stage_bundle(baseline_stage_dir / file_name, bundle, strip_lineage=True)
+        seen = idx + 1
+    return with_lineage, seen
 
 
 def _measure_lineage_persistence_trials(
-    bundles: list[DatasetBundle],
     *,
+    baseline_stage_dir: Path,
+    current_stage_dir: Path,
+    num_bundles: int,
     config: GeneratorConfig,
     trials: int,
 ) -> tuple[list[float], list[float]]:
     """Collect paired baseline/lineage persistence throughput trials."""
 
     n_trials = max(1, int(trials))
-    baseline_bundles = [_bundle_without_lineage(bundle) for bundle in bundles]
     baseline_trials: list[float] = []
     current_trials: list[float] = []
     for _ in range(n_trials):
+        baseline_bundles = _iter_staged_bundles(baseline_stage_dir, num_bundles=num_bundles)
         baseline_trials.append(
             _measure_persistence_datasets_per_minute(
                 baseline_bundles,
                 config=config,
+                num_bundles=num_bundles,
             )
         )
+        current_bundles = _iter_staged_bundles(current_stage_dir, num_bundles=num_bundles)
         current_trials.append(
             _measure_persistence_datasets_per_minute(
-                bundles,
+                current_bundles,
                 config=config,
+                num_bundles=num_bundles,
             )
         )
     return baseline_trials, current_trials
@@ -392,41 +479,45 @@ def _collect_lineage_guardrails(
     if sample_n <= 0:
         return {"enabled": False}
 
-    try:
-        sample_bundles = list(
-            generate_batch_iter(
+    sample_seed = int(config.seed + LINEAGE_GUARDRAIL_SEED_OFFSET)
+    with tempfile.TemporaryDirectory(prefix="cauchy_lineage_guardrail_stage_") as tmp_dir:
+        stage_root = Path(tmp_dir)
+        baseline_stage_dir = stage_root / "baseline"
+        current_stage_dir = stage_root / "current"
+        try:
+            bundles_with_lineage, bundles_seen = _stage_lineage_trial_bundles(
                 config,
-                num_datasets=sample_n,
-                seed=int(config.seed + LINEAGE_GUARDRAIL_SEED_OFFSET),
+                sample_n=sample_n,
+                seed=sample_seed,
                 device=device,
+                baseline_stage_dir=baseline_stage_dir,
+                current_stage_dir=current_stage_dir,
             )
-        )
-    except Exception as exc:
-        return {
-            "enabled": False,
-            "reason": "sampling_failed",
-            "detail": str(exc),
-        }
-    if not sample_bundles:
-        return {"enabled": False}
+        except Exception as exc:
+            return {
+                "enabled": False,
+                "reason": "sampling_failed",
+                "detail": str(exc),
+            }
+        if bundles_seen <= 0:
+            return {"enabled": False}
 
-    bundles_with_lineage = sum(
-        1 for bundle in sample_bundles if isinstance(bundle.metadata.get("lineage"), dict)
-    )
-    lineage_coverage_rate = float(bundles_with_lineage) / float(len(sample_bundles))
+        lineage_coverage_rate = float(bundles_with_lineage) / float(bundles_seen)
 
-    try:
-        baseline_trials, current_trials = _measure_lineage_persistence_trials(
-            sample_bundles,
-            config=config,
-            trials=LINEAGE_GUARDRAIL_RUNTIME_TRIALS,
-        )
-    except Exception as exc:
-        return {
-            "enabled": False,
-            "reason": "unavailable",
-            "detail": str(exc),
-        }
+        try:
+            baseline_trials, current_trials = _measure_lineage_persistence_trials(
+                baseline_stage_dir=baseline_stage_dir,
+                current_stage_dir=current_stage_dir,
+                num_bundles=bundles_seen,
+                config=config,
+                trials=LINEAGE_GUARDRAIL_RUNTIME_TRIALS,
+            )
+        except Exception as exc:
+            return {
+                "enabled": False,
+                "reason": "unavailable",
+                "detail": str(exc),
+            }
     baseline_dpm = _median_throughput(baseline_trials)
     current_dpm = _median_throughput(current_trials)
 
@@ -442,7 +533,7 @@ def _collect_lineage_guardrails(
     runtime_gating_enabled = sample_n >= LINEAGE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE
 
     issues: list[dict[str, Any]] = []
-    if bundles_with_lineage != len(sample_bundles):
+    if bundles_with_lineage != bundles_seen:
         issues.append(
             _build_lineage_guardrail_issue(
                 metric="lineage_metadata_coverage",

@@ -33,7 +33,7 @@ benchmark:
   collect_memory: false
   collect_reproducibility: false
   reproducibility_num_datasets: 1
-  latency_num_samples: 4
+  latency_num_samples: 5
   profiles:
     lineage_smoke:
       device: cpu
