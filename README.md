@@ -47,20 +47,27 @@ ______________________________________________________________________
 
 ### Installation
 
+Install `cauchy-generator` as a standalone tool (recommended) or in editable mode for development:
+
 ```bash
+# Recommended: Install as a standalone CLI tool
+uv tool install cauchy-generator
+
+# Development: Install dependencies and activate the environment
 uv sync --group dev
+source .venv/bin/activate
 ```
 
 ### Basic Generation
 
 ```bash
 # Generate 10 datasets using the default high-quality prior
-uv run cauchy-gen generate --config configs/default.yaml --num-datasets 10 --out data/run1
+cauchy-gen generate --config configs/default.yaml --num-datasets 10 --out data/run1
 ```
 
 ```bash
 # Enable diagnostics artifacts and opt-in meta-feature steering
-uv run cauchy-gen generate \
+cauchy-gen generate \
   --config configs/default.yaml \
   --num-datasets 50 \
   --diagnostics \
@@ -70,20 +77,20 @@ uv run cauchy-gen generate \
 
 ```bash
 # Use discoverable presets for diagnostics-only and conservative steering runs
-uv run cauchy-gen generate --config configs/preset_diagnostics_on.yaml --num-datasets 25 --diagnostics --out data/run_diag
-uv run cauchy-gen generate --config configs/preset_steering_conservative.yaml --num-datasets 25 --diagnostics --out data/run_steering
+cauchy-gen generate --config configs/preset_diagnostics_on.yaml --num-datasets 25 --diagnostics --out data/run_diag
+cauchy-gen generate --config configs/preset_steering_conservative.yaml --num-datasets 25 --diagnostics --out data/run_steering
 ```
 
 ```bash
 # Missingness presets (MCAR/MAR/MNAR)
-uv run cauchy-gen generate --config configs/preset_missingness_mcar.yaml --num-datasets 25 --out data/run_missing_mcar
-uv run cauchy-gen generate --config configs/preset_missingness_mar.yaml --num-datasets 25 --out data/run_missing_mar
-uv run cauchy-gen generate --config configs/preset_missingness_mnar.yaml --num-datasets 25 --out data/run_missing_mnar
+cauchy-gen generate --config configs/preset_missingness_mcar.yaml --num-datasets 25 --out data/run_missing_mcar
+cauchy-gen generate --config configs/preset_missingness_mar.yaml --num-datasets 25 --out data/run_missing_mar
+cauchy-gen generate --config configs/preset_missingness_mnar.yaml --num-datasets 25 --out data/run_missing_mnar
 ```
 
 ```bash
 # Override missingness controls directly from CLI with strict validation
-uv run cauchy-gen generate \
+cauchy-gen generate \
   --config configs/default.yaml \
   --num-datasets 25 \
   --device cpu \
@@ -98,12 +105,12 @@ uv run cauchy-gen generate \
 
 ```bash
 # Run the standard benchmark suite for the CPU profile
-uv run cauchy-gen benchmark --suite standard --profile cpu
+cauchy-gen benchmark --suite standard --profile cpu
 ```
 
 ```bash
 # Collect diagnostics during benchmark runs and emit artifact pointers in summary outputs
-uv run cauchy-gen benchmark \
+cauchy-gen benchmark \
   --suite smoke \
   --profile cpu \
   --diagnostics \
@@ -112,7 +119,7 @@ uv run cauchy-gen benchmark \
 
 ```bash
 # Benchmark a missingness-enabled custom config with runtime + acceptance guardrails
-uv run cauchy-gen benchmark \
+cauchy-gen benchmark \
   --config configs/preset_missingness_mar.yaml \
   --profile custom \
   --suite smoke \
@@ -122,7 +129,7 @@ uv run cauchy-gen benchmark \
 
 ```bash
 # Benchmark lineage artifact export overhead guardrails on a CPU smoke preset
-uv run cauchy-gen benchmark \
+cauchy-gen benchmark \
   --config configs/preset_lineage_benchmark_smoke.yaml \
   --profile custom \
   --suite smoke \

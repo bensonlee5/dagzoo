@@ -43,7 +43,7 @@ Lower rank means higher priority. Rank `0` is reserved for completed items retai
 | 0    | RD-001     | Ground-truth DAG artifact export                             | implemented | Now       | `#44 -> #45 -> #46 -> #47 -> #48` (completed)   |
 | 0    | RD-003     | Missingness generation (MCAR/MAR/MNAR)                       | implemented | Now       | `#15 -> #17 -> #18` (completed)                 |
 | 0    | RD-008     | Meta-feature coverage steering                               | implemented | Now       | `#9` (completed epic)                           |
-| 1    | RD-006     | Curriculum complexity scaling (features + graph)             | planned     | Now       | `#49 -> #50 -> #51 -> #52 -> #53`               |
+| 1    | RD-006     | Curriculum complexity scaling (features + graph)             | planned     | Now       | `#49 -> #50 -> #51 -> #90 -> #52 -> #53`        |
 | 2    | RD-004     | Shift-aware SCM generation                                   | planned     | Next      | `#64 -> #72 -> #73 -> #74 -> #75`               |
 | 3    | RD-012     | Noise family diversification for synthetic generation        | planned     | Next      | `#24 -> #25 -> #26 -> #27`                      |
 | 4    | RD-010     | Hardware-adaptive autotuning beyond coarse FLOPs tiers       | planned     | Next      | `#54 -> #55 -> #56 -> #70 -> #57 -> #71 -> #58` |
@@ -153,7 +153,7 @@ Lower rank means higher priority. Rank `0` is reserved for completed items retai
 - Mission alignment: foundation model pretraining
 - Pillar alignment: tabular realism
 - Goal: extend curriculum stages beyond row count to feature/node/depth complexity.
-- GitHub tracking: epic `#49`; dependency chain `#50 -> #51 -> #52 -> #53`
+- GitHub tracking: epic `#49`; dependency chain `#50 -> #51 -> #90 -> #52 -> #53`
 - Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/core/dataset.py`, `configs/curriculum_tabiclv2.yaml`
 - Exit criteria:
   - Stage definitions include row, feature, and graph complexity controls.

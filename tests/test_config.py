@@ -38,6 +38,7 @@ def test_load_default_config() -> None:
     assert cfg.dataset.missing_mar_observed_fraction == 0.5
     assert cfg.dataset.missing_mar_logit_scale == 1.0
     assert cfg.dataset.missing_mnar_logit_scale == 1.0
+    assert cfg.curriculum.stages == {}
 
 
 def test_default_config_metadata_is_compatible_with_optional_lineage() -> None:
@@ -111,6 +112,138 @@ def test_load_curriculum_preset() -> None:
     assert cfg.curriculum_stage == "auto"
     assert cfg.dataset.n_train > 0
     assert cfg.dataset.n_test > 0
+    assert cfg.curriculum.stages == {}
+
+
+def test_curriculum_stage_schema_parses_with_string_stage_keys() -> None:
+    cfg = GeneratorConfig.from_dict(
+        {
+            "dataset": {"n_features_min": 8, "n_features_max": 64},
+            "graph": {"n_nodes_min": 2, "n_nodes_max": 32},
+            "curriculum": {
+                "stages": {
+                    "1": {
+                        "n_features_min": 8,
+                        "n_features_max": 16,
+                        "n_nodes_min": 2,
+                        "n_nodes_max": 6,
+                    },
+                    "2": {
+                        "n_features_min": 16,
+                        "n_features_max": 32,
+                        "depth_min": 2,
+                        "depth_max": 5,
+                    },
+                    "3": {
+                        "n_features_min": 24,
+                        "n_features_max": 64,
+                        "n_nodes_min": 6,
+                        "n_nodes_max": 32,
+                    },
+                }
+            },
+        }
+    )
+    assert set(cfg.curriculum.stages) == {1, 2, 3}
+    stage2 = cfg.curriculum.stages[2]
+    assert stage2.depth_min == 2
+    assert stage2.depth_max == 5
+
+
+def test_curriculum_stage_schema_rejects_invalid_stage_key() -> None:
+    with pytest.raises(ValueError, match="Unsupported curriculum stage key '4'"):
+        GeneratorConfig.from_dict({"curriculum": {"stages": {"4": {"n_features_min": 8}}}})
+
+
+@pytest.mark.parametrize("stage_key", (1.9, "1.9"))
+def test_curriculum_stage_schema_rejects_decimal_stage_key(stage_key: object) -> None:
+    with pytest.raises(ValueError, match="Unsupported curriculum stage key"):
+        GeneratorConfig.from_dict({"curriculum": {"stages": {stage_key: {"n_features_min": 8}}}})
+
+
+def test_curriculum_stage_schema_rejects_non_mapping_stage_payload() -> None:
+    with pytest.raises(ValueError, match=r"curriculum\.stages\['1'\] must be a mapping"):
+        GeneratorConfig.from_dict({"curriculum": {"stages": {"1": 12}}})
+
+
+@pytest.mark.parametrize("bad_curriculum", ([1, 2], "bad"))
+def test_curriculum_schema_rejects_non_mapping_curriculum_payload(
+    bad_curriculum: object,
+) -> None:
+    with pytest.raises(ValueError, match=r"curriculum must be a mapping"):
+        GeneratorConfig.from_dict({"curriculum": bad_curriculum})
+
+
+def test_curriculum_stage_schema_rejects_invalid_stage_bounds() -> None:
+    with pytest.raises(ValueError, match=r"n_features_min must be <= n_features_max"):
+        GeneratorConfig.from_dict(
+            {
+                "curriculum": {"stages": {"1": {"n_features_min": 16, "n_features_max": 8}}},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    (("n_features_min", 16.9), ("n_nodes_max", 12.1), ("depth_min", "2.4")),
+)
+def test_curriculum_stage_schema_rejects_non_integral_bounds(
+    field_name: str, value: float | str
+) -> None:
+    with pytest.raises(
+        ValueError, match=rf"curriculum\.stages\.\*\.{field_name} must be an integer"
+    ):
+        GeneratorConfig.from_dict({"curriculum": {"stages": {"1": {field_name: value}}}})
+
+
+def test_curriculum_stage_schema_rejects_stage_bounds_outside_global_ranges() -> None:
+    with pytest.raises(ValueError, match=r"n_nodes_max must be <= graph\.n_nodes_max"):
+        GeneratorConfig.from_dict(
+            {
+                "graph": {"n_nodes_min": 2, "n_nodes_max": 10},
+                "curriculum": {"stages": {"2": {"n_nodes_min": 2, "n_nodes_max": 12}}},
+            }
+        )
+
+
+def test_curriculum_stage_schema_rejects_features_min_above_global_max() -> None:
+    with pytest.raises(ValueError, match=r"n_features_min must be <= dataset\.n_features_max"):
+        GeneratorConfig.from_dict(
+            {
+                "dataset": {"n_features_min": 8, "n_features_max": 32},
+                "curriculum": {"stages": {"2": {"n_features_min": 64}}},
+            }
+        )
+
+
+def test_curriculum_stage_schema_rejects_features_max_below_global_min() -> None:
+    with pytest.raises(ValueError, match=r"n_features_max must be >= dataset\.n_features_min"):
+        GeneratorConfig.from_dict(
+            {
+                "dataset": {"n_features_min": 16, "n_features_max": 64},
+                "curriculum": {"stages": {"2": {"n_features_max": 8}}},
+            }
+        )
+
+
+def test_curriculum_stage_schema_rejects_nodes_min_above_global_max() -> None:
+    with pytest.raises(ValueError, match=r"n_nodes_min must be <= graph\.n_nodes_max"):
+        GeneratorConfig.from_dict(
+            {
+                "graph": {"n_nodes_min": 2, "n_nodes_max": 10},
+                "curriculum": {"stages": {"2": {"n_nodes_min": 12}}},
+            }
+        )
+
+
+def test_curriculum_stage_schema_rejects_nodes_max_below_global_min() -> None:
+    with pytest.raises(ValueError, match=r"n_nodes_max must be >= graph\.n_nodes_min"):
+        GeneratorConfig.from_dict(
+            {
+                "graph": {"n_nodes_min": 4, "n_nodes_max": 12},
+                "curriculum": {"stages": {"2": {"n_nodes_max": 2}}},
+            }
+        )
 
 
 def test_runtime_config_from_dict() -> None:

@@ -149,6 +149,138 @@ class GraphConfig:
     n_nodes_max: int = 32
 
 
+def _validate_optional_int_bound(name: str, value: object | None, *, minimum: int) -> int | None:
+    """Validate an optional integer bound and normalize to int."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer >= {minimum}, got {value!r}.")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        normalized = value.strip()
+        signless = normalized[1:] if normalized.startswith(("+", "-")) else normalized
+        if not signless.isdigit():
+            raise ValueError(f"{name} must be an integer >= {minimum}, got {value!r}.")
+        parsed = int(normalized)
+    else:
+        raise ValueError(f"{name} must be an integer >= {minimum}, got {value!r}.")
+    if parsed < minimum:
+        raise ValueError(f"{name} must be an integer >= {minimum}, got {value!r}.")
+    return parsed
+
+
+@dataclass(slots=True)
+class CurriculumStageConfig:
+    n_features_min: int | None = None
+    n_features_max: int | None = None
+    n_nodes_min: int | None = None
+    n_nodes_max: int | None = None
+    depth_min: int | None = None
+    depth_max: int | None = None
+
+    def __post_init__(self) -> None:
+        self.n_features_min = _validate_optional_int_bound(
+            "curriculum.stages.*.n_features_min", self.n_features_min, minimum=1
+        )
+        self.n_features_max = _validate_optional_int_bound(
+            "curriculum.stages.*.n_features_max", self.n_features_max, minimum=1
+        )
+        self.n_nodes_min = _validate_optional_int_bound(
+            "curriculum.stages.*.n_nodes_min", self.n_nodes_min, minimum=2
+        )
+        self.n_nodes_max = _validate_optional_int_bound(
+            "curriculum.stages.*.n_nodes_max", self.n_nodes_max, minimum=2
+        )
+        self.depth_min = _validate_optional_int_bound(
+            "curriculum.stages.*.depth_min", self.depth_min, minimum=1
+        )
+        self.depth_max = _validate_optional_int_bound(
+            "curriculum.stages.*.depth_max", self.depth_max, minimum=1
+        )
+
+        if (
+            self.n_features_min is not None
+            and self.n_features_max is not None
+            and self.n_features_min > self.n_features_max
+        ):
+            raise ValueError(
+                "curriculum.stages.*.n_features_min must be <= n_features_max, got "
+                f"{self.n_features_min} > {self.n_features_max}."
+            )
+        if (
+            self.n_nodes_min is not None
+            and self.n_nodes_max is not None
+            and self.n_nodes_min > self.n_nodes_max
+        ):
+            raise ValueError(
+                "curriculum.stages.*.n_nodes_min must be <= n_nodes_max, got "
+                f"{self.n_nodes_min} > {self.n_nodes_max}."
+            )
+        if (
+            self.depth_min is not None
+            and self.depth_max is not None
+            and self.depth_min > self.depth_max
+        ):
+            raise ValueError(
+                "curriculum.stages.*.depth_min must be <= depth_max, got "
+                f"{self.depth_min} > {self.depth_max}."
+            )
+
+
+def _normalize_curriculum_stage_key(value: str | int) -> int:
+    """Normalize stage key into 1..3 integer stage."""
+
+    if isinstance(value, bool):
+        raise ValueError(f"Unsupported curriculum stage key '{value}'. Expected 1, 2, or 3.")
+    if isinstance(value, int):
+        stage = value
+    elif isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Unsupported curriculum stage key ''. Expected 1, 2, or 3.")
+        signless = normalized[1:] if normalized.startswith(("+", "-")) else normalized
+        if not signless.isdigit():
+            raise ValueError(f"Unsupported curriculum stage key '{value}'. Expected 1, 2, or 3.")
+        stage = int(normalized)
+    else:  # pragma: no cover - defensive
+        raise ValueError(f"Unsupported curriculum stage key '{value}'. Expected 1, 2, or 3.")
+    if stage not in (1, 2, 3):
+        raise ValueError(f"Unsupported curriculum stage key '{value}'. Expected 1, 2, or 3.")
+    return stage
+
+
+@dataclass(slots=True)
+class CurriculumConfig:
+    stages: dict[int, CurriculumStageConfig] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: object | None) -> "CurriculumConfig":
+        """Construct curriculum config from dictionary payload."""
+
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise ValueError("curriculum must be a mapping.")
+        raw_stages = data.get("stages", {})
+        if raw_stages is None:
+            raw_stages = {}
+        if not isinstance(raw_stages, dict):
+            raise ValueError("curriculum.stages must be a mapping keyed by stage (1,2,3).")
+        stages: dict[int, CurriculumStageConfig] = {}
+        for raw_key, raw_stage_config in raw_stages.items():
+            stage = _normalize_curriculum_stage_key(raw_key)
+            if stage in stages:
+                raise ValueError(f"Duplicate curriculum stage '{stage}' in curriculum.stages.")
+            if not isinstance(raw_stage_config, dict):
+                raise ValueError(
+                    f"curriculum.stages[{raw_key!r}] must be a mapping of stage bounds."
+                )
+            stages[stage] = CurriculumStageConfig(**raw_stage_config)
+        return cls(stages=stages)
+
+
 @dataclass(slots=True)
 class RuntimeConfig:
     device: str = "auto"
@@ -228,6 +360,7 @@ class GeneratorConfig:
     meta_feature_targets: dict[str, list[float] | tuple[float, ...]] = field(default_factory=dict)
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     graph: GraphConfig = field(default_factory=GraphConfig)
+    curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
@@ -247,6 +380,7 @@ class GeneratorConfig:
         if "n_nodes_log2_max" in graph_data and "n_nodes_max" not in graph_data:
             graph_data["n_nodes_max"] = graph_data.pop("n_nodes_log2_max")
         graph = GraphConfig(**graph_data)
+        curriculum = CurriculumConfig.from_dict(data.get("curriculum"))
         runtime = RuntimeConfig(**(data.get("runtime") or {}))
         output = OutputConfig(**(data.get("output") or {}))
         diagnostics = DiagnosticsConfig(**(data.get("diagnostics") or {}))
@@ -263,6 +397,7 @@ class GeneratorConfig:
             meta_feature_targets=meta_feature_targets,
             dataset=dataset,
             graph=graph,
+            curriculum=curriculum,
             runtime=runtime,
             output=output,
             diagnostics=diagnostics,
@@ -270,6 +405,58 @@ class GeneratorConfig:
             benchmark=benchmark,
             filter=filter_cfg,
         )
+
+    def __post_init__(self) -> None:
+        dataset_n_features_min = int(self.dataset.n_features_min)
+        dataset_n_features_max = int(self.dataset.n_features_max)
+        graph_n_nodes_min = int(self.graph.n_nodes_min)
+        graph_n_nodes_max = int(self.graph.n_nodes_max)
+        for stage, stage_cfg in self.curriculum.stages.items():
+            _ = stage
+            if stage_cfg.n_features_min is not None:
+                if stage_cfg.n_features_min < dataset_n_features_min:
+                    raise ValueError(
+                        "curriculum.stages.*.n_features_min must be >= dataset.n_features_min "
+                        f"({dataset_n_features_min}), got {stage_cfg.n_features_min}."
+                    )
+                if stage_cfg.n_features_min > dataset_n_features_max:
+                    raise ValueError(
+                        "curriculum.stages.*.n_features_min must be <= dataset.n_features_max "
+                        f"({dataset_n_features_max}), got {stage_cfg.n_features_min}."
+                    )
+            if stage_cfg.n_features_max is not None:
+                if stage_cfg.n_features_max > dataset_n_features_max:
+                    raise ValueError(
+                        "curriculum.stages.*.n_features_max must be <= dataset.n_features_max "
+                        f"({dataset_n_features_max}), got {stage_cfg.n_features_max}."
+                    )
+                if stage_cfg.n_features_max < dataset_n_features_min:
+                    raise ValueError(
+                        "curriculum.stages.*.n_features_max must be >= dataset.n_features_min "
+                        f"({dataset_n_features_min}), got {stage_cfg.n_features_max}."
+                    )
+            if stage_cfg.n_nodes_min is not None:
+                if stage_cfg.n_nodes_min < graph_n_nodes_min:
+                    raise ValueError(
+                        "curriculum.stages.*.n_nodes_min must be >= graph.n_nodes_min "
+                        f"({graph_n_nodes_min}), got {stage_cfg.n_nodes_min}."
+                    )
+                if stage_cfg.n_nodes_min > graph_n_nodes_max:
+                    raise ValueError(
+                        "curriculum.stages.*.n_nodes_min must be <= graph.n_nodes_max "
+                        f"({graph_n_nodes_max}), got {stage_cfg.n_nodes_min}."
+                    )
+            if stage_cfg.n_nodes_max is not None:
+                if stage_cfg.n_nodes_max > graph_n_nodes_max:
+                    raise ValueError(
+                        "curriculum.stages.*.n_nodes_max must be <= graph.n_nodes_max "
+                        f"({graph_n_nodes_max}), got {stage_cfg.n_nodes_max}."
+                    )
+                if stage_cfg.n_nodes_max < graph_n_nodes_min:
+                    raise ValueError(
+                        "curriculum.stages.*.n_nodes_max must be >= graph.n_nodes_min "
+                        f"({graph_n_nodes_min}), got {stage_cfg.n_nodes_max}."
+                    )
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "GeneratorConfig":
