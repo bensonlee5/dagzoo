@@ -3,7 +3,12 @@ import torch
 import numpy as np
 
 from cauchy_generator.config import GeneratorConfig
-from cauchy_generator.core.dataset import generate_batch, generate_batch_iter, generate_one
+from cauchy_generator.core.dataset import (
+    _stratified_split_indices,
+    generate_batch,
+    generate_batch_iter,
+    generate_one,
+)
 from cauchy_generator.io.lineage_schema import (
     LINEAGE_SCHEMA_NAME,
     LINEAGE_SCHEMA_VERSION,
@@ -403,6 +408,67 @@ def test_invalid_class_split_raises_after_attempts(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("cauchy_generator.core.dataset._sample_curriculum", _tiny_split)
 
     with pytest.raises(ValueError, match="Failed to generate a valid dataset"):
+        generate_one(cfg, seed=99, device="cpu")
+
+
+def test_stratified_split_ensures_valid_class_split_with_many_classes() -> None:
+    """High n_classes with low n_test should not fail with stratified splitting."""
+    cfg = _tiny_config()
+    cfg.dataset.task = "classification"
+    cfg.dataset.n_classes_min = 10
+    cfg.dataset.n_classes_max = 10
+    cfg.dataset.n_train = 100
+    cfg.dataset.n_test = 28
+    cfg.filter.max_attempts = 3
+
+    bundle = generate_one(cfg, seed=42, device="cpu")
+    train_classes = set(torch.unique(bundle.y_train).tolist())
+    test_classes = set(torch.unique(bundle.y_test).tolist())
+    assert len(train_classes) >= 2
+    assert train_classes == test_classes
+
+
+def test_stratified_split_indices_returns_exact_requested_sizes() -> None:
+    y = torch.tensor([0] * 8 + [1] * 5 + [2] * 3 + [3], dtype=torch.int64)
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(123)
+    train_idx, test_idx = _stratified_split_indices(y, 10, generator, "cpu")
+
+    assert int(train_idx.shape[0]) == 10
+    assert int(test_idx.shape[0]) == 7
+
+    train_set = set(train_idx.tolist())
+    test_set = set(test_idx.tolist())
+    assert train_set.isdisjoint(test_set)
+    assert train_set | test_set == set(range(int(y.shape[0])))
+
+
+def test_stratified_split_indices_raises_for_infeasible_constraints() -> None:
+    y = torch.tensor([0, 0, 1, 1, 2, 2], dtype=torch.int64)
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(123)
+    with pytest.raises(ValueError, match="infeasible_stratified_split"):
+        _stratified_split_indices(y, 2, generator, "cpu")
+
+
+def test_generate_retries_when_stratified_split_is_infeasible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "classification"
+    cfg.filter.max_attempts = 2
+
+    def _raise_infeasible_split(
+        *_args: object, **_kwargs: object
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        raise ValueError("infeasible_stratified_split: forced for test")
+
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset._stratified_split_indices",
+        _raise_infeasible_split,
+    )
+
+    with pytest.raises(ValueError, match=r"Last reason: invalid_class_split"):
         generate_one(cfg, seed=99, device="cpu")
 
 
