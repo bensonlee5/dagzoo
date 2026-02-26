@@ -23,7 +23,7 @@ from cauchy_generator.core.node_pipeline import (
 from cauchy_generator.core.steering_metrics import extract_steering_metrics
 from cauchy_generator.diagnostics.types import DatasetMetrics
 from cauchy_generator.filtering import apply_torch_rf_filter
-from cauchy_generator.graph import sample_cauchy_dag
+from cauchy_generator.graph import dag_edge_density, dag_longest_path_nodes, sample_cauchy_dag
 from cauchy_generator.io.lineage_schema import (
     LINEAGE_SCHEMA_NAME,
     LINEAGE_SCHEMA_VERSION,
@@ -42,6 +42,8 @@ _CURRICULUM_STAGE3_MAX_ROWS = 60_000
 _CURRICULUM_STAGE1_TRAIN_FRACTION_MIN = 0.30
 _CURRICULUM_STAGE1_TRAIN_FRACTION_MAX = 0.90
 _CURRICULUM_STAGE23_TRAIN_FRACTION = 0.80
+_CURRICULUM_STAGE_STRUCTURE_EDGE_LOGIT_BIAS: dict[int, float] = {1: -0.75, 2: 0.0, 3: 0.75}
+_CURRICULUM_GRAPH_SAMPLING_MAX_ATTEMPTS = 64
 _DEFAULT_CONFIGURED_N_TRAIN = int(DatasetConfig().n_train)
 _DEFAULT_CONFIGURED_N_TEST = int(DatasetConfig().n_test)
 _STEERING_SUPPORTED_METRICS = frozenset(
@@ -213,13 +215,16 @@ def _sample_assignments(
 
 def _resolve_stagewise_layout_bounds(
     config: GeneratorConfig, curriculum: dict[str, Any]
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int, int | None, int | None, int | None]:
     """Resolve effective feature/node sampling bounds for a curriculum stage."""
 
     feature_min = int(config.dataset.n_features_min)
     feature_max = int(config.dataset.n_features_max)
     node_min = int(config.graph.n_nodes_min)
     node_max = int(config.graph.n_nodes_max)
+    depth_min: int | None = None
+    depth_max: int | None = None
+    stage: int | None = None
 
     stage_raw = curriculum.get("stage")
     if stage_raw is not None:
@@ -234,6 +239,10 @@ def _resolve_stagewise_layout_bounds(
                 node_min = int(stage_cfg.n_nodes_min)
             if stage_cfg.n_nodes_max is not None:
                 node_max = int(stage_cfg.n_nodes_max)
+            if stage_cfg.depth_min is not None:
+                depth_min = int(stage_cfg.depth_min)
+            if stage_cfg.depth_max is not None:
+                depth_max = int(stage_cfg.depth_max)
 
     if feature_min > feature_max:
         raise ValueError(
@@ -245,7 +254,53 @@ def _resolve_stagewise_layout_bounds(
             "Invalid effective node bounds after curriculum stage resolution: "
             f"n_nodes_min={node_min} > n_nodes_max={node_max}."
         )
-    return feature_min, feature_max, node_min, node_max
+    if depth_min is not None and depth_max is not None and depth_min > depth_max:
+        raise ValueError(
+            "Invalid effective depth bounds after curriculum stage resolution: "
+            f"depth_min={depth_min} > depth_max={depth_max}."
+        )
+    return feature_min, feature_max, node_min, node_max, depth_min, depth_max, stage
+
+
+def _sample_stagewise_graph(
+    n_nodes: int,
+    stage: int | None,
+    depth_min: int | None,
+    depth_max: int | None,
+    generator: torch.Generator,
+    device: str,
+) -> tuple[torch.Tensor, int, float]:
+    """Sample DAG adjacency with optional stage-conditioned structure/depth constraints."""
+
+    if stage is None:
+        edge_logit_bias = 0.0
+    else:
+        edge_logit_bias = _CURRICULUM_STAGE_STRUCTURE_EDGE_LOGIT_BIAS.get(stage, 0.0)
+    effective_depth_min = int(depth_min) if depth_min is not None else 1
+    effective_depth_max = int(depth_max) if depth_max is not None else int(n_nodes)
+    if effective_depth_min > effective_depth_max:
+        raise ValueError(
+            "Invalid effective stage depth bounds during graph sampling: "
+            f"depth_min={effective_depth_min} > depth_max={effective_depth_max}."
+        )
+
+    for _ in range(_CURRICULUM_GRAPH_SAMPLING_MAX_ATTEMPTS):
+        adjacency = sample_cauchy_dag(
+            n_nodes,
+            generator,
+            device,
+            edge_logit_bias=edge_logit_bias,
+        )
+        realized_depth = dag_longest_path_nodes(adjacency)
+        if effective_depth_min <= realized_depth <= effective_depth_max:
+            return adjacency, realized_depth, dag_edge_density(adjacency)
+
+    raise ValueError(
+        "Unable to sample DAG satisfying depth constraints after "
+        f"{_CURRICULUM_GRAPH_SAMPLING_MAX_ATTEMPTS} attempts: "
+        f"stage={stage}, n_nodes={n_nodes}, depth_min={effective_depth_min}, "
+        f"depth_max={effective_depth_max}."
+    )
 
 
 def _sample_layout(
@@ -257,9 +312,15 @@ def _sample_layout(
 ) -> dict[str, Any]:
     """Sample dataset layout, graph, and node assignments for one dataset instance."""
 
-    feature_min, feature_max, node_min, node_max = _resolve_stagewise_layout_bounds(
-        config, curriculum
-    )
+    (
+        feature_min,
+        feature_max,
+        node_min,
+        node_max,
+        depth_min,
+        depth_max,
+        stage,
+    ) = _resolve_stagewise_layout_bounds(config, curriculum)
     n_features = int(
         torch.randint(
             feature_min,
@@ -309,7 +370,14 @@ def _sample_layout(
     n_classes = max(2, n_classes)
 
     n_nodes = _sample_node_count(node_min, node_max, generator, device)
-    adjacency = sample_cauchy_dag(n_nodes, generator, device)
+    adjacency, graph_depth_nodes, graph_edge_density = _sample_stagewise_graph(
+        n_nodes,
+        stage,
+        depth_min,
+        depth_max,
+        generator,
+        device,
+    )
     feature_node_assignment = _sample_assignments(n_features, n_nodes, generator, device)
     target_node_assignment = _sample_assignments(1, n_nodes, generator, device)[0]
 
@@ -327,6 +395,8 @@ def _sample_layout(
         "feature_types": feature_types,
         "graph_nodes": n_nodes,
         "graph_edges": int(adjacency.sum().item()),
+        "graph_depth_nodes": int(graph_depth_nodes),
+        "graph_edge_density": float(graph_edge_density),
         "adjacency": adjacency,
         "feature_node_assignment": feature_node_assignment,
         "target_node_assignment": target_node_assignment,
@@ -581,6 +651,8 @@ def _generate_torch(
             ),
             "graph_nodes": int(layout["graph_nodes"]),
             "graph_edges": int(layout["graph_edges"]),
+            "graph_depth_nodes": int(layout["graph_depth_nodes"]),
+            "graph_edge_density": float(layout["graph_edge_density"]),
             "lineage": _build_lineage_metadata(layout, feature_index_map=feature_index_map),
             "seed": seed,
             "attempt_used": attempt,

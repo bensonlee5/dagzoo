@@ -87,6 +87,18 @@ def test_generate_one_lineage_assignment_lengths_and_bounds() -> None:
         assert 0 <= int(node_index) < n_nodes
 
 
+def test_generate_one_emits_graph_complexity_metadata() -> None:
+    cfg = _tiny_config()
+    bundle = generate_one(cfg, seed=14, device="cpu")
+
+    graph_nodes = int(bundle.metadata["graph_nodes"])
+    graph_depth_nodes = int(bundle.metadata["graph_depth_nodes"])
+    graph_edge_density = float(bundle.metadata["graph_edge_density"])
+
+    assert 1 <= graph_depth_nodes <= graph_nodes
+    assert 0.0 <= graph_edge_density <= 1.0
+
+
 def test_generate_batch_reproducible_metadata() -> None:
     cfg = _tiny_config()
     batch_a = generate_batch(cfg, num_datasets=2, seed=123, device="cpu")
@@ -122,6 +134,8 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
         "feature_types": ["num", "cat", "num", "cat"],
         "graph_nodes": 3,
         "graph_edges": 2,
+        "graph_depth_nodes": 2,
+        "graph_edge_density": 2.0 / 3.0,
         "adjacency": torch.tensor(
             [
                 [0, 1, 1],
@@ -320,6 +334,80 @@ def test_fixed_curriculum_stage_ranges(stage: int, low: int, high: int) -> None:
     assert low <= int(curriculum["n_rows_total"]) <= high
     assert float(curriculum["train_fraction"]) == pytest.approx(0.8)
     assert int(curriculum["n_train"]) + int(curriculum["n_test"]) == int(curriculum["n_rows_total"])
+
+
+def test_stagewise_structure_bias_increases_density_for_same_rng_stream() -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "regression"
+    cfg.dataset.n_features_min = 8
+    cfg.dataset.n_features_max = 8
+    cfg.graph.n_nodes_min = 20
+    cfg.graph.n_nodes_max = 20
+
+    layout_stage1 = _sample_layout(
+        cfg,
+        SeedManager(190).torch_rng("layout"),
+        "cpu",
+        curriculum={"stage": 1},
+    )
+    layout_stage3 = _sample_layout(
+        cfg,
+        SeedManager(190).torch_rng("layout"),
+        "cpu",
+        curriculum={"stage": 3},
+    )
+
+    assert int(layout_stage3["graph_edges"]) >= int(layout_stage1["graph_edges"])
+    assert float(layout_stage3["graph_edge_density"]) >= float(layout_stage1["graph_edge_density"])
+
+
+@pytest.mark.parametrize("task", ["classification", "regression"])
+def test_fixed_curriculum_stage_enforces_graph_depth_bounds(task: str) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = task
+    cfg.curriculum_stage = 2
+    cfg.filter.enabled = False
+    cfg.graph.n_nodes_min = 3
+    cfg.graph.n_nodes_max = 3
+    cfg.curriculum.stages = {
+        2: CurriculumStageConfig(
+            n_nodes_min=3,
+            n_nodes_max=3,
+            depth_min=3,
+            depth_max=3,
+        )
+    }
+
+    if task == "classification":
+        cfg.dataset.n_classes_min = 2
+        cfg.dataset.n_classes_max = 2
+
+    bundle = generate_one(cfg, seed=912 if task == "classification" else 913, device="cpu")
+    assert int(bundle.metadata["curriculum"]["stage"]) == 2
+    assert int(bundle.metadata["graph_nodes"]) == 3
+    assert int(bundle.metadata["graph_depth_nodes"]) == 3
+
+
+def test_curriculum_off_ignores_stagewise_depth_bounds() -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "regression"
+    cfg.curriculum_stage = "off"
+    cfg.filter.enabled = False
+    cfg.graph.n_nodes_min = 3
+    cfg.graph.n_nodes_max = 3
+    cfg.curriculum.stages = {
+        1: CurriculumStageConfig(
+            n_nodes_min=3,
+            n_nodes_max=3,
+            depth_min=4,
+            depth_max=4,
+        )
+    }
+
+    bundle = generate_one(cfg, seed=920, device="cpu")
+    assert bundle.metadata["curriculum"]["stage"] is None
+    assert int(bundle.metadata["graph_nodes"]) == 3
+    assert int(bundle.metadata["graph_depth_nodes"]) <= 3
 
 
 def test_fixed_curriculum_stage_enforces_feature_and_node_bounds(

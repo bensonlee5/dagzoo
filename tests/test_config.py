@@ -246,6 +246,26 @@ def test_curriculum_stage_schema_rejects_nodes_max_below_global_min() -> None:
         )
 
 
+def test_curriculum_stage_schema_rejects_depth_min_above_effective_nodes_max() -> None:
+    with pytest.raises(ValueError, match=r"depth_min must be <= effective graph\.n_nodes_max"):
+        GeneratorConfig.from_dict(
+            {
+                "graph": {"n_nodes_min": 2, "n_nodes_max": 8},
+                "curriculum": {"stages": {"2": {"n_nodes_max": 6, "depth_min": 7}}},
+            }
+        )
+
+
+def test_curriculum_stage_schema_rejects_depth_max_above_effective_nodes_max() -> None:
+    with pytest.raises(ValueError, match=r"depth_max must be <= effective graph\.n_nodes_max"):
+        GeneratorConfig.from_dict(
+            {
+                "graph": {"n_nodes_min": 2, "n_nodes_max": 8},
+                "curriculum": {"stages": {"2": {"n_nodes_max": 5, "depth_max": 6}}},
+            }
+        )
+
+
 def test_runtime_config_from_dict() -> None:
     cfg = GeneratorConfig.from_dict(
         {

@@ -412,7 +412,6 @@ class GeneratorConfig:
         graph_n_nodes_min = int(self.graph.n_nodes_min)
         graph_n_nodes_max = int(self.graph.n_nodes_max)
         for stage, stage_cfg in self.curriculum.stages.items():
-            _ = stage
             if stage_cfg.n_features_min is not None:
                 if stage_cfg.n_features_min < dataset_n_features_min:
                     raise ValueError(
@@ -457,6 +456,22 @@ class GeneratorConfig:
                         "curriculum.stages.*.n_nodes_max must be >= graph.n_nodes_min "
                         f"({graph_n_nodes_min}), got {stage_cfg.n_nodes_max}."
                     )
+
+            effective_stage_nodes_max = (
+                int(stage_cfg.n_nodes_max)
+                if stage_cfg.n_nodes_max is not None
+                else graph_n_nodes_max
+            )
+            if stage_cfg.depth_min is not None and stage_cfg.depth_min > effective_stage_nodes_max:
+                raise ValueError(
+                    "curriculum.stages.*.depth_min must be <= effective graph.n_nodes_max "
+                    f"for stage {stage} ({effective_stage_nodes_max}), got {stage_cfg.depth_min}."
+                )
+            if stage_cfg.depth_max is not None and stage_cfg.depth_max > effective_stage_nodes_max:
+                raise ValueError(
+                    "curriculum.stages.*.depth_max must be <= effective graph.n_nodes_max "
+                    f"for stage {stage} ({effective_stage_nodes_max}), got {stage_cfg.depth_max}."
+                )
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "GeneratorConfig":

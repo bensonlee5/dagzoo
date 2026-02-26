@@ -7,12 +7,18 @@ import math
 import torch
 
 
-def sample_cauchy_dag(n_nodes: int, generator: torch.Generator, device: str) -> torch.Tensor:
+def sample_cauchy_dag(
+    n_nodes: int,
+    generator: torch.Generator,
+    device: str,
+    *,
+    edge_logit_bias: float = 0.0,
+) -> torch.Tensor:
     """
     Sample a DAG adjacency matrix using Cauchy-style probabilities.
 
     For i < j:
-      p_ij = sigmoid(A + B_i + C_j)
+      p_ij = sigmoid(A + B_i + C_j + edge_logit_bias)
     where A, B_i, C_j ~ standard Cauchy.
     """
 
@@ -29,7 +35,7 @@ def sample_cauchy_dag(n_nodes: int, generator: torch.Generator, device: str) -> 
     u_c = torch.empty(n_nodes, device=device).uniform_(0, 1, generator=generator)
     c = torch.tan(math.pi * (u_c - 0.5))
 
-    logits = a + b[:, None] + c[None, :]
+    logits = a + b[:, None] + c[None, :] + float(edge_logit_bias)
     probs = torch.sigmoid(logits)
 
     upper_mask = torch.triu(
@@ -38,3 +44,45 @@ def sample_cauchy_dag(n_nodes: int, generator: torch.Generator, device: str) -> 
     edges = torch.empty(n_nodes, n_nodes, device=device).uniform_(0, 1, generator=generator) < probs
     adjacency = edges & upper_mask
     return adjacency
+
+
+def dag_longest_path_nodes(adjacency: torch.Tensor) -> int:
+    """Return DAG longest path length measured in number of nodes."""
+
+    if adjacency.ndim != 2 or adjacency.shape[0] != adjacency.shape[1]:
+        raise ValueError(f"adjacency must be square, got shape={tuple(adjacency.shape)!r}")
+    n_nodes = int(adjacency.shape[0])
+    if n_nodes == 0:
+        return 0
+    if n_nodes == 1:
+        return 1
+
+    adj_bool = adjacency.to(dtype=torch.bool)
+    if bool(torch.tril(adj_bool, diagonal=0).any().item()):
+        raise ValueError("adjacency must be strict upper-triangular for DAG depth computation.")
+
+    longest_from = [1] * n_nodes
+    for src in range(n_nodes - 1, -1, -1):
+        children = torch.where(adj_bool[src])[0]
+        if int(children.numel()) == 0:
+            longest_from[src] = 1
+        else:
+            longest_from[src] = 1 + max(longest_from[int(child.item())] for child in children)
+    return max(longest_from)
+
+
+def dag_edge_density(adjacency: torch.Tensor) -> float:
+    """Return realized DAG edge density over strict upper-triangular capacity."""
+
+    if adjacency.ndim != 2 or adjacency.shape[0] != adjacency.shape[1]:
+        raise ValueError(f"adjacency must be square, got shape={tuple(adjacency.shape)!r}")
+    n_nodes = int(adjacency.shape[0])
+    if n_nodes < 2:
+        return 0.0
+    adj_bool = adjacency.to(dtype=torch.bool)
+    if bool(torch.tril(adj_bool, diagonal=0).any().item()):
+        raise ValueError("adjacency must be strict upper-triangular for density computation.")
+
+    capacity = n_nodes * (n_nodes - 1) // 2
+    edges = int(adj_bool.sum().item())
+    return float(edges / capacity)
