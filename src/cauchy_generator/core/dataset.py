@@ -393,14 +393,14 @@ def _sample_layout(
         effective_node_min_for_sampling = max(
             effective_node_min_for_sampling, int(bounds.depth_min)
         )
-    if effective_node_min_for_sampling > bounds.node_max:
+    sampled_node_min = max(2, int(effective_node_min_for_sampling))
+    sampled_node_max = max(2, int(bounds.node_max))
+    if sampled_node_min > sampled_node_max:
         raise ValueError(
             "Invalid effective node/depth bounds for graph sampling: "
-            f"n_nodes_min={effective_node_min_for_sampling} > n_nodes_max={bounds.node_max} "
+            f"n_nodes_min={sampled_node_min} > n_nodes_max={sampled_node_max} "
             f"(stage={bounds.stage}, depth_min={bounds.depth_min})."
         )
-    sampled_node_min = max(2, int(effective_node_min_for_sampling))
-    sampled_node_max = max(sampled_node_min, int(bounds.node_max))
 
     n_nodes = _sample_node_count(
         sampled_node_min,

@@ -525,6 +525,28 @@ def test_sample_layout_stage_bounds_uses_effective_node_min_with_depth_constrain
     assert stage_bounds["n_nodes_max"] == 6
 
 
+def test_generate_one_accepts_depth_bounds_with_global_node_floor() -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "regression"
+    cfg.curriculum_stage = 2
+    cfg.filter.enabled = False
+    cfg.graph.n_nodes_min = 1
+    cfg.graph.n_nodes_max = 1
+    cfg.curriculum.stages = {
+        2: CurriculumStageConfig(
+            depth_min=2,
+            depth_max=2,
+        )
+    }
+
+    bundle = generate_one(cfg, seed=935, device="cpu")
+    assert int(bundle.metadata["curriculum"]["stage"]) == 2
+    assert int(bundle.metadata["graph_nodes"]) == 2
+    assert int(bundle.metadata["graph_depth_nodes"]) == 2
+    assert bundle.metadata["curriculum"]["stage_bounds"]["n_nodes_min"] == 2
+    assert bundle.metadata["curriculum"]["stage_bounds"]["n_nodes_max"] == 2
+
+
 def test_fixed_curriculum_stage_enforces_feature_and_node_bounds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
