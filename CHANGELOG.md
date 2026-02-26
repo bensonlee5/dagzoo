@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Versioned DAG lineage schema validator for `metadata.lineage` (`schema_name=cauchy_generator.dag_lineage`, `schema_version=1.0.0`) with strict adjacency/assignment checks and backward-compatible optional metadata mode
 - Benchmark lineage-export guardrails (`lineage_guardrails`) that compare shard persistence throughput against lineage-stripped controls and surface warn/fail issues in regression summaries
 - Lineage benchmark smoke preset: `configs/preset_lineage_benchmark_smoke.yaml`
+- Curriculum metadata diagnostics payload (`metadata.curriculum.realized_complexity`, `stage_bounds`, `monotonicity_axes`) for staged complexity tracking across tasks
 
 ### Changed
 

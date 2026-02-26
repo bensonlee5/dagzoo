@@ -46,6 +46,12 @@ _CURRICULUM_STAGE23_TRAIN_FRACTION = 0.80
 # Tuning/configurability can be promoted to a later roadmap item if needed.
 _CURRICULUM_STAGE_STRUCTURE_EDGE_LOGIT_BIAS: dict[int, float] = {1: -0.75, 2: 0.0, 3: 0.75}
 _CURRICULUM_GRAPH_SAMPLING_MAX_ATTEMPTS = 64
+_CURRICULUM_MONOTONICITY_AXES: tuple[str, ...] = (
+    "n_rows_total",
+    "n_features",
+    "graph_nodes",
+    "graph_depth_nodes",
+)
 _DEFAULT_CONFIGURED_N_TRAIN = int(DatasetConfig().n_train)
 _DEFAULT_CONFIGURED_N_TEST = int(DatasetConfig().n_test)
 _STEERING_SUPPORTED_METRICS = frozenset(
@@ -393,10 +399,12 @@ def _sample_layout(
             f"n_nodes_min={effective_node_min_for_sampling} > n_nodes_max={bounds.node_max} "
             f"(stage={bounds.stage}, depth_min={bounds.depth_min})."
         )
+    sampled_node_min = max(2, int(effective_node_min_for_sampling))
+    sampled_node_max = max(sampled_node_min, int(bounds.node_max))
 
     n_nodes = _sample_node_count(
-        effective_node_min_for_sampling,
-        bounds.node_max,
+        sampled_node_min,
+        sampled_node_max,
         generator,
         device,
     )
@@ -427,6 +435,15 @@ def _sample_layout(
         "graph_edges": int(adjacency.sum().item()),
         "graph_depth_nodes": int(graph_depth_nodes),
         "graph_edge_density": float(graph_edge_density),
+        "stage_bounds": {
+            # Report effective sampling bounds after depth-derived clamping.
+            "n_features_min": int(bounds.feature_min),
+            "n_features_max": int(bounds.feature_max),
+            "n_nodes_min": int(sampled_node_min),
+            "n_nodes_max": int(sampled_node_max),
+            "depth_min": int(bounds.depth_min) if bounds.depth_min is not None else None,
+            "depth_max": int(bounds.depth_max) if bounds.depth_max is not None else None,
+        },
         "adjacency": adjacency,
         "feature_node_assignment": feature_node_assignment,
         "target_node_assignment": target_node_assignment,
@@ -467,6 +484,45 @@ def _build_lineage_metadata(
         },
     }
     validate_lineage_payload(payload)
+    return payload
+
+
+def _build_curriculum_metadata(
+    curriculum: dict[str, Any],
+    *,
+    layout: dict[str, Any],
+    n_train: int,
+    n_test: int,
+    n_features: int,
+) -> dict[str, Any]:
+    """Attach stage complexity diagnostics to emitted curriculum metadata."""
+
+    payload = dict(curriculum)
+    stage_bounds_payload: dict[str, int | None] = {
+        "n_features_min": None,
+        "n_features_max": None,
+        "n_nodes_min": None,
+        "n_nodes_max": None,
+        "depth_min": None,
+        "depth_max": None,
+    }
+    raw_stage_bounds = layout.get("stage_bounds")
+    if isinstance(raw_stage_bounds, dict):
+        for key in stage_bounds_payload:
+            raw_value = raw_stage_bounds.get(key)
+            stage_bounds_payload[key] = int(raw_value) if raw_value is not None else None
+
+    payload["realized_complexity"] = {
+        "n_rows_total": int(n_train + n_test),
+        "n_train": int(n_train),
+        "n_test": int(n_test),
+        "n_features": int(n_features),
+        "graph_nodes": int(layout["graph_nodes"]),
+        "graph_depth_nodes": int(layout["graph_depth_nodes"]),
+        "graph_edge_density": float(layout["graph_edge_density"]),
+    }
+    payload["stage_bounds"] = stage_bounds_payload
+    payload["monotonicity_axes"] = list(_CURRICULUM_MONOTONICITY_AXES)
     return payload
 
 
@@ -669,6 +725,13 @@ def _generate_torch(
         y_dtype = torch.int64 if config.dataset.task == "classification" else dtype
         y_train = y_train.to(y_dtype)
         y_test = y_test.to(y_dtype)
+        curriculum_metadata = _build_curriculum_metadata(
+            curriculum,
+            layout=layout,
+            n_train=int(x_train.shape[0]),
+            n_test=int(x_test.shape[0]),
+            n_features=int(x_train.shape[1]),
+        )
 
         metadata = {
             "backend": "torch",
@@ -687,7 +750,7 @@ def _generate_torch(
             "seed": seed,
             "attempt_used": attempt,
             "filter": aux_meta.get("filter", {}),
-            "curriculum": curriculum,
+            "curriculum": curriculum_metadata,
             "config": asdict(config),
         }
         if missingness_summary is not None:
