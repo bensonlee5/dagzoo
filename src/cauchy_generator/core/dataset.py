@@ -185,15 +185,17 @@ def _torch_dtype(config: GeneratorConfig) -> torch.dtype:
     return torch.float64 if config.runtime.torch_dtype == "float64" else torch.float32
 
 
-def _sample_node_count(config: GeneratorConfig, generator: torch.Generator, device: str) -> int:
-    """Sample graph node count using log-uniform bounds from config."""
+def _sample_node_count(
+    n_nodes_min: int,
+    n_nodes_max: int,
+    generator: torch.Generator,
+    device: str,
+) -> int:
+    """Sample graph node count using log-uniform bounds."""
 
-    low = max(2.0, float(config.graph.n_nodes_min))
-    high = max(low, float(config.graph.n_nodes_max))
-    log_low = math.log(low)
-    log_high = math.log(high)
-    u = torch.empty(1, device=device).uniform_(log_low, log_high, generator=generator)
-    return max(2, int(math.exp(u.item())))
+    low = max(2, int(n_nodes_min))
+    high = max(low, int(n_nodes_max))
+    return _sample_log_uniform_int(generator, device, low, high)
 
 
 def _sample_assignments(
@@ -209,15 +211,59 @@ def _sample_assignments(
     return eligible_nodes[indices].tolist()
 
 
+def _resolve_stagewise_layout_bounds(
+    config: GeneratorConfig, curriculum: dict[str, Any]
+) -> tuple[int, int, int, int]:
+    """Resolve effective feature/node sampling bounds for a curriculum stage."""
+
+    feature_min = int(config.dataset.n_features_min)
+    feature_max = int(config.dataset.n_features_max)
+    node_min = int(config.graph.n_nodes_min)
+    node_max = int(config.graph.n_nodes_max)
+
+    stage_raw = curriculum.get("stage")
+    if stage_raw is not None:
+        stage = int(stage_raw)
+        stage_cfg = config.curriculum.stages.get(stage)
+        if stage_cfg is not None:
+            if stage_cfg.n_features_min is not None:
+                feature_min = int(stage_cfg.n_features_min)
+            if stage_cfg.n_features_max is not None:
+                feature_max = int(stage_cfg.n_features_max)
+            if stage_cfg.n_nodes_min is not None:
+                node_min = int(stage_cfg.n_nodes_min)
+            if stage_cfg.n_nodes_max is not None:
+                node_max = int(stage_cfg.n_nodes_max)
+
+    if feature_min > feature_max:
+        raise ValueError(
+            "Invalid effective feature bounds after curriculum stage resolution: "
+            f"n_features_min={feature_min} > n_features_max={feature_max}."
+        )
+    if node_min > node_max:
+        raise ValueError(
+            "Invalid effective node bounds after curriculum stage resolution: "
+            f"n_nodes_min={node_min} > n_nodes_max={node_max}."
+        )
+    return feature_min, feature_max, node_min, node_max
+
+
 def _sample_layout(
-    config: GeneratorConfig, generator: torch.Generator, device: str
+    config: GeneratorConfig,
+    generator: torch.Generator,
+    device: str,
+    *,
+    curriculum: dict[str, Any],
 ) -> dict[str, Any]:
     """Sample dataset layout, graph, and node assignments for one dataset instance."""
 
+    feature_min, feature_max, node_min, node_max = _resolve_stagewise_layout_bounds(
+        config, curriculum
+    )
     n_features = int(
         torch.randint(
-            config.dataset.n_features_min,
-            config.dataset.n_features_max + 1,
+            feature_min,
+            feature_max + 1,
             (1,),
             generator=generator,
         ).item()
@@ -262,7 +308,7 @@ def _sample_layout(
     )
     n_classes = max(2, n_classes)
 
-    n_nodes = _sample_node_count(config, generator, device)
+    n_nodes = _sample_node_count(node_min, node_max, generator, device)
     adjacency = sample_cauchy_dag(n_nodes, generator, device)
     feature_node_assignment = _sample_assignments(n_features, n_nodes, generator, device)
     target_node_assignment = _sample_assignments(1, n_nodes, generator, device)[0]
@@ -735,7 +781,7 @@ def _generate_one_seeded(
     manager = SeedManager(seed)
     curriculum = _sample_curriculum(config, manager, auto_stage=auto_stage)
     layout_gen = manager.torch_rng("layout")
-    layout = _sample_layout(config, layout_gen, "cpu")
+    layout = _sample_layout(config, layout_gen, "cpu", curriculum=curriculum)
     data_seed = manager.child("data")
     n_train = int(curriculum["n_train"])
     n_test = int(curriculum["n_test"])

@@ -2,8 +2,9 @@ import pytest
 import torch
 import numpy as np
 
-from cauchy_generator.config import GeneratorConfig
+from cauchy_generator.config import CurriculumStageConfig, GeneratorConfig
 from cauchy_generator.core.dataset import (
+    _sample_layout,
     _stratified_split_indices,
     generate_batch,
     generate_batch_iter,
@@ -15,6 +16,7 @@ from cauchy_generator.io.lineage_schema import (
     validate_metadata_lineage,
     validate_lineage_payload,
 )
+from cauchy_generator.rng import SeedManager
 from cauchy_generator.types import DatasetBundle
 
 
@@ -318,6 +320,137 @@ def test_fixed_curriculum_stage_ranges(stage: int, low: int, high: int) -> None:
     assert low <= int(curriculum["n_rows_total"]) <= high
     assert float(curriculum["train_fraction"]) == pytest.approx(0.8)
     assert int(curriculum["n_train"]) + int(curriculum["n_test"]) == int(curriculum["n_rows_total"])
+
+
+def test_fixed_curriculum_stage_enforces_feature_and_node_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "regression"
+    cfg.curriculum_stage = 2
+    cfg.filter.enabled = False
+    cfg.dataset.n_features_min = 8
+    cfg.dataset.n_features_max = 64
+    cfg.graph.n_nodes_min = 2
+    cfg.graph.n_nodes_max = 32
+    cfg.curriculum.stages = {
+        2: CurriculumStageConfig(
+            n_features_min=11,
+            n_features_max=11,
+            n_nodes_min=7,
+            n_nodes_max=7,
+        )
+    }
+
+    def _identity_postprocess(
+        x_train,
+        y_train,
+        x_test,
+        y_test,
+        feature_types,
+        _task,
+        _generator,
+        _device,
+        *,
+        return_feature_index_map=False,
+    ):
+        assert return_feature_index_map is True
+        index_map = list(range(int(x_train.shape[1])))
+        return x_train, y_train, x_test, y_test, list(feature_types), index_map
+
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset.postprocess_dataset",
+        _identity_postprocess,
+    )
+
+    bundle = generate_one(cfg, seed=2026, device="cpu")
+    assert int(bundle.metadata["curriculum"]["stage"]) == 2
+    assert int(bundle.metadata["n_features"]) == 11
+    assert int(bundle.metadata["graph_nodes"]) == 7
+    assert int(bundle.X_train.shape[1]) == 11
+    assert int(bundle.X_test.shape[1]) == 11
+
+
+def test_curriculum_off_ignores_stagewise_feature_and_node_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "regression"
+    cfg.curriculum_stage = "off"
+    cfg.filter.enabled = False
+    cfg.dataset.n_features_min = 6
+    cfg.dataset.n_features_max = 6
+    cfg.graph.n_nodes_min = 4
+    cfg.graph.n_nodes_max = 4
+    cfg.curriculum.stages = {
+        1: CurriculumStageConfig(
+            n_features_min=20,
+            n_features_max=20,
+            n_nodes_min=12,
+            n_nodes_max=12,
+        )
+    }
+
+    def _identity_postprocess(
+        x_train,
+        y_train,
+        x_test,
+        y_test,
+        feature_types,
+        _task,
+        _generator,
+        _device,
+        *,
+        return_feature_index_map=False,
+    ):
+        assert return_feature_index_map is True
+        index_map = list(range(int(x_train.shape[1])))
+        return x_train, y_train, x_test, y_test, list(feature_types), index_map
+
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset.postprocess_dataset",
+        _identity_postprocess,
+    )
+
+    bundle = generate_one(cfg, seed=2027, device="cpu")
+    assert bundle.metadata["curriculum"]["stage"] is None
+    assert int(bundle.metadata["n_features"]) == 6
+    assert int(bundle.metadata["graph_nodes"]) == 4
+
+
+def test_stagewise_layout_sampling_is_seed_reproducible_for_feature_and_node_bounds() -> None:
+    cfg = _tiny_config()
+    cfg.dataset.n_features_min = 8
+    cfg.dataset.n_features_max = 64
+    cfg.graph.n_nodes_min = 2
+    cfg.graph.n_nodes_max = 32
+    cfg.curriculum.stages = {
+        3: CurriculumStageConfig(
+            n_features_min=13,
+            n_features_max=19,
+            n_nodes_min=5,
+            n_nodes_max=9,
+        )
+    }
+    curriculum = {"stage": 3}
+
+    layout_a = _sample_layout(
+        cfg,
+        SeedManager(909).torch_rng("layout"),
+        "cpu",
+        curriculum=curriculum,
+    )
+    layout_b = _sample_layout(
+        cfg,
+        SeedManager(909).torch_rng("layout"),
+        "cpu",
+        curriculum=curriculum,
+    )
+
+    assert layout_a["n_features"] == layout_b["n_features"]
+    assert layout_a["graph_nodes"] == layout_b["graph_nodes"]
+    assert 13 <= int(layout_a["n_features"]) <= 19
+    assert 5 <= int(layout_a["graph_nodes"]) <= 9
 
 
 def test_auto_curriculum_batch_stage_sequence_reproducible() -> None:
