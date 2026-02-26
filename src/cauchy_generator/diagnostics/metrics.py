@@ -6,10 +6,33 @@ from collections.abc import Sequence
 from dataclasses import fields
 from typing import Any
 
+import torch
+
 from cauchy_generator.core.steering_metrics import extract_steering_metrics
 from cauchy_generator.types import DatasetBundle
 
 from .types import DatasetMetrics
+
+
+def _to_cpu_value(value: Any) -> Any:
+    """Move tensors to CPU for diagnostics extraction, leaving non-tensors unchanged."""
+
+    if isinstance(value, torch.Tensor):
+        return value.detach().to(device="cpu")
+    return value
+
+
+def _bundle_on_cpu(bundle: DatasetBundle) -> DatasetBundle:
+    """Return a CPU-normalized copy of a bundle for device-agnostic diagnostics."""
+
+    return DatasetBundle(
+        X_train=_to_cpu_value(bundle.X_train),
+        y_train=_to_cpu_value(bundle.y_train),
+        X_test=_to_cpu_value(bundle.X_test),
+        y_test=_to_cpu_value(bundle.y_test),
+        feature_types=list(bundle.feature_types),
+        metadata=dict(bundle.metadata),
+    )
 
 
 def extract_metrics_batch(
@@ -26,6 +49,7 @@ def extract_dataset_metrics(
     bundle: DatasetBundle, *, include_spearman: bool = False
 ) -> DatasetMetrics:
     """Extract deterministic dataset-level metrics from one generated bundle."""
+    cpu_bundle = _bundle_on_cpu(bundle)
 
     # Derive all possible numeric metric names from the DatasetMetrics dataclass.
     metric_names = {f.name for f in fields(DatasetMetrics) if f.name != "task"}
@@ -33,7 +57,7 @@ def extract_dataset_metrics(
         metric_names -= {"spearman_abs_mean", "spearman_abs_max"}
 
     raw = extract_steering_metrics(
-        bundle, target_metric_names=metric_names, include_spearman=include_spearman
+        cpu_bundle, target_metric_names=metric_names, include_spearman=include_spearman
     )
 
     # Convert numeric results to expected types (int where appropriate)
