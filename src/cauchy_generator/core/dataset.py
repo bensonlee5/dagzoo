@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import asdict, fields
+from dataclasses import asdict
 import math
 from typing import Any
 
@@ -14,68 +14,28 @@ from cauchy_generator.config import (
     GeneratorConfig,
     normalize_curriculum_stage,
 )
+from cauchy_generator.core import curriculum as curriculum_core
 from cauchy_generator.core.constants import (
     NODE_SPEC_SEED_OFFSET,
     SPLIT_PERMUTATION_SEED_OFFSET,
     STEERING_TARGET_BAND_MIN_WIDTH,
 )
-from cauchy_generator.core.curriculum import (
-    _sample_auto_stage,
-    _sample_curriculum as _sample_curriculum_impl,
-    _sample_stage_rows as _sample_stage_rows_impl,
-    _split_counts as _split_counts_impl,
-)
 from cauchy_generator.core.layout import _build_node_specs, _sample_layout
 from cauchy_generator.core.metadata import _build_curriculum_metadata, _build_lineage_metadata
 from cauchy_generator.core.steering_metrics import extract_steering_metrics
 from cauchy_generator.core.validation import _classification_split_valid, _stratified_split_indices
-from cauchy_generator.diagnostics.types import DatasetMetrics
 from cauchy_generator.filtering import apply_torch_rf_filter
 from cauchy_generator.core.node_pipeline import apply_node_pipeline
 from cauchy_generator.meta_targets import (
+    CLASSIFICATION_ONLY_METRICS,
+    SUPPORTED_METRICS,
     collect_unknown_target_metrics,
     merge_weighted_target_specs,
-    validate_target_specs_for_task as _validate_target_specs_for_task_shared,
+    validate_target_specs_for_task,
 )
 from cauchy_generator.postprocess import inject_missingness, postprocess_dataset
 from cauchy_generator.rng import SeedManager
 from cauchy_generator.types import DatasetBundle
-
-_STEERING_SUPPORTED_METRICS = frozenset(
-    field_info.name for field_info in fields(DatasetMetrics) if field_info.name != "task"
-)
-_STEERING_CLASSIFICATION_ONLY_METRICS = frozenset(
-    {"class_entropy", "majority_minority_ratio", "n_classes"}
-)
-
-
-def _sample_stage_rows(stage: int, generator: torch.Generator, device: str) -> tuple[int, float]:
-    """Compatibility shim that keeps stage-row sampling monkeypatchable in this module."""
-
-    return _sample_stage_rows_impl(stage, generator, device)
-
-
-def _split_counts(n_total: int, train_fraction: float) -> tuple[int, int]:
-    """Compatibility shim for curriculum split count derivation."""
-
-    return _split_counts_impl(n_total, train_fraction)
-
-
-def _sample_curriculum(
-    config: GeneratorConfig,
-    manager: SeedManager,
-    *,
-    auto_stage: int,
-) -> dict[str, Any]:
-    """Compatibility shim that preserves module-local curriculum monkeypatching in tests."""
-
-    return _sample_curriculum_impl(
-        config,
-        manager,
-        auto_stage=auto_stage,
-        sample_stage_rows_fn=_sample_stage_rows,
-        split_counts_fn=_split_counts,
-    )
 
 
 def _resolve_device(config: GeneratorConfig, device_override: str | None) -> str:
@@ -351,7 +311,13 @@ def _generate_one_seeded(
     """Generate one dataset for a fully resolved seed/device/stage context."""
 
     manager = SeedManager(seed)
-    curriculum = _sample_curriculum(config, manager, auto_stage=auto_stage)
+    curriculum = curriculum_core._sample_curriculum(
+        config,
+        manager,
+        auto_stage=auto_stage,
+        sample_stage_rows_fn=curriculum_core._sample_stage_rows,
+        split_counts_fn=curriculum_core._split_counts,
+    )
     layout_gen = manager.torch_rng("layout")
     layout = _sample_layout(config, layout_gen, "cpu", curriculum=curriculum)
     data_seed = manager.child("data")
@@ -398,31 +364,7 @@ def _resolve_meta_target_specs(config: GeneratorConfig) -> dict[str, tuple[float
     return merge_weighted_target_specs(
         config.diagnostics.meta_feature_targets,
         config.meta_feature_targets,
-        supported_metrics=_STEERING_SUPPORTED_METRICS,
-    )
-
-
-def _collect_unknown_steering_target_metrics(config: GeneratorConfig) -> tuple[str, ...]:
-    """Collect unsupported steering target keys from config payloads."""
-
-    return collect_unknown_target_metrics(
-        config.diagnostics.meta_feature_targets,
-        config.meta_feature_targets,
-        supported_metrics=_STEERING_SUPPORTED_METRICS,
-    )
-
-
-def _validate_target_specs_for_task(
-    *,
-    task: str,
-    target_specs: dict[str, tuple[float, float, float]],
-) -> tuple[str, ...]:
-    """Return steering metrics that are incompatible with configured task."""
-
-    return _validate_target_specs_for_task_shared(
-        task=task,
-        target_specs=target_specs,
-        classification_only_metrics=_STEERING_CLASSIFICATION_ONLY_METRICS,
+        supported_metrics=SUPPORTED_METRICS,
     )
 
 
@@ -431,7 +373,7 @@ def _resolve_auto_stage(mode: str | int, *, seed: int) -> int:
 
     if mode == CURRICULUM_STAGE_AUTO:
         stage_gen = SeedManager(seed).torch_rng("curriculum", "stage")
-        return _sample_auto_stage(stage_gen)
+        return curriculum_core._sample_auto_stage(stage_gen)
     if isinstance(mode, int):
         return mode
     return 1
@@ -442,7 +384,11 @@ def _resolve_steering_settings(
 ) -> tuple[bool, dict[str, tuple[float, float, float]], int, float, bool]:
     """Resolve steering policy and validate runtime knobs when enabled."""
 
-    unknown_metrics = _collect_unknown_steering_target_metrics(config)
+    unknown_metrics = collect_unknown_target_metrics(
+        config.diagnostics.meta_feature_targets,
+        config.meta_feature_targets,
+        supported_metrics=SUPPORTED_METRICS,
+    )
     target_specs = _resolve_meta_target_specs(config)
     enabled = bool(config.steering.enabled and target_specs)
     max_attempts = max(1, int(config.steering.max_attempts))
@@ -450,13 +396,14 @@ def _resolve_steering_settings(
     if bool(config.steering.enabled):
         if unknown_metrics:
             unknown = ", ".join(unknown_metrics)
-            supported = ", ".join(sorted(_STEERING_SUPPORTED_METRICS))
+            supported = ", ".join(sorted(SUPPORTED_METRICS))
             raise ValueError(
                 f"Unsupported steering target metric(s): {unknown}. Supported metrics: {supported}."
             )
-        incompatible = _validate_target_specs_for_task(
+        incompatible = validate_target_specs_for_task(
             task=str(config.dataset.task),
             target_specs=target_specs,
+            classification_only_metrics=CLASSIFICATION_ONLY_METRICS,
         )
         if incompatible:
             metrics = ", ".join(incompatible)

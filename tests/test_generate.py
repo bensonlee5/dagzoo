@@ -794,7 +794,7 @@ def test_curriculum_complexity_metadata_is_monotonic_across_stages(
             3: (2048, 0.80),
         }[int(stage)]
 
-    monkeypatch.setattr("cauchy_generator.core.dataset._sample_stage_rows", _fixed_stage_rows)
+    monkeypatch.setattr("cauchy_generator.core.curriculum._sample_stage_rows", _fixed_stage_rows)
 
     realized_by_stage: list[dict[str, int]] = []
     for stage in (1, 2, 3):
@@ -802,7 +802,6 @@ def test_curriculum_complexity_metadata_is_monotonic_across_stages(
         bundle = generate_one(cfg, seed=2700 + stage, device="cpu")
         curriculum = bundle.metadata["curriculum"]
         realized = curriculum["realized_complexity"]
-        print(f"STAGE {stage}: {realized['n_rows_total']}")
         assert curriculum["monotonicity_axes"] == [
             "n_rows_total",
             "n_features",
@@ -845,7 +844,7 @@ def test_curriculum_respects_configured_split_size_ceiling(
     cfg.dataset.n_test = 4
 
     monkeypatch.setattr(
-        "cauchy_generator.core.dataset._sample_auto_stage",
+        "cauchy_generator.core.curriculum._sample_auto_stage",
         lambda _rng: 3,
     )
 
@@ -868,11 +867,11 @@ def test_curriculum_ceiling_applies_when_total_matches_default(
     cfg.dataset.n_test = 124
 
     monkeypatch.setattr(
-        "cauchy_generator.core.dataset._sample_auto_stage",
+        "cauchy_generator.core.curriculum._sample_auto_stage",
         lambda _rng: 3,
     )
     monkeypatch.setattr(
-        "cauchy_generator.core.dataset._sample_stage_rows",
+        "cauchy_generator.core.curriculum._sample_stage_rows",
         lambda _stage, _gen, _dev: (60_000, 0.8),
     )
 
@@ -909,7 +908,7 @@ def test_invalid_class_split_raises_after_attempts(monkeypatch: pytest.MonkeyPat
             "train_fraction": 0.5,
         }
 
-    monkeypatch.setattr("cauchy_generator.core.dataset._sample_curriculum", _tiny_split)
+    monkeypatch.setattr("cauchy_generator.core.curriculum._sample_curriculum", _tiny_split)
 
     with pytest.raises(ValueError, match="Failed to generate a valid dataset"):
         generate_one(cfg, seed=99, device="cpu")

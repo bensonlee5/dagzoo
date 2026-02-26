@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -276,7 +276,7 @@ def _ridge_predict(
         weights = torch.linalg.solve(gram + reg, rhs)
     except RuntimeError:
         weights = torch.linalg.pinv(gram + reg) @ rhs
-    return pred_design @ weights
+    return cast(torch.Tensor, pred_design @ weights)
 
 
 def _bootstrap_wins_ratio(

@@ -6,7 +6,8 @@ import argparse
 import datetime as dt
 import math
 import sys
-from dataclasses import asdict, fields
+from collections.abc import Iterator
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +32,6 @@ from cauchy_generator.diagnostics import (
     write_coverage_summary_json,
     write_coverage_summary_markdown,
 )
-from cauchy_generator.diagnostics.types import DatasetMetrics
 from cauchy_generator.hardware import (
     HardwareInfo,
     apply_hardware_profile,
@@ -39,10 +39,12 @@ from cauchy_generator.hardware import (
 )
 from cauchy_generator.io.parquet_writer import write_parquet_shards_stream
 from cauchy_generator.meta_targets import (
-    coerce_quantiles as _coerce_quantiles_shared,
+    CLASSIFICATION_ONLY_METRICS,
+    SUPPORTED_METRICS,
+    coerce_quantiles,
     collect_unknown_target_metrics,
     merge_weighted_target_specs,
-    validate_target_specs_for_task as _validate_target_specs_for_task_shared,
+    validate_target_specs_for_task,
     weighted_specs_to_bands,
 )
 
@@ -53,10 +55,6 @@ MISSINGNESS_MECHANISM_CLI_CHOICES = (
     MISSINGNESS_MECHANISM_MAR,
     MISSINGNESS_MECHANISM_MNAR,
 )
-META_TARGET_SUPPORTED_METRICS = frozenset(
-    field_info.name for field_info in fields(DatasetMetrics) if field_info.name != "task"
-)
-CLASSIFICATION_ONLY_METRICS = frozenset({"class_entropy", "majority_minority_ratio", "n_classes"})
 
 
 def _positive_int(value: str) -> int:
@@ -192,8 +190,8 @@ def _parse_meta_target_arg(raw: str) -> tuple[str, tuple[float, float, float]]:
         raise argparse.ArgumentTypeError(
             f"Invalid --meta-target '{raw}'. Metric key must be non-empty."
         )
-    if metric_name not in META_TARGET_SUPPORTED_METRICS:
-        supported = ", ".join(sorted(META_TARGET_SUPPORTED_METRICS))
+    if metric_name not in SUPPORTED_METRICS:
+        supported = ", ".join(sorted(SUPPORTED_METRICS))
         raise argparse.ArgumentTypeError(
             f"Unsupported --meta-target metric '{metric_name}'. Supported metrics: {supported}."
         )
@@ -230,7 +228,7 @@ def _resolve_meta_target_specs(
     resolved = merge_weighted_target_specs(
         config.diagnostics.meta_feature_targets,
         config.meta_feature_targets,
-        supported_metrics=META_TARGET_SUPPORTED_METRICS,
+        supported_metrics=SUPPORTED_METRICS,
     )
     if cli_overrides:
         for metric_name, spec in cli_overrides:
@@ -246,41 +244,11 @@ def _target_specs_to_bands(
     return weighted_specs_to_bands(target_specs)
 
 
-def _validate_target_specs_for_task(
-    *,
-    task: str,
-    target_specs: dict[str, tuple[float, float, float]],
-) -> tuple[str, ...]:
-    """Return metrics that are incompatible with the configured task."""
-
-    return _validate_target_specs_for_task_shared(
-        task=task,
-        target_specs=target_specs,
-        classification_only_metrics=CLASSIFICATION_ONLY_METRICS,
-    )
-
-
-def _collect_unknown_target_metrics_from_config(config: GeneratorConfig) -> tuple[str, ...]:
-    """Collect unsupported target metric keys from config payloads."""
-
-    return collect_unknown_target_metrics(
-        config.diagnostics.meta_feature_targets,
-        config.meta_feature_targets,
-        supported_metrics=META_TARGET_SUPPORTED_METRICS,
-    )
-
-
 def _raise_usage_error(message: str) -> None:
     """Exit with argparse-compatible usage error semantics."""
 
     print(f"error: {message}", file=sys.stderr)
     raise SystemExit(2)
-
-
-def _coerce_quantiles(raw: object) -> tuple[float, ...]:
-    """Normalize diagnostics quantiles into a tuple of floats."""
-
-    return _coerce_quantiles_shared(raw)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -541,16 +509,21 @@ def _run_generate(args: argparse.Namespace) -> int:
     steering_requested = bool(config.steering.enabled or args.steer_meta or bool(args.meta_target))
     resolved_target_specs = _resolve_meta_target_specs(config, args.meta_target)
     if steering_requested:
-        unknown_metrics = _collect_unknown_target_metrics_from_config(config)
+        unknown_metrics = collect_unknown_target_metrics(
+            config.diagnostics.meta_feature_targets,
+            config.meta_feature_targets,
+            supported_metrics=SUPPORTED_METRICS,
+        )
         if unknown_metrics:
             unknown = ", ".join(unknown_metrics)
-            supported = ", ".join(sorted(META_TARGET_SUPPORTED_METRICS))
+            supported = ", ".join(sorted(SUPPORTED_METRICS))
             _raise_usage_error(
                 f"Unsupported steering target metric(s): {unknown}. Supported metrics: {supported}."
             )
-        incompatible_metrics = _validate_target_specs_for_task(
+        incompatible_metrics = validate_target_specs_for_task(
             task=str(config.dataset.task),
             target_specs=resolved_target_specs,
+            classification_only_metrics=CLASSIFICATION_ONLY_METRICS,
         )
         if incompatible_metrics:
             metrics = ", ".join(incompatible_metrics)
@@ -584,7 +557,7 @@ def _run_generate(args: argparse.Namespace) -> int:
             CoverageAggregationConfig(
                 include_spearman=bool(config.diagnostics.include_spearman),
                 histogram_bins=int(config.diagnostics.histogram_bins),
-                quantiles=_coerce_quantiles(config.diagnostics.quantiles),
+                quantiles=coerce_quantiles(config.diagnostics.quantiles),
                 underrepresented_threshold=float(config.diagnostics.underrepresented_threshold),
                 max_values_per_metric=config.diagnostics.max_values_per_metric,
                 target_bands=_target_specs_to_bands(resolved_target_specs),
@@ -599,7 +572,7 @@ def _run_generate(args: argparse.Namespace) -> int:
         f"memory_gb={hw.total_memory_gb} peak_flops={hw.peak_flops:.3e} profile={hw.profile}"
     )
 
-    stream = generate_batch_iter(
+    stream: Iterator[Any] = generate_batch_iter(
         config,
         num_datasets=args.num_datasets,
         seed=seed,
@@ -608,7 +581,7 @@ def _run_generate(args: argparse.Namespace) -> int:
     if diagnostics_aggregator is not None:
         base_stream = stream
 
-        def _stream_with_diagnostics():
+        def _stream_with_diagnostics() -> Iterator[Any]:
             for bundle in base_stream:
                 diagnostics_aggregator.update_bundle(bundle)
                 yield bundle

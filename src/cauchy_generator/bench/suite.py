@@ -74,7 +74,7 @@ from cauchy_generator.hardware import (
     detect_hardware,
 )
 from cauchy_generator.meta_targets import (
-    coerce_quantiles as _coerce_quantiles_shared,
+    coerce_quantiles,
     merge_target_bands,
 )
 from cauchy_generator.rng import SeedManager
@@ -226,12 +226,6 @@ def _resolve_target_bands(config: GeneratorConfig) -> dict[str, tuple[float, flo
     return merge_target_bands(config.diagnostics.meta_feature_targets, config.meta_feature_targets)
 
 
-def _coerce_quantiles(raw: object) -> tuple[float, ...]:
-    """Normalize diagnostics quantiles into finite values."""
-
-    return _coerce_quantiles_shared(raw)
-
-
 def _sanitize_profile_key(profile_key: str) -> str:
     """Normalize profile key into a filesystem-safe unique path segment."""
 
@@ -255,7 +249,7 @@ def _build_diagnostics_aggregator(config: GeneratorConfig) -> CoverageAggregator
         CoverageAggregationConfig(
             include_spearman=bool(config.diagnostics.include_spearman),
             histogram_bins=max(1, int(config.diagnostics.histogram_bins)),
-            quantiles=_coerce_quantiles(config.diagnostics.quantiles),
+            quantiles=coerce_quantiles(config.diagnostics.quantiles),
             underrepresented_threshold=float(config.diagnostics.underrepresented_threshold),
             max_values_per_metric=config.diagnostics.max_values_per_metric,
             target_bands=_resolve_target_bands(config),

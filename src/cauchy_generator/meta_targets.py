@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
 import math
+
+from cauchy_generator.diagnostics.types import DatasetMetrics
 
 WeightedTargetSpec = tuple[float, float, float]
 TargetBand = tuple[float, float]
+SUPPORTED_METRICS: frozenset[str] = frozenset(
+    field_info.name for field_info in fields(DatasetMetrics) if field_info.name != "task"
+)
+CLASSIFICATION_ONLY_METRICS: frozenset[str] = frozenset(
+    {"class_entropy", "majority_minority_ratio", "n_classes"}
+)
 
 
 def coerce_weighted_target_specs(
