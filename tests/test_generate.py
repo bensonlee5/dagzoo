@@ -388,6 +388,27 @@ def test_fixed_curriculum_stage_enforces_graph_depth_bounds(task: str) -> None:
     assert int(bundle.metadata["graph_depth_nodes"]) == 3
 
 
+def test_stage_depth_min_above_nodes_min_still_generates_valid_graph() -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "regression"
+    cfg.curriculum_stage = 2
+    cfg.filter.enabled = False
+    cfg.graph.n_nodes_min = 3
+    cfg.graph.n_nodes_max = 6
+    cfg.curriculum.stages = {
+        2: CurriculumStageConfig(
+            n_nodes_min=3,
+            n_nodes_max=6,
+            depth_min=5,
+        )
+    }
+
+    bundle = generate_one(cfg, seed=931, device="cpu")
+    assert int(bundle.metadata["curriculum"]["stage"]) == 2
+    assert int(bundle.metadata["graph_nodes"]) >= 5
+    assert int(bundle.metadata["graph_depth_nodes"]) >= 5
+
+
 def test_curriculum_off_ignores_stagewise_depth_bounds() -> None:
     cfg = _tiny_config()
     cfg.dataset.task = "regression"
@@ -408,6 +429,27 @@ def test_curriculum_off_ignores_stagewise_depth_bounds() -> None:
     assert bundle.metadata["curriculum"]["stage"] is None
     assert int(bundle.metadata["graph_nodes"]) == 3
     assert int(bundle.metadata["graph_depth_nodes"]) <= 3
+
+
+def test_sample_layout_rejects_infeasible_depth_vs_nodes_bounds() -> None:
+    cfg = _tiny_config()
+    cfg.graph.n_nodes_min = 3
+    cfg.graph.n_nodes_max = 5
+    cfg.curriculum.stages = {
+        2: CurriculumStageConfig(
+            n_nodes_min=3,
+            n_nodes_max=5,
+            depth_min=6,
+        )
+    }
+
+    with pytest.raises(ValueError, match="Invalid effective node/depth bounds"):
+        _sample_layout(
+            cfg,
+            SeedManager(932).torch_rng("layout"),
+            "cpu",
+            curriculum={"stage": 2},
+        )
 
 
 def test_fixed_curriculum_stage_enforces_feature_and_node_bounds(

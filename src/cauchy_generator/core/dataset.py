@@ -369,7 +369,22 @@ def _sample_layout(
     )
     n_classes = max(2, n_classes)
 
-    n_nodes = _sample_node_count(node_min, node_max, generator, device)
+    effective_node_min_for_sampling = node_min
+    if depth_min is not None:
+        effective_node_min_for_sampling = max(effective_node_min_for_sampling, int(depth_min))
+    if effective_node_min_for_sampling > node_max:
+        raise ValueError(
+            "Invalid effective node/depth bounds for graph sampling: "
+            f"n_nodes_min={effective_node_min_for_sampling} > n_nodes_max={node_max} "
+            f"(stage={stage}, depth_min={depth_min})."
+        )
+
+    n_nodes = _sample_node_count(
+        effective_node_min_for_sampling,
+        node_max,
+        generator,
+        device,
+    )
     adjacency, graph_depth_nodes, graph_edge_density = _sample_stagewise_graph(
         n_nodes,
         stage,
