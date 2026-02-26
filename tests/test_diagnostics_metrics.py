@@ -27,7 +27,9 @@ def test_extract_dataset_metrics_classification_invariants(
     def _stub_filter(*_args, **_kwargs):
         return True, {"wins_ratio": 0.75, "n_valid_oob": 64, "backend": "torch_rf"}
 
-    monkeypatch.setattr("cauchy_generator.diagnostics.metrics.apply_torch_rf_filter", _stub_filter)
+    monkeypatch.setattr(
+        "cauchy_generator.core.steering_metrics.apply_torch_rf_filter", _stub_filter
+    )
     bundle = generate_one(_tiny_config("classification"), seed=7, device="cpu")
 
     metrics = extract_dataset_metrics(bundle, include_spearman=True)
@@ -57,7 +59,9 @@ def test_extract_dataset_metrics_regression_branch(
     def _stub_filter(*_args, **_kwargs):
         return True, {"wins_ratio": 0.55, "n_valid_oob": 64, "backend": "torch_rf"}
 
-    monkeypatch.setattr("cauchy_generator.diagnostics.metrics.apply_torch_rf_filter", _stub_filter)
+    monkeypatch.setattr(
+        "cauchy_generator.core.steering_metrics.apply_torch_rf_filter", _stub_filter
+    )
     bundle = generate_one(_tiny_config("regression"), seed=17, device="cpu")
 
     metrics = extract_dataset_metrics(bundle)
@@ -76,7 +80,9 @@ def test_extract_dataset_metrics_spearman_toggle(
     def _stub_filter(*_args, **_kwargs):
         return True, {"wins_ratio": 0.61, "n_valid_oob": 6, "backend": "torch_rf"}
 
-    monkeypatch.setattr("cauchy_generator.diagnostics.metrics.apply_torch_rf_filter", _stub_filter)
+    monkeypatch.setattr(
+        "cauchy_generator.core.steering_metrics.apply_torch_rf_filter", _stub_filter
+    )
     bundle = DatasetBundle(
         X_train=np.asarray([[0.0, 10.0], [1.0, 20.0], [2.0, 30.0], [3.0, 40.0]], dtype=np.float32),
         y_train=np.asarray([0.0, 1.0, 2.0, 3.0], dtype=np.float32),
@@ -102,7 +108,9 @@ def test_extract_dataset_metrics_reproducible_for_fixed_input(
     def _stub_filter(*_args, **_kwargs):
         return True, {"wins_ratio": 0.42, "n_valid_oob": 64, "backend": "torch_rf"}
 
-    monkeypatch.setattr("cauchy_generator.diagnostics.metrics.apply_torch_rf_filter", _stub_filter)
+    monkeypatch.setattr(
+        "cauchy_generator.core.steering_metrics.apply_torch_rf_filter", _stub_filter
+    )
     cfg = _tiny_config("classification")
     bundle_a = generate_one(cfg, seed=123, device="cpu")
     bundle_b = generate_one(cfg, seed=123, device="cpu")
@@ -120,7 +128,9 @@ def test_extract_dataset_metrics_handles_degenerate_constant_columns(
     def _stub_filter(*_args, **_kwargs):
         return False, {"reason": "insufficient_oob_predictions", "n_valid_oob": 0}
 
-    monkeypatch.setattr("cauchy_generator.diagnostics.metrics.apply_torch_rf_filter", _stub_filter)
+    monkeypatch.setattr(
+        "cauchy_generator.core.steering_metrics.apply_torch_rf_filter", _stub_filter
+    )
     bundle = DatasetBundle(
         X_train=np.ones((8, 3), dtype=np.float32),
         y_train=np.linspace(0.0, 1.0, num=8, dtype=np.float32),
@@ -149,7 +159,9 @@ def test_extract_metrics_batch_preserves_order(
     def _stub_filter(*_args, **_kwargs):
         return True, {"wins_ratio": 0.8, "n_valid_oob": 64, "backend": "torch_rf"}
 
-    monkeypatch.setattr("cauchy_generator.diagnostics.metrics.apply_torch_rf_filter", _stub_filter)
+    monkeypatch.setattr(
+        "cauchy_generator.core.steering_metrics.apply_torch_rf_filter", _stub_filter
+    )
     cfg = _tiny_config("classification")
     bundles = generate_batch(cfg, num_datasets=2, seed=900, device="cpu")
 

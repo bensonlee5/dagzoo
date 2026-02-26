@@ -10,13 +10,11 @@ import resource
 import sys
 import time
 from collections import Counter
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
-import cauchy_generator.bench.guardrails as _guardrails
 from cauchy_generator.bench.baseline import compare_summary_to_baseline
 from cauchy_generator.bench.constants import (
     CURRICULUM_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE,
@@ -50,6 +48,7 @@ from cauchy_generator.bench.collectors import (
 )
 from cauchy_generator.bench.guardrails import (
     _build_guardrail_issue,
+    _collect_lineage_guardrails,
     _collect_guardrail_regression_issues,
     _issue_sort_key,
     _resolve_curriculum_guardrail_context,
@@ -79,7 +78,6 @@ from cauchy_generator.meta_targets import (
     merge_target_bands,
 )
 from cauchy_generator.rng import SeedManager
-from cauchy_generator.types import DatasetBundle
 
 
 DEFAULT_PROFILE_CONFIGS: dict[str, str] = {
@@ -271,122 +269,6 @@ def _is_missingness_enabled(config: GeneratorConfig) -> bool:
     return bool(
         float(config.dataset.missing_rate) > 0.0
         and str(config.dataset.missing_mechanism).strip().lower() != MISSINGNESS_MECHANISM_NONE
-    )
-
-
-def _lineage_guardrail_sample_count(config: GeneratorConfig, suite: str, num_datasets: int) -> int:
-    """Compatibility wrapper for suite-level monkeypatching in tests."""
-
-    return _guardrails._lineage_guardrail_sample_count(
-        config, suite=suite, num_datasets=num_datasets
-    )
-
-
-def _bundle_without_lineage(bundle: DatasetBundle) -> DatasetBundle:
-    """Compatibility wrapper for suite-level monkeypatching in tests."""
-
-    return _guardrails._bundle_without_lineage(bundle)
-
-
-def _measure_persistence_datasets_per_minute(
-    bundles: Iterable[DatasetBundle],
-    *,
-    config: GeneratorConfig,
-    num_bundles: int,
-) -> float:
-    """Compatibility wrapper for suite-level monkeypatching in tests."""
-
-    return _guardrails._measure_persistence_datasets_per_minute(
-        bundles,
-        config=config,
-        num_bundles=num_bundles,
-    )
-
-
-def _stage_bundle(path: Path, bundle: DatasetBundle, *, strip_lineage: bool) -> None:
-    """Compatibility wrapper for suite-level monkeypatching in tests."""
-
-    _guardrails._stage_bundle(path, bundle, strip_lineage=strip_lineage)
-
-
-def _iter_staged_bundles(stage_dir: Path, *, num_bundles: int) -> Iterable[DatasetBundle]:
-    """Compatibility wrapper for suite-level monkeypatching in tests."""
-
-    return _guardrails._iter_staged_bundles(stage_dir, num_bundles=num_bundles)
-
-
-def _stage_lineage_trial_bundles(
-    config: GeneratorConfig,
-    *,
-    sample_n: int,
-    seed: int,
-    device: str | None,
-    baseline_stage_dir: Path,
-    current_stage_dir: Path,
-) -> tuple[int, int]:
-    """Compatibility wrapper preserving suite-level generate/serialize patch points."""
-
-    return _guardrails._stage_lineage_trial_bundles_impl(
-        config,
-        sample_n=sample_n,
-        seed=seed,
-        device=device,
-        baseline_stage_dir=baseline_stage_dir,
-        current_stage_dir=current_stage_dir,
-        generate_batch_iter_fn=generate_batch_iter,
-        stage_bundle_fn=_stage_bundle,
-    )
-
-
-def _measure_lineage_persistence_trials(
-    *,
-    baseline_stage_dir: Path,
-    current_stage_dir: Path,
-    num_bundles: int,
-    config: GeneratorConfig,
-    trials: int,
-) -> tuple[list[float], list[float]]:
-    """Compatibility wrapper preserving suite-level replay/measure patch points."""
-
-    return _guardrails._measure_lineage_persistence_trials_impl(
-        baseline_stage_dir=baseline_stage_dir,
-        current_stage_dir=current_stage_dir,
-        num_bundles=num_bundles,
-        config=config,
-        trials=trials,
-        iter_staged_bundles_fn=_iter_staged_bundles,
-        measure_persistence_fn=_measure_persistence_datasets_per_minute,
-    )
-
-
-def _median_throughput(values: list[float]) -> float:
-    """Compatibility wrapper for suite-level monkeypatching in tests."""
-
-    return _guardrails._median_throughput(values)
-
-
-def _collect_lineage_guardrails(
-    config: GeneratorConfig,
-    *,
-    suite: str,
-    num_datasets: int,
-    device: str | None,
-    warn_threshold_pct: float,
-    fail_threshold_pct: float,
-) -> dict[str, Any]:
-    """Compatibility wrapper preserving suite-level lineage patch points."""
-
-    return _guardrails._collect_lineage_guardrails_impl(
-        config,
-        suite=suite,
-        num_datasets=num_datasets,
-        device=device,
-        warn_threshold_pct=warn_threshold_pct,
-        fail_threshold_pct=fail_threshold_pct,
-        sample_count_fn=_lineage_guardrail_sample_count,
-        stage_lineage_trial_bundles_fn=_stage_lineage_trial_bundles,
-        measure_lineage_persistence_trials_fn=_measure_lineage_persistence_trials,
-        median_throughput_fn=_median_throughput,
     )
 
 

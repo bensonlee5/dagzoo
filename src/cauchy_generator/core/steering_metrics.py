@@ -26,7 +26,7 @@ def extract_steering_metrics(
     *,
     target_metric_names: set[str],
     include_spearman: bool = False,
-) -> dict[str, float | None]:
+) -> dict[str, Any]:
     """Extract the metric subset needed for steering without NumPy conversion."""
 
     x_train = _as_2d_float_tensor(bundle.X_train, name="X_train")
@@ -43,10 +43,11 @@ def extract_steering_metrics(
     )
     x_all = torch.cat([x_train, x_test], dim=0)
     y_all = _concat_targets(y_train, y_test)
-    task = _resolve_task(bundle.metadata, y_all)
+    task = resolve_task(bundle.metadata, y_all)
 
     required = set(target_metric_names)
-    metrics: dict[str, float | None] = {}
+    metrics: dict[str, Any] = {}
+    metrics["task"] = task
     metrics["n_rows"] = float(x_all.shape[0])
     metrics["n_features"] = float(x_all.shape[1])
 
@@ -136,8 +137,12 @@ def extract_steering_metrics(
         )
     metrics["snr_proxy_db"] = snr_proxy_db
 
-    # Return only targets and keep deterministic key ordering.
-    return {metric_name: metrics.get(metric_name) for metric_name in sorted(required)}
+    # Return only targets and task, keeping deterministic key ordering for metrics.
+    results: dict[str, Any] = {
+        metric_name: metrics.get(metric_name) for metric_name in sorted(required)
+    }
+    results["task"] = task
+    return results
 
 
 def _as_2d_float_tensor(value: Any, *, name: str) -> torch.Tensor:
@@ -170,7 +175,7 @@ def _concat_targets(y_train: torch.Tensor, y_test: torch.Tensor) -> torch.Tensor
     )
 
 
-def _resolve_task(metadata: dict[str, Any], y_all: torch.Tensor) -> str:
+def resolve_task(metadata: dict[str, Any], y_all: torch.Tensor) -> str:
     task = resolve_task_from_metadata(metadata)
     if task is not None:
         return task

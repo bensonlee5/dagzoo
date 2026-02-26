@@ -29,6 +29,7 @@ dev = [
   "pytest-cov>=6.0",
   "ruff>=0.6",
   "types-PyYAML",
+  "vulture>=2.14",
 ]
 
 [tool.hatch.build.targets.wheel]

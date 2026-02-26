@@ -7,7 +7,7 @@ import pickle
 import statistics
 import tempfile
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -137,41 +137,13 @@ def _stage_lineage_trial_bundles(
 ) -> tuple[int, int]:
     """Generate and stage baseline/current trial bundles once outside timed sections."""
 
-    return _stage_lineage_trial_bundles_impl(
-        config,
-        sample_n=sample_n,
-        seed=seed,
-        device=device,
-        baseline_stage_dir=baseline_stage_dir,
-        current_stage_dir=current_stage_dir,
-    )
-
-
-def _stage_lineage_trial_bundles_impl(
-    config: GeneratorConfig,
-    *,
-    sample_n: int,
-    seed: int,
-    device: str | None,
-    baseline_stage_dir: Path,
-    current_stage_dir: Path,
-    generate_batch_iter_fn: Callable[..., Iterable[DatasetBundle]] | None = None,
-    stage_bundle_fn: Callable[..., None] | None = None,
-) -> tuple[int, int]:
-    """Generate and stage baseline/current trial bundles using injectable dependencies."""
-
-    if generate_batch_iter_fn is None:
-        generate_batch_iter_fn = generate_batch_iter
-    if stage_bundle_fn is None:
-        stage_bundle_fn = _stage_bundle
-
     baseline_stage_dir.mkdir(parents=True, exist_ok=True)
     current_stage_dir.mkdir(parents=True, exist_ok=True)
 
     seen = 0
     with_lineage = 0
     for idx, bundle in enumerate(
-        generate_batch_iter_fn(
+        generate_batch_iter(
             config,
             num_datasets=sample_n,
             seed=seed,
@@ -182,8 +154,8 @@ def _stage_lineage_trial_bundles_impl(
         if has_lineage:
             with_lineage += 1
         file_name = f"bundle_{idx:06d}.pkl"
-        stage_bundle_fn(current_stage_dir / file_name, bundle, strip_lineage=False)
-        stage_bundle_fn(baseline_stage_dir / file_name, bundle, strip_lineage=True)
+        _stage_bundle(current_stage_dir / file_name, bundle, strip_lineage=False)
+        _stage_bundle(baseline_stage_dir / file_name, bundle, strip_lineage=True)
         seen = idx + 1
     return with_lineage, seen
 
@@ -198,47 +170,21 @@ def _measure_lineage_persistence_trials(
 ) -> tuple[list[float], list[float]]:
     """Collect paired baseline/lineage persistence throughput trials."""
 
-    return _measure_lineage_persistence_trials_impl(
-        baseline_stage_dir=baseline_stage_dir,
-        current_stage_dir=current_stage_dir,
-        num_bundles=num_bundles,
-        config=config,
-        trials=trials,
-    )
-
-
-def _measure_lineage_persistence_trials_impl(
-    *,
-    baseline_stage_dir: Path,
-    current_stage_dir: Path,
-    num_bundles: int,
-    config: GeneratorConfig,
-    trials: int,
-    iter_staged_bundles_fn: Callable[..., Iterable[DatasetBundle]] | None = None,
-    measure_persistence_fn: Callable[..., float] | None = None,
-) -> tuple[list[float], list[float]]:
-    """Collect paired persistence-throughput trials using injectable dependencies."""
-
-    if iter_staged_bundles_fn is None:
-        iter_staged_bundles_fn = _iter_staged_bundles
-    if measure_persistence_fn is None:
-        measure_persistence_fn = _measure_persistence_datasets_per_minute
-
     n_trials = max(1, int(trials))
     baseline_trials: list[float] = []
     current_trials: list[float] = []
     for _ in range(n_trials):
-        baseline_bundles = iter_staged_bundles_fn(baseline_stage_dir, num_bundles=num_bundles)
+        baseline_bundles = _iter_staged_bundles(baseline_stage_dir, num_bundles=num_bundles)
         baseline_trials.append(
-            measure_persistence_fn(
+            _measure_persistence_datasets_per_minute(
                 baseline_bundles,
                 config=config,
                 num_bundles=num_bundles,
             )
         )
-        current_bundles = iter_staged_bundles_fn(current_stage_dir, num_bundles=num_bundles)
+        current_bundles = _iter_staged_bundles(current_stage_dir, num_bundles=num_bundles)
         current_trials.append(
-            measure_persistence_fn(
+            _measure_persistence_datasets_per_minute(
                 current_bundles,
                 config=config,
                 num_bundles=num_bundles,
@@ -357,43 +303,7 @@ def _collect_lineage_guardrails(
     fail_threshold_pct: float,
 ) -> dict[str, Any]:
     """Measure lineage export overhead and convert it into guardrail metrics."""
-
-    return _collect_lineage_guardrails_impl(
-        config,
-        suite=suite,
-        num_datasets=num_datasets,
-        device=device,
-        warn_threshold_pct=warn_threshold_pct,
-        fail_threshold_pct=fail_threshold_pct,
-    )
-
-
-def _collect_lineage_guardrails_impl(
-    config: GeneratorConfig,
-    *,
-    suite: str,
-    num_datasets: int,
-    device: str | None,
-    warn_threshold_pct: float,
-    fail_threshold_pct: float,
-    sample_count_fn: Callable[..., int] | None = None,
-    stage_lineage_trial_bundles_fn: Callable[..., tuple[int, int]] | None = None,
-    measure_lineage_persistence_trials_fn: Callable[..., tuple[list[float], list[float]]]
-    | None = None,
-    median_throughput_fn: Callable[[list[float]], float] | None = None,
-) -> dict[str, Any]:
-    """Collect lineage guardrails using injectable helpers for call-site patchability."""
-
-    if sample_count_fn is None:
-        sample_count_fn = _lineage_guardrail_sample_count
-    if stage_lineage_trial_bundles_fn is None:
-        stage_lineage_trial_bundles_fn = _stage_lineage_trial_bundles
-    if measure_lineage_persistence_trials_fn is None:
-        measure_lineage_persistence_trials_fn = _measure_lineage_persistence_trials
-    if median_throughput_fn is None:
-        median_throughput_fn = _median_throughput
-
-    sample_n = sample_count_fn(config, suite=suite, num_datasets=num_datasets)
+    sample_n = _lineage_guardrail_sample_count(config, suite=suite, num_datasets=num_datasets)
     if sample_n <= 0:
         return {"enabled": False}
 
@@ -403,7 +313,7 @@ def _collect_lineage_guardrails_impl(
         baseline_stage_dir = stage_root / "baseline"
         current_stage_dir = stage_root / "current"
         try:
-            bundles_with_lineage, bundles_seen = stage_lineage_trial_bundles_fn(
+            bundles_with_lineage, bundles_seen = _stage_lineage_trial_bundles(
                 config,
                 sample_n=sample_n,
                 seed=sample_seed,
@@ -423,7 +333,7 @@ def _collect_lineage_guardrails_impl(
         lineage_coverage_rate = float(bundles_with_lineage) / float(bundles_seen)
 
         try:
-            baseline_trials, current_trials = measure_lineage_persistence_trials_fn(
+            baseline_trials, current_trials = _measure_lineage_persistence_trials(
                 baseline_stage_dir=baseline_stage_dir,
                 current_stage_dir=current_stage_dir,
                 num_bundles=bundles_seen,
@@ -436,8 +346,8 @@ def _collect_lineage_guardrails_impl(
                 "reason": "unavailable",
                 "detail": str(exc),
             }
-    baseline_dpm = median_throughput_fn(baseline_trials)
-    current_dpm = median_throughput_fn(current_trials)
+    baseline_dpm = _median_throughput(baseline_trials)
+    current_dpm = _median_throughput(current_trials)
 
     runtime_degradation = degradation_percent("datasets_per_minute", current_dpm, baseline_dpm)
     runtime_degradation_value = (

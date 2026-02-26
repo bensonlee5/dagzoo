@@ -801,6 +801,8 @@ def test_curriculum_complexity_metadata_is_monotonic_across_stages(
         cfg.curriculum_stage = stage
         bundle = generate_one(cfg, seed=2700 + stage, device="cpu")
         curriculum = bundle.metadata["curriculum"]
+        realized = curriculum["realized_complexity"]
+        print(f"STAGE {stage}: {realized['n_rows_total']}")
         assert curriculum["monotonicity_axes"] == [
             "n_rows_total",
             "n_features",

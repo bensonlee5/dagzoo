@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import cauchy_generator.bench.guardrails as guardrails_mod
 import cauchy_generator.bench.suite as suite_mod
 from cauchy_generator.bench.micro import run_microbenchmarks
 from cauchy_generator.bench.suite import ProfileRunSpec, run_benchmark_suite
@@ -676,14 +677,14 @@ def test_collect_lineage_guardrails_uses_median_of_three_trials_with_runtime_gat
         return float(next(trial_values))
 
     monkeypatch.setattr(
-        "cauchy_generator.bench.suite.generate_batch_iter", _stub_generate_batch_iter
+        "cauchy_generator.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter
     )
     monkeypatch.setattr(
-        "cauchy_generator.bench.suite._measure_persistence_datasets_per_minute",
+        "cauchy_generator.bench.guardrails._measure_persistence_datasets_per_minute",
         _stub_measure,
     )
 
-    guardrails = suite_mod._collect_lineage_guardrails(
+    guardrails = guardrails_mod._collect_lineage_guardrails(
         cfg,
         suite="smoke",
         num_datasets=2,
@@ -752,14 +753,14 @@ def test_collect_lineage_guardrails_emits_runtime_issue_when_sample_is_sufficien
         return float(next(trial_values))
 
     monkeypatch.setattr(
-        "cauchy_generator.bench.suite.generate_batch_iter", _stub_generate_batch_iter
+        "cauchy_generator.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter
     )
     monkeypatch.setattr(
-        "cauchy_generator.bench.suite._measure_persistence_datasets_per_minute",
+        "cauchy_generator.bench.guardrails._measure_persistence_datasets_per_minute",
         _stub_measure,
     )
 
-    guardrails = suite_mod._collect_lineage_guardrails(
+    guardrails = guardrails_mod._collect_lineage_guardrails(
         cfg,
         suite="smoke",
         num_datasets=6,
@@ -824,14 +825,14 @@ def test_collect_lineage_guardrails_reports_unavailable_for_non_runtime_persiste
         raise ValueError("codec unavailable")
 
     monkeypatch.setattr(
-        "cauchy_generator.bench.suite.generate_batch_iter", _stub_generate_batch_iter
+        "cauchy_generator.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter
     )
     monkeypatch.setattr(
-        "cauchy_generator.bench.suite._measure_lineage_persistence_trials",
+        "cauchy_generator.bench.guardrails._measure_lineage_persistence_trials",
         _stub_trials,
     )
 
-    guardrails = suite_mod._collect_lineage_guardrails(
+    guardrails = guardrails_mod._collect_lineage_guardrails(
         cfg,
         suite="smoke",
         num_datasets=2,
@@ -865,8 +866,8 @@ def test_measure_lineage_persistence_trials_replays_staged_bundles_without_gener
     )
     for idx in range(2):
         file_name = f"bundle_{idx:06d}.pkl"
-        suite_mod._stage_bundle(current_stage_dir / file_name, bundle, strip_lineage=False)
-        suite_mod._stage_bundle(baseline_stage_dir / file_name, bundle, strip_lineage=True)
+        guardrails_mod._stage_bundle(current_stage_dir / file_name, bundle, strip_lineage=False)
+        guardrails_mod._stage_bundle(baseline_stage_dir / file_name, bundle, strip_lineage=True)
 
     def _unexpected_generate(*_args, **_kwargs):
         raise AssertionError("generate_batch_iter must not run during timed persistence trials")
@@ -886,13 +887,15 @@ def test_measure_lineage_persistence_trials_replays_staged_bundles_without_gener
         assert seen == 2
         return 100.0 if len(call_counts) % 2 == 1 else 90.0
 
-    monkeypatch.setattr("cauchy_generator.bench.suite.generate_batch_iter", _unexpected_generate)
     monkeypatch.setattr(
-        "cauchy_generator.bench.suite._measure_persistence_datasets_per_minute",
+        "cauchy_generator.bench.guardrails.generate_batch_iter", _unexpected_generate
+    )
+    monkeypatch.setattr(
+        "cauchy_generator.bench.guardrails._measure_persistence_datasets_per_minute",
         _stub_measure,
     )
 
-    baseline_trials, current_trials = suite_mod._measure_lineage_persistence_trials(
+    baseline_trials, current_trials = guardrails_mod._measure_lineage_persistence_trials(
         baseline_stage_dir=baseline_stage_dir,
         current_stage_dir=current_stage_dir,
         num_bundles=2,
