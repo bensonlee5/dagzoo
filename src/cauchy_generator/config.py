@@ -69,6 +69,33 @@ def normalize_missing_mechanism(value: str) -> MissingnessMechanism:
     return result
 
 
+def _validate_finite_float_field(
+    *,
+    field_name: str,
+    value: Any,
+    lo: float,
+    hi: float | None,
+    lo_inclusive: bool,
+    hi_inclusive: bool,
+    expectation: str,
+) -> float:
+    """Validate a float field against finite bounds and normalize it."""
+
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be {expectation}, got {value!r}.")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be {expectation}, got {value!r}.") from exc
+    lo_ok = parsed >= lo if lo_inclusive else parsed > lo
+    hi_ok = True
+    if hi is not None:
+        hi_ok = parsed <= hi if hi_inclusive else parsed < hi
+    if not math.isfinite(parsed) or not (lo_ok and hi_ok):
+        raise ValueError(f"{field_name} must be {expectation}, got {parsed!r}.")
+    return parsed
+
+
 @dataclass(slots=True)
 class DatasetConfig:
     task: str = "classification"
@@ -88,15 +115,15 @@ class DatasetConfig:
     missing_mnar_logit_scale: float = 1.0
 
     def __post_init__(self) -> None:
-        if isinstance(self.missing_rate, bool):
-            raise ValueError(
-                f"dataset.missing_rate must be a finite value in [0, 1], got {self.missing_rate!r}."
-            )
-        self.missing_rate = float(self.missing_rate)
-        if not math.isfinite(self.missing_rate) or not (0.0 <= self.missing_rate <= 1.0):
-            raise ValueError(
-                f"dataset.missing_rate must be a finite value in [0, 1], got {self.missing_rate!r}."
-            )
+        self.missing_rate = _validate_finite_float_field(
+            field_name="dataset.missing_rate",
+            value=self.missing_rate,
+            lo=0.0,
+            hi=1.0,
+            lo_inclusive=True,
+            hi_inclusive=True,
+            expectation="a finite value in [0, 1]",
+        )
 
         self.missing_mechanism = normalize_missing_mechanism(self.missing_mechanism)
         if self.missing_rate > 0.0 and self.missing_mechanism == MISSINGNESS_MECHANISM_NONE:
@@ -104,43 +131,33 @@ class DatasetConfig:
                 "dataset.missing_mechanism must be mcar, mar, or mnar when dataset.missing_rate > 0."
             )
 
-        if isinstance(self.missing_mar_observed_fraction, bool):
-            raise ValueError(
-                "dataset.missing_mar_observed_fraction must be in (0, 1], got "
-                f"{self.missing_mar_observed_fraction!r}."
-            )
-        self.missing_mar_observed_fraction = float(self.missing_mar_observed_fraction)
-        if not math.isfinite(self.missing_mar_observed_fraction) or not (
-            0.0 < self.missing_mar_observed_fraction <= 1.0
-        ):
-            raise ValueError(
-                "dataset.missing_mar_observed_fraction must be in (0, 1], got "
-                f"{self.missing_mar_observed_fraction!r}."
-            )
-
-        if isinstance(self.missing_mar_logit_scale, bool):
-            raise ValueError(
-                "dataset.missing_mar_logit_scale must be a finite value > 0, got "
-                f"{self.missing_mar_logit_scale!r}."
-            )
-        self.missing_mar_logit_scale = float(self.missing_mar_logit_scale)
-        if not math.isfinite(self.missing_mar_logit_scale) or self.missing_mar_logit_scale <= 0.0:
-            raise ValueError(
-                "dataset.missing_mar_logit_scale must be a finite value > 0, got "
-                f"{self.missing_mar_logit_scale!r}."
-            )
-
-        if isinstance(self.missing_mnar_logit_scale, bool):
-            raise ValueError(
-                "dataset.missing_mnar_logit_scale must be a finite value > 0, got "
-                f"{self.missing_mnar_logit_scale!r}."
-            )
-        self.missing_mnar_logit_scale = float(self.missing_mnar_logit_scale)
-        if not math.isfinite(self.missing_mnar_logit_scale) or self.missing_mnar_logit_scale <= 0.0:
-            raise ValueError(
-                "dataset.missing_mnar_logit_scale must be a finite value > 0, got "
-                f"{self.missing_mnar_logit_scale!r}."
-            )
+        self.missing_mar_observed_fraction = _validate_finite_float_field(
+            field_name="dataset.missing_mar_observed_fraction",
+            value=self.missing_mar_observed_fraction,
+            lo=0.0,
+            hi=1.0,
+            lo_inclusive=False,
+            hi_inclusive=True,
+            expectation="in (0, 1]",
+        )
+        self.missing_mar_logit_scale = _validate_finite_float_field(
+            field_name="dataset.missing_mar_logit_scale",
+            value=self.missing_mar_logit_scale,
+            lo=0.0,
+            hi=None,
+            lo_inclusive=False,
+            hi_inclusive=False,
+            expectation="a finite value > 0",
+        )
+        self.missing_mnar_logit_scale = _validate_finite_float_field(
+            field_name="dataset.missing_mnar_logit_scale",
+            value=self.missing_mnar_logit_scale,
+            lo=0.0,
+            hi=None,
+            lo_inclusive=False,
+            hi_inclusive=False,
+            expectation="a finite value > 0",
+        )
 
 
 @dataclass(slots=True)
@@ -169,6 +186,21 @@ def _validate_optional_int_bound(name: str, value: object | None, *, minimum: in
     if parsed < minimum:
         raise ValueError(f"{name} must be an integer >= {minimum}, got {value!r}.")
     return parsed
+
+
+def _validate_min_max_pair(
+    *,
+    name: str,
+    min_value: int | None,
+    max_value: int | None,
+    max_label: str,
+) -> None:
+    """Validate that optional min/max values are ordered when both are provided."""
+
+    if min_value is None or max_value is None:
+        return
+    if min_value > max_value:
+        raise ValueError(f"{name} must be <= {max_label}, got {min_value} > {max_value}.")
 
 
 @dataclass(slots=True)
@@ -200,33 +232,24 @@ class CurriculumStageConfig:
             "curriculum.stages.*.depth_max", self.depth_max, minimum=1
         )
 
-        if (
-            self.n_features_min is not None
-            and self.n_features_max is not None
-            and self.n_features_min > self.n_features_max
-        ):
-            raise ValueError(
-                "curriculum.stages.*.n_features_min must be <= n_features_max, got "
-                f"{self.n_features_min} > {self.n_features_max}."
-            )
-        if (
-            self.n_nodes_min is not None
-            and self.n_nodes_max is not None
-            and self.n_nodes_min > self.n_nodes_max
-        ):
-            raise ValueError(
-                "curriculum.stages.*.n_nodes_min must be <= n_nodes_max, got "
-                f"{self.n_nodes_min} > {self.n_nodes_max}."
-            )
-        if (
-            self.depth_min is not None
-            and self.depth_max is not None
-            and self.depth_min > self.depth_max
-        ):
-            raise ValueError(
-                "curriculum.stages.*.depth_min must be <= depth_max, got "
-                f"{self.depth_min} > {self.depth_max}."
-            )
+        _validate_min_max_pair(
+            name="curriculum.stages.*.n_features_min",
+            min_value=self.n_features_min,
+            max_value=self.n_features_max,
+            max_label="n_features_max",
+        )
+        _validate_min_max_pair(
+            name="curriculum.stages.*.n_nodes_min",
+            min_value=self.n_nodes_min,
+            max_value=self.n_nodes_max,
+            max_label="n_nodes_max",
+        )
+        _validate_min_max_pair(
+            name="curriculum.stages.*.depth_min",
+            min_value=self.depth_min,
+            max_value=self.depth_max,
+            max_label="depth_max",
+        )
 
 
 def _normalize_curriculum_stage_key(value: str | int) -> int:

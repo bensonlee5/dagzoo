@@ -8,6 +8,7 @@ from typing import Iterable
 
 import numpy as np
 
+from cauchy_generator.bench.constants import MILLISECONDS_PER_SECOND
 from cauchy_generator.math_utils import to_numpy as _to_numpy
 from cauchy_generator.types import DatasetBundle
 
@@ -59,7 +60,7 @@ def summarize_latencies(latencies_seconds: Iterable[float]) -> dict[str, float]:
             "latency_max_ms": 0.0,
         }
 
-    ms = values * 1000.0
+    ms = values * MILLISECONDS_PER_SECOND
     return {
         "latency_samples": float(ms.size),
         "latency_mean_ms": float(np.mean(ms)),

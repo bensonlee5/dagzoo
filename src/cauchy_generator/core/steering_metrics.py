@@ -7,14 +7,18 @@ from typing import Any
 
 import torch
 
+from cauchy_generator.core.metric_constants import (
+    EPS as _EPS,
+    NUM_BOOTSTRAP as _NUM_BOOTSTRAP,
+    RIDGE_LAMBDA as _RIDGE_LAMBDA,
+    TASK_CLASSIFICATION as _TASK_CLASSIFICATION,
+    TASK_REGRESSION as _TASK_REGRESSION,
+    finite_or_none as _finite_or_none,
+    resolve_task_from_metadata,
+    validate_metric_shapes,
+)
 from cauchy_generator.filtering import apply_torch_rf_filter
 from cauchy_generator.types import DatasetBundle
-
-_TASK_CLASSIFICATION = "classification"
-_TASK_REGRESSION = "regression"
-_RIDGE_LAMBDA = 1e-6
-_NUM_BOOTSTRAP = 200
-_EPS = 1e-12
 
 
 def extract_steering_metrics(
@@ -30,7 +34,13 @@ def extract_steering_metrics(
     y_train = _as_target_tensor(bundle.y_train, name="y_train")
     y_test = _as_target_tensor(bundle.y_test, name="y_test")
 
-    _validate_shapes(bundle, x_train, x_test, y_train, y_test)
+    validate_metric_shapes(
+        feature_types=bundle.feature_types,
+        x_train=x_train,
+        x_test=x_test,
+        y_train=y_train,
+        y_test=y_test,
+    )
     x_all = torch.cat([x_train, x_test], dim=0)
     y_all = _concat_targets(y_train, y_test)
     task = _resolve_task(bundle.metadata, y_all)
@@ -144,30 +154,6 @@ def _as_target_tensor(value: Any, *, name: str) -> torch.Tensor:
     return arr
 
 
-def _validate_shapes(
-    bundle: DatasetBundle,
-    x_train: torch.Tensor,
-    x_test: torch.Tensor,
-    y_train: torch.Tensor,
-    y_test: torch.Tensor,
-) -> None:
-    if x_train.shape[1] != x_test.shape[1]:
-        raise ValueError(
-            f"X_train/X_test feature mismatch: {x_train.shape[1]} != {x_test.shape[1]}"
-        )
-    if x_train.shape[0] != y_train.shape[0]:
-        raise ValueError(f"X_train/y_train row mismatch: {x_train.shape[0]} != {y_train.shape[0]}")
-    if x_test.shape[0] != y_test.shape[0]:
-        raise ValueError(f"X_test/y_test row mismatch: {x_test.shape[0]} != {y_test.shape[0]}")
-    if x_train.shape[0] + x_test.shape[0] <= 0:
-        raise ValueError("Dataset must contain at least one row across train and test splits.")
-    if len(bundle.feature_types) != x_train.shape[1]:
-        raise ValueError(
-            "feature_types length must match feature count: "
-            f"{len(bundle.feature_types)} != {x_train.shape[1]}"
-        )
-
-
 def _concat_targets(y_train: torch.Tensor, y_test: torch.Tensor) -> torch.Tensor:
     if y_train.ndim == y_test.ndim:
         return torch.cat([y_train, y_test], dim=0)
@@ -185,13 +171,9 @@ def _concat_targets(y_train: torch.Tensor, y_test: torch.Tensor) -> torch.Tensor
 
 
 def _resolve_task(metadata: dict[str, Any], y_all: torch.Tensor) -> str:
-    config = metadata.get("config")
-    if isinstance(config, dict):
-        dataset_cfg = config.get("dataset")
-        if isinstance(dataset_cfg, dict):
-            raw_task = dataset_cfg.get("task")
-            if raw_task in {_TASK_CLASSIFICATION, _TASK_REGRESSION}:
-                return str(raw_task)
+    task = resolve_task_from_metadata(metadata)
+    if task is not None:
+        return task
 
     labels = y_all.reshape(-1)
     if labels.numel() == 0:
@@ -514,7 +496,3 @@ def _categorical_cardinality_stats(
         float(sum(cardinalities) / len(cardinalities)),
         int(max(cardinalities)),
     )
-
-
-def _finite_or_none(value: float) -> float | None:
-    return float(value) if math.isfinite(value) else None

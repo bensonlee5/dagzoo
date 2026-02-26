@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, fields
 import math
 from typing import Any
 
@@ -11,49 +11,36 @@ import torch
 
 from cauchy_generator.config import (
     CURRICULUM_STAGE_AUTO,
-    CURRICULUM_STAGE_OFF,
-    DatasetConfig,
     GeneratorConfig,
     normalize_curriculum_stage,
 )
-from cauchy_generator.core.node_pipeline import (
-    ConverterSpec,
-    apply_node_pipeline,
+from cauchy_generator.core.constants import (
+    NODE_SPEC_SEED_OFFSET,
+    SPLIT_PERMUTATION_SEED_OFFSET,
+    STEERING_TARGET_BAND_MIN_WIDTH,
 )
+from cauchy_generator.core.curriculum import (
+    _sample_auto_stage,
+    _sample_curriculum as _sample_curriculum_impl,
+    _sample_stage_rows as _sample_stage_rows_impl,
+    _split_counts as _split_counts_impl,
+)
+from cauchy_generator.core.layout import _build_node_specs, _sample_layout
+from cauchy_generator.core.metadata import _build_curriculum_metadata, _build_lineage_metadata
 from cauchy_generator.core.steering_metrics import extract_steering_metrics
+from cauchy_generator.core.validation import _classification_split_valid, _stratified_split_indices
 from cauchy_generator.diagnostics.types import DatasetMetrics
 from cauchy_generator.filtering import apply_torch_rf_filter
-from cauchy_generator.graph import dag_edge_density, dag_longest_path_nodes, sample_cauchy_dag
-from cauchy_generator.io.lineage_schema import (
-    LINEAGE_SCHEMA_NAME,
-    LINEAGE_SCHEMA_VERSION,
-    validate_lineage_payload,
+from cauchy_generator.core.node_pipeline import apply_node_pipeline
+from cauchy_generator.meta_targets import (
+    collect_unknown_target_metrics,
+    merge_weighted_target_specs,
+    validate_target_specs_for_task as _validate_target_specs_for_task_shared,
 )
 from cauchy_generator.postprocess import inject_missingness, postprocess_dataset
 from cauchy_generator.rng import SeedManager
-from cauchy_generator.sampling import CorrelatedSampler
 from cauchy_generator.types import DatasetBundle
 
-_CURRICULUM_STAGE1_ROWS = 1024
-_CURRICULUM_STAGE2_MIN_ROWS = 400
-_CURRICULUM_STAGE2_MAX_ROWS = 10_240
-_CURRICULUM_STAGE3_MIN_ROWS = 400
-_CURRICULUM_STAGE3_MAX_ROWS = 60_000
-_CURRICULUM_STAGE1_TRAIN_FRACTION_MIN = 0.30
-_CURRICULUM_STAGE1_TRAIN_FRACTION_MAX = 0.90
-_CURRICULUM_STAGE23_TRAIN_FRACTION = 0.80
-# Fixed stagewise structural prior for RD-006/RD-090 scope.
-# Tuning/configurability can be promoted to a later roadmap item if needed.
-_CURRICULUM_STAGE_STRUCTURE_EDGE_LOGIT_BIAS: dict[int, float] = {1: -0.75, 2: 0.0, 3: 0.75}
-_CURRICULUM_GRAPH_SAMPLING_MAX_ATTEMPTS = 64
-_CURRICULUM_MONOTONICITY_AXES: tuple[str, ...] = (
-    "n_rows_total",
-    "n_features",
-    "graph_nodes",
-    "graph_depth_nodes",
-)
-_DEFAULT_CONFIGURED_N_TRAIN = int(DatasetConfig().n_train)
-_DEFAULT_CONFIGURED_N_TEST = int(DatasetConfig().n_test)
 _STEERING_SUPPORTED_METRICS = frozenset(
     field_info.name for field_info in fields(DatasetMetrics) if field_info.name != "task"
 )
@@ -62,72 +49,16 @@ _STEERING_CLASSIFICATION_ONLY_METRICS = frozenset(
 )
 
 
-@dataclass(slots=True, frozen=True)
-class _StagewiseLayoutBounds:
-    feature_min: int
-    feature_max: int
-    node_min: int
-    node_max: int
-    depth_min: int | None
-    depth_max: int | None
-    stage: int | None
+def _sample_stage_rows(stage: int, generator: torch.Generator, device: str) -> tuple[int, float]:
+    """Compatibility shim that keeps stage-row sampling monkeypatchable in this module."""
 
-
-def _sample_log_uniform_int(generator: torch.Generator, device: str, low: int, high: int) -> int:
-    """Sample an integer from a log-uniform range [low, high]."""
-
-    log_low = math.log(float(low))
-    log_high = math.log(float(high))
-    u = torch.empty(1, device=device).uniform_(log_low, log_high, generator=generator)
-    sampled = int(math.exp(u.item()))
-    return max(low, min(high, sampled))
+    return _sample_stage_rows_impl(stage, generator, device)
 
 
 def _split_counts(n_total: int, train_fraction: float) -> tuple[int, int]:
-    """Split total rows into train/test while ensuring both sides are non-empty."""
+    """Compatibility shim for curriculum split count derivation."""
 
-    n_total = max(2, int(n_total))
-    n_train = int(round(float(train_fraction) * n_total))
-    n_train = min(max(1, n_train), n_total - 1)
-    n_test = n_total - n_train
-    return n_train, n_test
-
-
-def _sample_stage_rows(stage: int, generator: torch.Generator, device: str) -> tuple[int, float]:
-    """Sample total rows and train fraction for one curriculum stage."""
-
-    if stage == 1:
-        frac = (
-            torch.empty(1, device=device)
-            .uniform_(
-                _CURRICULUM_STAGE1_TRAIN_FRACTION_MIN,
-                _CURRICULUM_STAGE1_TRAIN_FRACTION_MAX,
-                generator=generator,
-            )
-            .item()
-        )
-        return (_CURRICULUM_STAGE1_ROWS, float(frac))
-    if stage == 2:
-        return (
-            _sample_log_uniform_int(
-                generator, device, _CURRICULUM_STAGE2_MIN_ROWS, _CURRICULUM_STAGE2_MAX_ROWS
-            ),
-            _CURRICULUM_STAGE23_TRAIN_FRACTION,
-        )
-    if stage == 3:
-        return (
-            _sample_log_uniform_int(
-                generator, device, _CURRICULUM_STAGE3_MIN_ROWS, _CURRICULUM_STAGE3_MAX_ROWS
-            ),
-            _CURRICULUM_STAGE23_TRAIN_FRACTION,
-        )
-    raise ValueError(f"Unsupported curriculum stage '{stage}'. Expected 1, 2, or 3.")
-
-
-def _sample_auto_stage(generator: torch.Generator) -> int:
-    """Sample a curriculum stage uniformly from 1..3."""
-
-    return int(torch.randint(1, 4, (1,), generator=generator).item())
+    return _split_counts_impl(n_total, train_fraction)
 
 
 def _sample_curriculum(
@@ -136,44 +67,15 @@ def _sample_curriculum(
     *,
     auto_stage: int,
 ) -> dict[str, Any]:
-    """Resolve stage and sample row/split regime for this dataset seed."""
+    """Compatibility shim that preserves module-local curriculum monkeypatching in tests."""
 
-    mode = normalize_curriculum_stage(config.curriculum_stage)
-    configured_n_train = max(1, int(config.dataset.n_train))
-    configured_n_test = max(1, int(config.dataset.n_test))
-    configured_total = configured_n_train + configured_n_test
-    if mode == CURRICULUM_STAGE_OFF:
-        return {
-            "mode": "off",
-            "stage": None,
-            "n_rows_total": configured_total,
-            "n_train": configured_n_train,
-            "n_test": configured_n_test,
-            "train_fraction": float(configured_n_train / configured_total),
-        }
-
-    stage = auto_stage if mode == CURRICULUM_STAGE_AUTO else int(mode)
-    rows_gen = manager.torch_rng("curriculum", "rows", stage)
-    sampled_rows_total, train_fraction = _sample_stage_rows(stage, rows_gen, "cpu")
-    configured_total = max(2, configured_total)
-    n_rows_total = sampled_rows_total
-    # Preserve caller-provided split-size knobs as a workload ceiling when
-    # they intentionally deviate from baseline defaults.
-    has_split_override = (
-        configured_n_train != _DEFAULT_CONFIGURED_N_TRAIN
-        or configured_n_test != _DEFAULT_CONFIGURED_N_TEST
+    return _sample_curriculum_impl(
+        config,
+        manager,
+        auto_stage=auto_stage,
+        sample_stage_rows_fn=_sample_stage_rows,
+        split_counts_fn=_split_counts,
     )
-    if has_split_override:
-        n_rows_total = min(sampled_rows_total, configured_total)
-    n_train, n_test = _split_counts(n_rows_total, train_fraction)
-    return {
-        "mode": CURRICULUM_STAGE_AUTO if mode == CURRICULUM_STAGE_AUTO else "fixed",
-        "stage": stage,
-        "n_rows_total": n_rows_total,
-        "n_train": n_train,
-        "n_test": n_test,
-        "train_fraction": float(train_fraction),
-    }
 
 
 def _resolve_device(config: GeneratorConfig, device_override: str | None) -> str:
@@ -206,369 +108,6 @@ def _torch_dtype(config: GeneratorConfig) -> torch.dtype:
     return torch.float64 if config.runtime.torch_dtype == "float64" else torch.float32
 
 
-def _sample_node_count(
-    n_nodes_min: int,
-    n_nodes_max: int,
-    generator: torch.Generator,
-    device: str,
-) -> int:
-    """Sample graph node count using log-uniform bounds."""
-
-    low = max(2, int(n_nodes_min))
-    high = max(low, int(n_nodes_max))
-    return _sample_log_uniform_int(generator, device, low, high)
-
-
-def _sample_assignments(
-    n_cols: int, n_nodes: int, generator: torch.Generator, device: str
-) -> list[int]:
-    """Assign columns to a random eligible subset of graph nodes."""
-
-    eligible_count = int(torch.randint(1, n_nodes + 1, (1,), generator=generator).item())
-    all_nodes = torch.randperm(n_nodes, generator=generator, device=device)
-    eligible_nodes = all_nodes[:eligible_count]
-    # Sample with replacement from eligible nodes
-    indices = torch.randint(0, eligible_count, (n_cols,), generator=generator, device=device)
-    return eligible_nodes[indices].tolist()
-
-
-def _resolve_stagewise_layout_bounds(
-    config: GeneratorConfig, curriculum: dict[str, Any]
-) -> _StagewiseLayoutBounds:
-    """Resolve effective feature/node sampling bounds for a curriculum stage."""
-
-    feature_min = int(config.dataset.n_features_min)
-    feature_max = int(config.dataset.n_features_max)
-    node_min = int(config.graph.n_nodes_min)
-    node_max = int(config.graph.n_nodes_max)
-    depth_min: int | None = None
-    depth_max: int | None = None
-    stage: int | None = None
-
-    stage_raw = curriculum.get("stage")
-    if stage_raw is not None:
-        stage = int(stage_raw)
-        stage_cfg = config.curriculum.stages.get(stage)
-        if stage_cfg is not None:
-            if stage_cfg.n_features_min is not None:
-                feature_min = int(stage_cfg.n_features_min)
-            if stage_cfg.n_features_max is not None:
-                feature_max = int(stage_cfg.n_features_max)
-            if stage_cfg.n_nodes_min is not None:
-                node_min = int(stage_cfg.n_nodes_min)
-            if stage_cfg.n_nodes_max is not None:
-                node_max = int(stage_cfg.n_nodes_max)
-            if stage_cfg.depth_min is not None:
-                depth_min = int(stage_cfg.depth_min)
-            if stage_cfg.depth_max is not None:
-                depth_max = int(stage_cfg.depth_max)
-
-    if feature_min > feature_max:
-        raise ValueError(
-            "Invalid effective feature bounds after curriculum stage resolution: "
-            f"n_features_min={feature_min} > n_features_max={feature_max}."
-        )
-    if node_min > node_max:
-        raise ValueError(
-            "Invalid effective node bounds after curriculum stage resolution: "
-            f"n_nodes_min={node_min} > n_nodes_max={node_max}."
-        )
-    if depth_min is not None and depth_max is not None and depth_min > depth_max:
-        raise ValueError(
-            "Invalid effective depth bounds after curriculum stage resolution: "
-            f"depth_min={depth_min} > depth_max={depth_max}."
-        )
-    return _StagewiseLayoutBounds(
-        feature_min=feature_min,
-        feature_max=feature_max,
-        node_min=node_min,
-        node_max=node_max,
-        depth_min=depth_min,
-        depth_max=depth_max,
-        stage=stage,
-    )
-
-
-def _sample_stagewise_graph(
-    n_nodes: int,
-    stage: int | None,
-    depth_min: int | None,
-    depth_max: int | None,
-    generator: torch.Generator,
-    device: str,
-) -> tuple[torch.Tensor, int, float]:
-    """Sample DAG adjacency with optional stage-conditioned structure/depth constraints."""
-
-    if stage is None:
-        edge_logit_bias = 0.0
-    else:
-        edge_logit_bias = _CURRICULUM_STAGE_STRUCTURE_EDGE_LOGIT_BIAS.get(stage, 0.0)
-    effective_depth_min = int(depth_min) if depth_min is not None else 1
-    effective_depth_max = int(depth_max) if depth_max is not None else int(n_nodes)
-    if effective_depth_min > effective_depth_max:
-        raise ValueError(
-            "Invalid effective stage depth bounds during graph sampling: "
-            f"depth_min={effective_depth_min} > depth_max={effective_depth_max}."
-        )
-
-    for _ in range(_CURRICULUM_GRAPH_SAMPLING_MAX_ATTEMPTS):
-        adjacency = sample_cauchy_dag(
-            n_nodes,
-            generator,
-            device,
-            edge_logit_bias=edge_logit_bias,
-        )
-        realized_depth = dag_longest_path_nodes(adjacency)
-        if effective_depth_min <= realized_depth <= effective_depth_max:
-            return adjacency, realized_depth, dag_edge_density(adjacency)
-
-    raise ValueError(
-        "Unable to sample DAG satisfying depth constraints after "
-        f"{_CURRICULUM_GRAPH_SAMPLING_MAX_ATTEMPTS} attempts: "
-        f"stage={stage}, n_nodes={n_nodes}, depth_min={effective_depth_min}, "
-        f"depth_max={effective_depth_max}."
-    )
-
-
-def _sample_layout(
-    config: GeneratorConfig,
-    generator: torch.Generator,
-    device: str,
-    *,
-    curriculum: dict[str, Any],
-) -> dict[str, Any]:
-    """Sample dataset layout, graph, and node assignments for one dataset instance."""
-
-    bounds = _resolve_stagewise_layout_bounds(config, curriculum)
-    n_features = int(
-        torch.randint(
-            bounds.feature_min,
-            bounds.feature_max + 1,
-            (1,),
-            generator=generator,
-        ).item()
-    )
-
-    corr = CorrelatedSampler(generator, device)
-    raw_ratio = corr.sample_num(
-        "categorical_ratio",
-        config.dataset.categorical_ratio_min,
-        config.dataset.categorical_ratio_max,
-        log_scale=False,
-        as_int=False,
-    )
-    cat_ratio = float(max(0.0, min(1.0, raw_ratio)))
-    n_cat = int(round(cat_ratio * n_features))
-    n_cat = max(0, min(n_features, n_cat))
-    if n_cat > 0:
-        cat_idx_t = torch.randperm(n_features, generator=generator, device=device)[:n_cat]
-        cat_idx_t, _ = torch.sort(cat_idx_t)
-        cat_idx = cat_idx_t.tolist()
-    else:
-        cat_idx = []
-
-    max_card = max(2, config.dataset.max_categorical_cardinality)
-    cardinalities = []
-    for _ in cat_idx:
-        log_low = math.log(2.0)
-        log_high = math.log(float(max_card))
-        u = torch.empty(1, device=device).uniform_(log_low, log_high, generator=generator)
-        cardinalities.append(max(2, int(math.exp(u.item()))))
-    card_by_feature = {
-        int(idx): int(card) for idx, card in zip(cat_idx, cardinalities, strict=True)
-    }
-
-    n_classes = int(
-        torch.randint(
-            config.dataset.n_classes_min,
-            config.dataset.n_classes_max + 1,
-            (1,),
-            generator=generator,
-        ).item()
-    )
-    n_classes = max(2, n_classes)
-
-    effective_node_min_for_sampling = bounds.node_min
-    if bounds.depth_min is not None:
-        effective_node_min_for_sampling = max(
-            effective_node_min_for_sampling, int(bounds.depth_min)
-        )
-    sampled_node_min = max(2, int(effective_node_min_for_sampling))
-    sampled_node_max = max(2, int(bounds.node_max))
-    if sampled_node_min > sampled_node_max:
-        raise ValueError(
-            "Invalid effective node/depth bounds for graph sampling: "
-            f"n_nodes_min={sampled_node_min} > n_nodes_max={sampled_node_max} "
-            f"(stage={bounds.stage}, depth_min={bounds.depth_min})."
-        )
-
-    n_nodes = _sample_node_count(
-        sampled_node_min,
-        sampled_node_max,
-        generator,
-        device,
-    )
-    adjacency, graph_depth_nodes, graph_edge_density = _sample_stagewise_graph(
-        n_nodes,
-        bounds.stage,
-        bounds.depth_min,
-        bounds.depth_max,
-        generator,
-        device,
-    )
-    feature_node_assignment = _sample_assignments(n_features, n_nodes, generator, device)
-    target_node_assignment = _sample_assignments(1, n_nodes, generator, device)[0]
-
-    feature_types = ["num"] * n_features
-    for i in cat_idx:
-        feature_types[int(i)] = "cat"
-
-    return {
-        "n_features": n_features,
-        "n_cat": n_cat,
-        "cat_idx": cat_idx,
-        "cardinalities": cardinalities,
-        "card_by_feature": card_by_feature,
-        "n_classes": n_classes,
-        "feature_types": feature_types,
-        "graph_nodes": n_nodes,
-        "graph_edges": int(adjacency.sum().item()),
-        "graph_depth_nodes": int(graph_depth_nodes),
-        "graph_edge_density": float(graph_edge_density),
-        "stage_bounds": {
-            # Report effective sampling bounds after depth-derived clamping.
-            "n_features_min": int(bounds.feature_min),
-            "n_features_max": int(bounds.feature_max),
-            "n_nodes_min": int(sampled_node_min),
-            "n_nodes_max": int(sampled_node_max),
-            "depth_min": int(bounds.depth_min) if bounds.depth_min is not None else None,
-            "depth_max": int(bounds.depth_max) if bounds.depth_max is not None else None,
-        },
-        "adjacency": adjacency,
-        "feature_node_assignment": feature_node_assignment,
-        "target_node_assignment": target_node_assignment,
-    }
-
-
-def _build_lineage_metadata(
-    layout: dict[str, Any],
-    *,
-    feature_index_map: list[int],
-) -> dict[str, Any]:
-    """Build a validated DAG lineage payload from sampled layout internals."""
-
-    n_nodes = int(layout["graph_nodes"])
-    raw_adjacency = layout["adjacency"]
-    if isinstance(raw_adjacency, torch.Tensor):
-        adjacency_rows = raw_adjacency.detach().to(device="cpu", dtype=torch.int64).tolist()
-    else:
-        adjacency_rows = torch.as_tensor(raw_adjacency, dtype=torch.int64, device="cpu").tolist()
-    adjacency = [[int(value) for value in row] for row in adjacency_rows]
-
-    raw_feature_to_node = [
-        int(node_index) for node_index in list(layout["feature_node_assignment"])
-    ]
-    feature_to_node = [raw_feature_to_node[int(src_col)] for src_col in feature_index_map]
-    target_to_node = int(layout["target_node_assignment"])
-
-    payload = {
-        "schema_name": LINEAGE_SCHEMA_NAME,
-        "schema_version": LINEAGE_SCHEMA_VERSION,
-        "graph": {
-            "n_nodes": n_nodes,
-            "adjacency": adjacency,
-        },
-        "assignments": {
-            "feature_to_node": feature_to_node,
-            "target_to_node": target_to_node,
-        },
-    }
-    validate_lineage_payload(payload)
-    return payload
-
-
-def _build_curriculum_metadata(
-    curriculum: dict[str, Any],
-    *,
-    layout: dict[str, Any],
-    n_train: int,
-    n_test: int,
-    n_features: int,
-) -> dict[str, Any]:
-    """Attach stage complexity diagnostics to emitted curriculum metadata."""
-
-    payload = dict(curriculum)
-    stage_bounds_payload: dict[str, int | None] = {
-        "n_features_min": None,
-        "n_features_max": None,
-        "n_nodes_min": None,
-        "n_nodes_max": None,
-        "depth_min": None,
-        "depth_max": None,
-    }
-    raw_stage_bounds = layout.get("stage_bounds")
-    if isinstance(raw_stage_bounds, dict):
-        for key in stage_bounds_payload:
-            raw_value = raw_stage_bounds.get(key)
-            stage_bounds_payload[key] = int(raw_value) if raw_value is not None else None
-
-    payload["realized_complexity"] = {
-        "n_rows_total": int(n_train + n_test),
-        "n_train": int(n_train),
-        "n_test": int(n_test),
-        "n_features": int(n_features),
-        "graph_nodes": int(layout["graph_nodes"]),
-        "graph_depth_nodes": int(layout["graph_depth_nodes"]),
-        "graph_edge_density": float(layout["graph_edge_density"]),
-    }
-    payload["stage_bounds"] = stage_bounds_payload
-    payload["monotonicity_axes"] = list(_CURRICULUM_MONOTONICITY_AXES)
-    return payload
-
-
-def _build_node_specs(
-    node_index: int,
-    layout: dict[str, Any],
-    task: str,
-    generator: torch.Generator,
-) -> list[ConverterSpec]:
-    """Build converter specs for one node in the graph execution order."""
-
-    specs: list[ConverterSpec] = []
-    feature_assignment = layout["feature_node_assignment"]
-    feature_types = list(layout["feature_types"])
-    card_by_feature: dict[int, int] = layout["card_by_feature"]
-
-    feature_indices = [i for i, a in enumerate(feature_assignment) if a == node_index]
-    for f in feature_indices:
-        if feature_types[f] == "cat":
-            c = int(card_by_feature[f])
-            if c > 2 and torch.empty(1).uniform_(0, 1, generator=generator).item() >= 0.5:
-                d = int(torch.randint(1, c, (1,), generator=generator).item())
-            else:
-                d = c
-            specs.append(
-                ConverterSpec(key=f"feature_{f}", kind="cat", dim=max(1, d), cardinality=c)
-            )
-        else:
-            specs.append(ConverterSpec(key=f"feature_{f}", kind="num", dim=1))
-
-    if int(layout["target_node_assignment"]) == node_index:
-        if task == "classification":
-            n_classes = int(layout["n_classes"])
-            specs.append(
-                ConverterSpec(
-                    key="target",
-                    kind="target_cls",
-                    dim=max(2, n_classes),
-                    cardinality=n_classes,
-                )
-            )
-        else:
-            specs.append(ConverterSpec(key="target", kind="target_reg", dim=1))
-    return specs
-
-
 def _generate_graph_dataset_torch(
     config: GeneratorConfig,
     layout: dict[str, Any],
@@ -599,7 +138,7 @@ def _generate_graph_dataset_torch(
 
         # Build specs using a deterministic per-node generator for layout consistency
         spec_gen = torch.Generator(device="cpu")
-        spec_gen.manual_seed(seed + node_idx + 1000)
+        spec_gen.manual_seed(seed + node_idx + NODE_SPEC_SEED_OFFSET)
         specs = _build_node_specs(node_idx, layout, task, spec_gen)
 
         x_node, extracted = apply_node_pipeline(parent_data, n_rows, specs, generator, device)
@@ -676,7 +215,7 @@ def _generate_torch(
             continue
 
         generator = torch.Generator(device=device)
-        generator.manual_seed(seed + 10_007 + attempt)
+        generator.manual_seed(seed + SPLIT_PERMUTATION_SEED_OFFSET + attempt)
 
         if config.dataset.task == "classification":
             try:
@@ -769,138 +308,6 @@ def _generate_torch(
     )
 
 
-def _stratified_split_indices(
-    y: torch.Tensor,
-    n_train: int,
-    generator: torch.Generator,
-    device: str,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return (train_indices, test_indices) with proportional class representation.
-
-    For classification tasks this keeps class balance close to proportional and
-    ensures classes with at least two members appear in both splits. For
-    infeasible combinations, this raises ``ValueError`` with an
-    ``infeasible_stratified_split`` prefix.
-    """
-    n_total = int(y.shape[0])
-    n_test = n_total - n_train
-    if n_total <= 0 or n_train <= 0 or n_test <= 0:
-        raise ValueError(
-            f"infeasible_stratified_split: expected 0 < n_train < n_total, got n_train={n_train}, n_total={n_total}."
-        )
-
-    classes = torch.unique(y, sorted=True)
-    train_frac = n_train / n_total
-
-    cls_indices: list[torch.Tensor] = []
-    cls_values: list[int] = []
-    cls_train_counts: list[int] = []
-    cls_train_min: list[int] = []
-    cls_train_max: list[int] = []
-    cls_remainders: list[float] = []
-
-    for cls in classes:
-        idx = torch.where(y == cls)[0]
-        perm = torch.randperm(idx.shape[0], generator=generator, device=device)
-        cls_indices.append(idx[perm])
-        cls_values.append(int(cls.item()))
-
-        n_cls = int(idx.shape[0])
-        proportional = float(n_cls * train_frac)
-        base_alloc = int(math.floor(proportional))
-        remainder = proportional - base_alloc
-        if n_cls >= 2:
-            train_min = 1
-            train_max = n_cls - 1
-        else:
-            train_min = 0
-            train_max = n_cls
-
-        n_cls_train = max(train_min, min(base_alloc, train_max))
-        cls_train_counts.append(n_cls_train)
-        cls_train_min.append(train_min)
-        cls_train_max.append(train_max)
-        cls_remainders.append(remainder)
-
-    deficit = n_train - sum(cls_train_counts)
-    if deficit > 0:
-        order = sorted(
-            range(len(cls_train_counts)), key=lambda i: (-cls_remainders[i], cls_values[i])
-        )
-        while deficit > 0:
-            progressed = False
-            for i in order:
-                if cls_train_counts[i] < cls_train_max[i]:
-                    cls_train_counts[i] += 1
-                    deficit -= 1
-                    progressed = True
-                    if deficit == 0:
-                        break
-            if not progressed:
-                break
-        if deficit > 0:
-            raise ValueError(
-                "infeasible_stratified_split: unable to allocate requested train rows while "
-                f"preserving class constraints (remaining={deficit})."
-            )
-    elif deficit < 0:
-        surplus = -deficit
-        order = sorted(
-            range(len(cls_train_counts)), key=lambda i: (cls_remainders[i], cls_values[i])
-        )
-        while surplus > 0:
-            progressed = False
-            for i in order:
-                if cls_train_counts[i] > cls_train_min[i]:
-                    cls_train_counts[i] -= 1
-                    surplus -= 1
-                    progressed = True
-                    if surplus == 0:
-                        break
-            if not progressed:
-                break
-        if surplus > 0:
-            raise ValueError(
-                "infeasible_stratified_split: unable to allocate requested test rows while "
-                f"preserving class constraints (remaining={surplus})."
-            )
-
-    if sum(cls_train_counts) != n_train:
-        raise ValueError(
-            "infeasible_stratified_split: train allocation mismatch after rebalance "
-            f"(expected={n_train}, actual={sum(cls_train_counts)})."
-        )
-
-    train_parts: list[torch.Tensor] = []
-    test_parts: list[torch.Tensor] = []
-    for idx, n_cls_train in zip(cls_indices, cls_train_counts):
-        train_parts.append(idx[:n_cls_train])
-        test_parts.append(idx[n_cls_train:])
-
-    train_idx = torch.cat(train_parts)
-    test_idx = torch.cat(test_parts)
-    if int(train_idx.shape[0]) != n_train or int(test_idx.shape[0]) != n_test:
-        raise ValueError(
-            "infeasible_stratified_split: index cardinality mismatch "
-            f"(expected_train={n_train}, actual_train={int(train_idx.shape[0])}, "
-            f"expected_test={n_test}, actual_test={int(test_idx.shape[0])})."
-        )
-
-    # Shuffle within each split
-    train_idx = train_idx[torch.randperm(train_idx.shape[0], generator=generator, device=device)]
-    test_idx = test_idx[torch.randperm(test_idx.shape[0], generator=generator, device=device)]
-
-    return train_idx, test_idx
-
-
-def _classification_split_valid(y_train: torch.Tensor, y_test: torch.Tensor) -> bool:
-    """Validate classification split constraints."""
-
-    train_classes = set(torch.unique(y_train).tolist())
-    test_classes = set(torch.unique(y_test).tolist())
-    return len(train_classes) >= 2 and train_classes == test_classes
-
-
 def _apply_filter_torch(
     config: GeneratorConfig,
     x: torch.Tensor,
@@ -985,52 +392,24 @@ def _generate_one_seeded(
     )
 
 
-def _coerce_meta_target_specs(raw: object) -> dict[str, tuple[float, float, float]]:
-    """Normalize target specs into `(min, max, weight)` tuples."""
-
-    normalized: dict[str, tuple[float, float, float]] = {}
-    if not isinstance(raw, dict):
-        return normalized
-    for metric_name, value in raw.items():
-        if not isinstance(metric_name, str) or metric_name not in _STEERING_SUPPORTED_METRICS:
-            continue
-        if not isinstance(value, (list, tuple)) or len(value) not in {2, 3}:
-            continue
-        try:
-            lo = float(value[0])
-            hi = float(value[1])
-            weight = float(value[2]) if len(value) == 3 else 1.0
-        except (TypeError, ValueError):
-            continue
-        if not (math.isfinite(lo) and math.isfinite(hi) and math.isfinite(weight)):
-            continue
-        if weight <= 0:
-            continue
-        if lo > hi:
-            lo, hi = hi, lo
-        normalized[metric_name] = (lo, hi, weight)
-    return normalized
-
-
 def _resolve_meta_target_specs(config: GeneratorConfig) -> dict[str, tuple[float, float, float]]:
     """Merge target specs from legacy diagnostics and top-level config."""
 
-    merged = _coerce_meta_target_specs(config.diagnostics.meta_feature_targets)
-    merged.update(_coerce_meta_target_specs(config.meta_feature_targets))
-    return merged
+    return merge_weighted_target_specs(
+        config.diagnostics.meta_feature_targets,
+        config.meta_feature_targets,
+        supported_metrics=_STEERING_SUPPORTED_METRICS,
+    )
 
 
 def _collect_unknown_steering_target_metrics(config: GeneratorConfig) -> tuple[str, ...]:
     """Collect unsupported steering target keys from config payloads."""
 
-    unknown: set[str] = set()
-    for raw in (config.diagnostics.meta_feature_targets, config.meta_feature_targets):
-        if not isinstance(raw, dict):
-            continue
-        for metric_name in raw:
-            if isinstance(metric_name, str) and metric_name not in _STEERING_SUPPORTED_METRICS:
-                unknown.add(metric_name)
-    return tuple(sorted(unknown))
+    return collect_unknown_target_metrics(
+        config.diagnostics.meta_feature_targets,
+        config.meta_feature_targets,
+        supported_metrics=_STEERING_SUPPORTED_METRICS,
+    )
 
 
 def _validate_target_specs_for_task(
@@ -1040,10 +419,11 @@ def _validate_target_specs_for_task(
 ) -> tuple[str, ...]:
     """Return steering metrics that are incompatible with configured task."""
 
-    if task.strip().lower() != "regression":
-        return ()
-    incompatible = sorted(set(target_specs).intersection(_STEERING_CLASSIFICATION_ONLY_METRICS))
-    return tuple(incompatible)
+    return _validate_target_specs_for_task_shared(
+        task=task,
+        target_specs=target_specs,
+        classification_only_metrics=_STEERING_CLASSIFICATION_ONLY_METRICS,
+    )
 
 
 def _resolve_auto_stage(mode: str | int, *, seed: int) -> int:
@@ -1101,7 +481,7 @@ def _resolve_steering_settings(
 def _distance_to_band(value: float, *, lo: float, hi: float) -> tuple[float, bool]:
     """Return normalized distance to a target band and in-band flag."""
 
-    width = max(1e-6, hi - lo)
+    width = max(STEERING_TARGET_BAND_MIN_WIDTH, hi - lo)
     if value < lo:
         return (lo - value) / width, False
     if value > hi:

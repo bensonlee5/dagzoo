@@ -38,6 +38,13 @@ from cauchy_generator.hardware import (
     detect_hardware,
 )
 from cauchy_generator.io.parquet_writer import write_parquet_shards_stream
+from cauchy_generator.meta_targets import (
+    coerce_quantiles as _coerce_quantiles_shared,
+    collect_unknown_target_metrics,
+    merge_weighted_target_specs,
+    validate_target_specs_for_task as _validate_target_specs_for_task_shared,
+    weighted_specs_to_bands,
+)
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
 MISSINGNESS_MECHANISM_CLI_CHOICES = (
@@ -84,50 +91,82 @@ def _parse_finite_float(raw: str, *, flag: str) -> float:
     return value
 
 
+def _parse_bounded_float(
+    raw: str,
+    *,
+    flag: str,
+    lo: float,
+    hi: float | None,
+    lo_inclusive: bool,
+    hi_inclusive: bool,
+    expectation: str,
+) -> float:
+    """argparse helper: parse a finite float and enforce explicit numeric bounds."""
+
+    value = _parse_finite_float(raw, flag=flag)
+    lo_ok = value >= lo if lo_inclusive else value > lo
+    hi_ok = True
+    if hi is not None:
+        hi_ok = value <= hi if hi_inclusive else value < hi
+    if lo_ok and hi_ok:
+        return value
+    raise argparse.ArgumentTypeError(f"Invalid {flag} value '{raw}'. Expected {expectation}.")
+
+
 def _parse_missing_rate_arg(raw: str) -> float:
     """argparse type: parse missing rate in [0, 1]."""
 
-    value = _parse_finite_float(raw, flag="--missing-rate")
-    if not (0.0 <= value <= 1.0):
-        raise argparse.ArgumentTypeError(
-            f"Invalid --missing-rate value '{raw}'. Expected a finite value in [0, 1]."
-        )
-    return value
-
-
-def _parse_missing_positive_scale_arg(raw: str, *, flag: str) -> float:
-    """argparse helper: parse positive finite missingness scale."""
-
-    value = _parse_finite_float(raw, flag=flag)
-    if value <= 0.0:
-        raise argparse.ArgumentTypeError(
-            f"Invalid {flag} value '{raw}'. Expected a finite value > 0."
-        )
-    return value
+    return _parse_bounded_float(
+        raw,
+        flag="--missing-rate",
+        lo=0.0,
+        hi=1.0,
+        lo_inclusive=True,
+        hi_inclusive=True,
+        expectation="a finite value in [0, 1]",
+    )
 
 
 def _parse_missing_mar_observed_fraction_arg(raw: str) -> float:
     """argparse type: parse MAR observed-feature fraction in (0, 1]."""
 
-    value = _parse_finite_float(raw, flag="--missing-mar-observed-fraction")
-    if not (0.0 < value <= 1.0):
-        raise argparse.ArgumentTypeError(
-            "Invalid --missing-mar-observed-fraction value "
-            f"'{raw}'. Expected a finite value in (0, 1]."
-        )
-    return value
+    return _parse_bounded_float(
+        raw,
+        flag="--missing-mar-observed-fraction",
+        lo=0.0,
+        hi=1.0,
+        lo_inclusive=False,
+        hi_inclusive=True,
+        expectation="a finite value in (0, 1]",
+    )
 
 
 def _parse_missing_mar_logit_scale_arg(raw: str) -> float:
     """argparse type: parse MAR logit scale > 0."""
 
-    return _parse_missing_positive_scale_arg(raw, flag="--missing-mar-logit-scale")
+    return _parse_bounded_float(
+        raw,
+        flag="--missing-mar-logit-scale",
+        lo=0.0,
+        hi=None,
+        lo_inclusive=False,
+        hi_inclusive=False,
+        expectation="a finite value > 0",
+    )
 
 
 def _parse_missing_mnar_logit_scale_arg(raw: str) -> float:
     """argparse type: parse MNAR logit scale > 0."""
 
-    return _parse_missing_positive_scale_arg(raw, flag="--missing-mnar-logit-scale")
+    return _parse_bounded_float(
+        raw,
+        flag="--missing-mnar-logit-scale",
+        lo=0.0,
+        hi=None,
+        lo_inclusive=False,
+        hi_inclusive=False,
+        expectation="a finite value > 0",
+    )
 
 
 def _parse_missing_mechanism_arg(raw: str) -> str:
@@ -182,41 +221,17 @@ def _parse_meta_target_arg(raw: str) -> tuple[str, tuple[float, float, float]]:
     return metric_name, (lo, hi, weight)
 
 
-def _coerce_meta_target_specs(raw: object) -> dict[str, tuple[float, float, float]]:
-    """Normalize config target payload into `(min, max, weight)` specs."""
-
-    normalized: dict[str, tuple[float, float, float]] = {}
-    if not isinstance(raw, dict):
-        return normalized
-    for metric_name, band in raw.items():
-        if not isinstance(metric_name, str) or metric_name not in META_TARGET_SUPPORTED_METRICS:
-            continue
-        if not isinstance(band, (list, tuple)) or len(band) not in {2, 3}:
-            continue
-        try:
-            lo = float(band[0])
-            hi = float(band[1])
-            weight = float(band[2]) if len(band) == 3 else 1.0
-        except (TypeError, ValueError):
-            continue
-        if not (math.isfinite(lo) and math.isfinite(hi) and math.isfinite(weight)):
-            continue
-        if weight <= 0:
-            continue
-        if lo > hi:
-            lo, hi = hi, lo
-        normalized[metric_name] = (lo, hi, weight)
-    return normalized
-
-
 def _resolve_meta_target_specs(
     config: GeneratorConfig,
     cli_overrides: list[tuple[str, tuple[float, float, float]]] | None,
 ) -> dict[str, tuple[float, float, float]]:
     """Merge target specs across legacy diagnostics, top-level config, and CLI."""
 
-    resolved = _coerce_meta_target_specs(config.diagnostics.meta_feature_targets)
-    resolved.update(_coerce_meta_target_specs(config.meta_feature_targets))
+    resolved = merge_weighted_target_specs(
+        config.diagnostics.meta_feature_targets,
+        config.meta_feature_targets,
+        supported_metrics=META_TARGET_SUPPORTED_METRICS,
+    )
     if cli_overrides:
         for metric_name, spec in cli_overrides:
             resolved[metric_name] = spec
@@ -228,7 +243,7 @@ def _target_specs_to_bands(
 ) -> dict[str, tuple[float, float]]:
     """Drop steering weights for diagnostics coverage aggregation payload."""
 
-    return {metric_name: (spec[0], spec[1]) for metric_name, spec in target_specs.items()}
+    return weighted_specs_to_bands(target_specs)
 
 
 def _validate_target_specs_for_task(
@@ -238,24 +253,21 @@ def _validate_target_specs_for_task(
 ) -> tuple[str, ...]:
     """Return metrics that are incompatible with the configured task."""
 
-    normalized_task = task.strip().lower()
-    if normalized_task != "regression":
-        return ()
-    incompatible = sorted(set(target_specs).intersection(CLASSIFICATION_ONLY_METRICS))
-    return tuple(incompatible)
+    return _validate_target_specs_for_task_shared(
+        task=task,
+        target_specs=target_specs,
+        classification_only_metrics=CLASSIFICATION_ONLY_METRICS,
+    )
 
 
 def _collect_unknown_target_metrics_from_config(config: GeneratorConfig) -> tuple[str, ...]:
     """Collect unsupported target metric keys from config payloads."""
 
-    unknown: set[str] = set()
-    for raw in (config.diagnostics.meta_feature_targets, config.meta_feature_targets):
-        if not isinstance(raw, dict):
-            continue
-        for metric_name in raw:
-            if isinstance(metric_name, str) and metric_name not in META_TARGET_SUPPORTED_METRICS:
-                unknown.add(metric_name)
-    return tuple(sorted(unknown))
+    return collect_unknown_target_metrics(
+        config.diagnostics.meta_feature_targets,
+        config.meta_feature_targets,
+        supported_metrics=META_TARGET_SUPPORTED_METRICS,
+    )
 
 
 def _raise_usage_error(message: str) -> None:
@@ -268,17 +280,7 @@ def _raise_usage_error(message: str) -> None:
 def _coerce_quantiles(raw: object) -> tuple[float, ...]:
     """Normalize diagnostics quantiles into a tuple of floats."""
 
-    if not isinstance(raw, (list, tuple)):
-        return ()
-    values: list[float] = []
-    for item in raw:
-        try:
-            value = float(item)
-        except (TypeError, ValueError):
-            continue
-        if value == value:
-            values.append(value)
-    return tuple(values)
+    return _coerce_quantiles_shared(raw)
 
 
 def _build_parser() -> argparse.ArgumentParser:

@@ -5,6 +5,12 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
+from cauchy_generator.bench.constants import (
+    SECONDS_PER_MINUTE,
+    THROUGHPUT_MEASURE_SEED_OFFSET,
+    THROUGHPUT_SLO_DATASETS_PER_MINUTE,
+    THROUGHPUT_WARMUP_SEED_OFFSET,
+)
 from cauchy_generator.config import GeneratorConfig
 from cauchy_generator.core.dataset import generate_batch_iter
 from cauchy_generator.types import DatasetBundle
@@ -44,7 +50,7 @@ def run_throughput_benchmark(
         _consume_generation(
             config,
             num_datasets=warmup_datasets,
-            seed=config.seed + 1,
+            seed=config.seed + THROUGHPUT_WARMUP_SEED_OFFSET,
             device=device,
         )
 
@@ -52,13 +58,13 @@ def run_throughput_benchmark(
     _consume_generation(
         config,
         num_datasets=num_datasets,
-        seed=config.seed + 2,
+        seed=config.seed + THROUGHPUT_MEASURE_SEED_OFFSET,
         device=device,
         on_bundle=on_bundle,
     )
     elapsed = time.perf_counter() - start
     dps = num_datasets / elapsed if elapsed > 0 else 0.0
-    dpm = dps * 60.0
+    dpm = dps * SECONDS_PER_MINUTE
     return {
         "profile": config.benchmark.profile_name,
         "num_datasets": num_datasets,
@@ -66,5 +72,5 @@ def run_throughput_benchmark(
         "elapsed_seconds": elapsed,
         "datasets_per_second": dps,
         "datasets_per_minute": dpm,
-        "slo_pass_100_datasets_per_min": dpm >= 100.0,
+        "slo_pass_100_datasets_per_min": dpm >= THROUGHPUT_SLO_DATASETS_PER_MINUTE,
     }
