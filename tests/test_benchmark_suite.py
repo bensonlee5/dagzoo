@@ -209,6 +209,138 @@ def test_run_benchmark_suite_missingness_runtime_guardrail_updates_regression_st
     assert all(call["has_callback"] for call in baseline_calls)
 
 
+def test_run_benchmark_suite_missingness_runtime_guardrail_keeps_curriculum_callback_parity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_missingness_cpu_config()
+    cfg.curriculum_stage = "auto"
+    cfg.curriculum.stages = {
+        1: {"n_features_min": 8, "n_features_max": 8},
+        2: {"n_features_min": 8, "n_features_max": 8},
+        3: {"n_features_min": 8, "n_features_max": 8},
+    }
+    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    calls: list[dict[str, object]] = []
+    curriculum_update_run_kinds: list[str] = []
+    active_run_kind = {"value": "unknown"}
+
+    original_curriculum_update = suite_mod._CurriculumMetadataCollector.update
+
+    def _tracking_curriculum_update(self, bundle: DatasetBundle) -> None:
+        curriculum_update_run_kinds.append(str(active_run_kind["value"]))
+        original_curriculum_update(self, bundle)
+
+    def _stub_throughput(
+        config,
+        *,
+        num_datasets: int,
+        warmup_datasets: int = 10,
+        device: str | None = None,
+        on_bundle=None,
+    ):
+        _ = warmup_datasets
+        _ = device
+        missing_enabled = float(config.dataset.missing_rate) > 0.0
+        curriculum_enabled = str(config.curriculum_stage).strip().lower() != "off"
+        if missing_enabled and curriculum_enabled:
+            run_kind = "primary"
+        elif (not missing_enabled) and (not curriculum_enabled):
+            run_kind = "curriculum_baseline"
+        elif (not missing_enabled) and curriculum_enabled:
+            run_kind = "missingness_baseline"
+        else:
+            run_kind = "other"
+        active_run_kind["value"] = run_kind
+        calls.append(
+            {
+                "run_kind": run_kind,
+                "missing_enabled": missing_enabled,
+                "curriculum_enabled": curriculum_enabled,
+                "has_callback": on_bundle is not None,
+            }
+        )
+        dpm = 80.0 if missing_enabled else 100.0
+        dps = dpm / 60.0
+        elapsed = (float(num_datasets) / dps) if dps > 0 else 0.0
+        if on_bundle is not None:
+            for i in range(num_datasets):
+                metadata: dict[str, object] = {
+                    "seed": i,
+                    "attempt_used": 0,
+                    "curriculum": {
+                        "mode": "auto" if curriculum_enabled else "off",
+                        "stage": 1 if curriculum_enabled else None,
+                    },
+                }
+                if missing_enabled:
+                    metadata["missingness"] = {"missing_count_overall": 4}
+                on_bundle(
+                    DatasetBundle(
+                        X_train=np.zeros((3, 4), dtype=np.float32),
+                        y_train=np.zeros(3, dtype=np.int64),
+                        X_test=np.zeros((1, 4), dtype=np.float32),
+                        y_test=np.zeros(1, dtype=np.int64),
+                        feature_types=["num", "num", "num", "num"],
+                        metadata=metadata,
+                    )
+                )
+        return {
+            "profile": config.benchmark.profile_name,
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup_datasets,
+            "elapsed_seconds": elapsed,
+            "datasets_per_second": dps,
+            "datasets_per_minute": dpm,
+            "slo_pass_100_datasets_per_min": dpm >= 100.0,
+        }
+
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite._CurriculumMetadataCollector.update",
+        _tracking_curriculum_update,
+    )
+    monkeypatch.setattr("cauchy_generator.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite._collect_latency",
+        lambda _cfg, *, device, num_samples: {
+            "latency_samples": float(num_samples),
+            "latency_mean_ms": 1.0,
+            "latency_p95_ms": 1.0,
+            "latency_min_ms": 1.0,
+            "latency_max_ms": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite._collect_lineage_guardrails",
+        lambda *_args, **_kwargs: {"enabled": False},
+    )
+
+    summary = run_benchmark_suite(
+        [spec],
+        suite="smoke",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+        baseline_payload=None,
+        num_datasets_override=6,
+        warmup_override=0,
+        collect_memory=False,
+        collect_reproducibility=False,
+        collect_diagnostics=False,
+        diagnostics_root_dir=None,
+        fail_on_regression=False,
+        no_hardware_aware=True,
+    )
+
+    result = summary["profile_results"][0]
+    guardrails = result["missingness_guardrails"]
+    assert guardrails["enabled"] is True
+    missingness_baseline_calls = [
+        call for call in calls if call["run_kind"] == "missingness_baseline"
+    ]
+    assert missingness_baseline_calls
+    assert all(bool(call["has_callback"]) for call in missingness_baseline_calls)
+    assert "missingness_baseline" in curriculum_update_run_kinds
+
+
 def test_run_benchmark_suite_curriculum_runtime_guardrail_updates_regression_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
