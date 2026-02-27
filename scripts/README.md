@@ -10,6 +10,8 @@ These wrappers call `uv run cauchy-gen ...` from the repo root.
   - Uses `configs/default.yaml`.
 - `scripts/generate-h100.sh [num_datasets] [device] [out_dir] [seed]`
   - Uses `configs/preset_cuda_h100.yaml`.
+- `scripts/generate-many-class.sh [num_datasets] [device] [out_dir] [seed]`
+  - Uses `configs/preset_many_class_generate_smoke.yaml`.
 - `scripts/generate-smoke.sh [config] [num_datasets] [device]`
   - Runs quick in-memory generation with `--no-write`.
 - `scripts/generate-curriculum.sh [num_datasets] [device] [out_dir] [seed] [curriculum]`
@@ -32,6 +34,7 @@ These wrappers call `uv run cauchy-gen ...` from the repo root.
 ./scripts/generate-default.sh
 ./scripts/generate-default.sh 50 cpu data/run_cpu_50
 ./scripts/generate-h100.sh 500 cuda data/run_h100_500 123
+./scripts/generate-many-class.sh 25 cpu data/run_many_class 123
 ./scripts/generate-from-config.sh configs/benchmark_medium_cuda.yaml 100 cuda data/run_medium 42
 ./scripts/generate-smoke.sh configs/default.yaml 3 cpu
 ./scripts/generate-curriculum.sh

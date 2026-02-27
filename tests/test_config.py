@@ -209,6 +209,23 @@ def test_load_curriculum_stage_presets() -> None:
     assert "curriculum_smoke" in cfg_benchmark.benchmark.profiles
 
 
+def test_load_many_class_presets() -> None:
+    cfg_generate = GeneratorConfig.from_yaml("configs/preset_many_class_generate_smoke.yaml")
+    cfg_benchmark = GeneratorConfig.from_yaml("configs/preset_many_class_benchmark_smoke.yaml")
+
+    assert cfg_generate.dataset.task == "classification"
+    assert cfg_generate.dataset.n_classes_min >= 24
+    assert cfg_generate.dataset.n_classes_max <= MAX_SUPPORTED_CLASS_COUNT
+    assert cfg_generate.filter.enabled is False
+
+    assert cfg_benchmark.dataset.task == "classification"
+    assert cfg_benchmark.dataset.n_classes_min >= 24
+    assert cfg_benchmark.dataset.n_classes_max <= MAX_SUPPORTED_CLASS_COUNT
+    assert cfg_benchmark.filter.enabled is False
+    assert cfg_benchmark.benchmark.profile_name == "many_class_smoke"
+    assert "many_class_smoke" in cfg_benchmark.benchmark.profiles
+
+
 def test_curriculum_stage_schema_parses_with_string_stage_keys() -> None:
     cfg = GeneratorConfig.from_dict(
         {

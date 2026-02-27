@@ -283,3 +283,36 @@ def test_benchmark_cli_curriculum_stage1_smoke_preset_does_not_crash(tmp_path) -
     profile = payload["profile_results"][0]
     guardrails = profile["curriculum_guardrails"]
     assert guardrails["enabled"] is True
+
+
+def test_benchmark_cli_many_class_smoke_preset_emits_runtime_metrics(tmp_path) -> None:
+    out = tmp_path / "summary_many_class_smoke.json"
+    code = main(
+        [
+            "benchmark",
+            "--config",
+            "configs/preset_many_class_benchmark_smoke.yaml",
+            "--profile",
+            "custom",
+            "--suite",
+            "smoke",
+            "--num-datasets",
+            "2",
+            "--warmup",
+            "0",
+            "--no-hardware-aware",
+            "--no-memory",
+            "--json-out",
+            str(out),
+        ]
+    )
+    assert code == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    profile = payload["profile_results"][0]
+    assert float(profile["datasets_per_minute"]) > 0.0
+    assert float(profile["latency_p95_ms"]) >= 0.0
+    regression = payload["regression"]
+    assert regression["status"] in {"pass", "warn", "fail"}
+    guardrails = profile["lineage_guardrails"]
+    assert isinstance(guardrails, dict)
+    assert isinstance(guardrails["enabled"], bool)

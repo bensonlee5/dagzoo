@@ -234,6 +234,61 @@ def test_generate_cli_curriculum_fixed_stage_preset_end_to_end_no_write(
         assert int(payload["stage"]) == 2
 
 
+def test_generate_cli_many_class_preset_end_to_end_no_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cauchy_generator.core import dataset as dataset_mod
+
+    captured_metadata: list[dict[str, object]] = []
+    original_generate_batch_iter = dataset_mod.generate_batch_iter
+
+    def _capture_generate_batch_iter(
+        config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        for bundle in original_generate_batch_iter(
+            config,
+            num_datasets=num_datasets,
+            seed=seed,
+            device=device,
+        ):
+            captured_metadata.append(bundle.metadata)
+            yield bundle
+
+    monkeypatch.setattr(
+        "cauchy_generator.cli.generate_batch_iter",
+        _capture_generate_batch_iter,
+    )
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            "configs/preset_many_class_generate_smoke.yaml",
+            "--num-datasets",
+            "2",
+            "--device",
+            "cpu",
+            "--no-hardware-aware",
+            "--no-write",
+        ]
+    )
+
+    assert code == 0
+    assert len(captured_metadata) == 2
+    for metadata in captured_metadata:
+        class_structure = metadata["class_structure"]
+        assert isinstance(class_structure, dict)
+        assert 2 <= int(class_structure["n_classes_realized"]) <= 32
+        filter_metadata = metadata["filter"]
+        assert isinstance(filter_metadata, dict)
+        assert filter_metadata["enabled"] is False
+        assert "accepted" not in filter_metadata
+
+
 def test_benchmark_cli_rejects_negative_warmup() -> None:
     with pytest.raises(SystemExit) as exc:
         main(
