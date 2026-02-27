@@ -39,6 +39,8 @@ _MISSINGNESS_MECHANISM_VALUE_MAP: dict[str, MissingnessMechanism] = {
     MISSINGNESS_MECHANISM_MNAR: MISSINGNESS_MECHANISM_MNAR,
 }
 
+MAX_SUPPORTED_CLASS_COUNT = 32
+
 
 def normalize_curriculum_stage(value: str | int) -> CurriculumStage:
     """Normalize curriculum stage config into a validated internal value."""
@@ -96,6 +98,71 @@ def _validate_finite_float_field(
     return parsed
 
 
+def _validate_int_field(
+    *,
+    field_name: str,
+    value: Any,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    """Validate and normalize integer fields with optional inclusive bounds."""
+
+    if isinstance(value, bool):
+        expectation = (
+            f"an integer in [{minimum}, {maximum}]"
+            if maximum is not None
+            else f"an integer >= {minimum}"
+        )
+        raise ValueError(f"{field_name} must be {expectation}, got {value!r}.")
+
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        normalized = value.strip()
+        signless = normalized[1:] if normalized.startswith(("+", "-")) else normalized
+        if not signless.isdigit():
+            expectation = (
+                f"an integer in [{minimum}, {maximum}]"
+                if maximum is not None
+                else f"an integer >= {minimum}"
+            )
+            raise ValueError(f"{field_name} must be {expectation}, got {value!r}.")
+        parsed = int(normalized)
+    else:
+        expectation = (
+            f"an integer in [{minimum}, {maximum}]"
+            if maximum is not None
+            else f"an integer >= {minimum}"
+        )
+        raise ValueError(f"{field_name} must be {expectation}, got {value!r}.")
+
+    if parsed < minimum or (maximum is not None and parsed > maximum):
+        expectation = (
+            f"an integer in [{minimum}, {maximum}]"
+            if maximum is not None
+            else f"an integer >= {minimum}"
+        )
+        raise ValueError(f"{field_name} must be {expectation}, got {parsed!r}.")
+    return parsed
+
+
+def validate_class_split_feasibility(
+    *,
+    n_classes: int,
+    n_train: int,
+    n_test: int,
+    context: str,
+) -> None:
+    """Validate whether split sizes can represent all classes in both train and test."""
+
+    if n_classes > n_train or n_classes > n_test:
+        raise ValueError(
+            f"{context}: infeasible class/split combination for classification "
+            f"(n_classes={n_classes}, n_train={n_train}, n_test={n_test}). "
+            "Require n_train and n_test to each be >= n_classes."
+        )
+
+
 @dataclass(slots=True)
 class DatasetConfig:
     task: str = "classification"
@@ -115,6 +182,42 @@ class DatasetConfig:
     missing_mnar_logit_scale: float = 1.0
 
     def __post_init__(self) -> None:
+        self.n_train = _validate_int_field(
+            field_name="dataset.n_train",
+            value=self.n_train,
+            minimum=1,
+        )
+        self.n_test = _validate_int_field(
+            field_name="dataset.n_test",
+            value=self.n_test,
+            minimum=1,
+        )
+        self.n_classes_min = _validate_int_field(
+            field_name="dataset.n_classes_min",
+            value=self.n_classes_min,
+            minimum=2,
+            maximum=MAX_SUPPORTED_CLASS_COUNT,
+        )
+        self.n_classes_max = _validate_int_field(
+            field_name="dataset.n_classes_max",
+            value=self.n_classes_max,
+            minimum=2,
+            maximum=MAX_SUPPORTED_CLASS_COUNT,
+        )
+        _validate_min_max_pair(
+            name="dataset.n_classes_min",
+            min_value=self.n_classes_min,
+            max_value=self.n_classes_max,
+            max_label="n_classes_max",
+        )
+        if str(self.task).strip().lower() == "classification":
+            validate_class_split_feasibility(
+                n_classes=int(self.n_classes_min),
+                n_train=int(self.n_train),
+                n_test=int(self.n_test),
+                context="dataset classification split constraints for n_classes_min",
+            )
+
         self.missing_rate = _validate_finite_float_field(
             field_name="dataset.missing_rate",
             value=self.missing_rate,

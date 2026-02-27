@@ -306,6 +306,7 @@ metadata JSON contract, and DAG lineage schema.
 - Mission alignment: foundation model pretraining
 - Pillar alignment: tabular realism, causal structural integrity
 - Goal: assess feasibility and, only if viable, raise practical class/cardinality limits while preserving filter quality.
+- Current rollout envelope (`#20`): enforce `dataset.n_classes_max <= 32` as the narrow-go safety cap until follow-on hardening (`#21`-`#23`) lands.
 - GitHub tracking: epic `#19`; research gate `#43`; conditional chain `#20 -> #21 -> #22 -> #23`
 - Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/converters/categorical.py`, `src/cauchy_generator/filtering/torch_rf_filter.py`
 - Exit criteria:

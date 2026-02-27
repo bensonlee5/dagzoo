@@ -1,6 +1,7 @@
 import pytest
 
 from cauchy_generator.config import (
+    MAX_SUPPORTED_CLASS_COUNT,
     MISSINGNESS_MECHANISM_MAR,
     MISSINGNESS_MECHANISM_MCAR,
     MISSINGNESS_MECHANISM_MNAR,
@@ -48,6 +49,78 @@ def test_default_config_metadata_is_compatible_with_optional_lineage() -> None:
         "config": cfg.to_dict(),
     }
     validate_metadata_lineage(metadata, required=False)
+
+
+def test_class_range_accepts_many_class_envelope_limit() -> None:
+    cfg = GeneratorConfig.from_dict(
+        {
+            "dataset": {
+                "task": "classification",
+                "n_classes_min": 12,
+                "n_classes_max": MAX_SUPPORTED_CLASS_COUNT,
+            }
+        }
+    )
+    assert cfg.dataset.n_classes_min == 12
+    assert cfg.dataset.n_classes_max == MAX_SUPPORTED_CLASS_COUNT
+
+
+def test_class_range_rejects_values_above_many_class_envelope_limit() -> None:
+    with pytest.raises(ValueError, match=r"dataset\.n_classes_max must be an integer in \[2, 32\]"):
+        GeneratorConfig.from_dict({"dataset": {"task": "classification", "n_classes_max": 33}})
+
+
+def test_class_range_rejects_min_greater_than_max() -> None:
+    with pytest.raises(ValueError, match=r"dataset\.n_classes_min must be <= n_classes_max"):
+        GeneratorConfig.from_dict(
+            {"dataset": {"task": "classification", "n_classes_min": 16, "n_classes_max": 12}}
+        )
+
+
+def test_classification_rejects_impossible_class_split_bounds() -> None:
+    with pytest.raises(ValueError, match=r"infeasible class/split combination"):
+        GeneratorConfig.from_dict(
+            {
+                "dataset": {
+                    "task": "classification",
+                    "n_train": 24,
+                    "n_test": 24,
+                    "n_classes_min": 32,
+                    "n_classes_max": 32,
+                }
+            }
+        )
+
+
+def test_classification_allows_partial_class_range_when_lower_bound_is_feasible() -> None:
+    cfg = GeneratorConfig.from_dict(
+        {
+            "dataset": {
+                "task": "classification",
+                "n_train": 32,
+                "n_test": 8,
+                "n_classes_min": 2,
+                "n_classes_max": 10,
+            }
+        }
+    )
+    assert cfg.dataset.n_classes_min == 2
+    assert cfg.dataset.n_classes_max == 10
+
+
+def test_regression_allows_class_fields_without_split_feasibility_check() -> None:
+    cfg = GeneratorConfig.from_dict(
+        {
+            "dataset": {
+                "task": "regression",
+                "n_train": 24,
+                "n_test": 24,
+                "n_classes_min": 2,
+                "n_classes_max": 32,
+            }
+        }
+    )
+    assert cfg.dataset.n_classes_max == 32
 
 
 def test_load_cuda_presets() -> None:

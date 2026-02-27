@@ -891,7 +891,7 @@ def test_invalid_curriculum_stage_raises() -> None:
         generate_one(cfg, seed=123, device="cpu")
 
 
-def test_invalid_class_split_raises_after_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_infeasible_curriculum_split_raises_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = _tiny_config()
     cfg.dataset.task = "classification"
     cfg.dataset.n_classes_min = 2
@@ -910,7 +910,33 @@ def test_invalid_class_split_raises_after_attempts(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr("cauchy_generator.core.curriculum._sample_curriculum", _tiny_split)
 
-    with pytest.raises(ValueError, match="Failed to generate a valid dataset"):
+    with pytest.raises(ValueError, match=r"infeasible class/split combination"):
+        generate_one(cfg, seed=99, device="cpu")
+
+
+def test_sampled_curriculum_split_fails_fast_when_classes_exceed_train_or_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "classification"
+    cfg.dataset.n_classes_min = 32
+    cfg.dataset.n_classes_max = 32
+
+    def _infeasible_curriculum(*_args, **_kwargs):
+        return {
+            "mode": "fixed",
+            "stage": 1,
+            "n_rows_total": 128,
+            "n_train": 31,
+            "n_test": 97,
+            "train_fraction": 31 / 128,
+        }
+
+    monkeypatch.setattr(
+        "cauchy_generator.core.curriculum._sample_curriculum", _infeasible_curriculum
+    )
+
+    with pytest.raises(ValueError, match=r"sampled classification split constraints"):
         generate_one(cfg, seed=99, device="cpu")
 
 
