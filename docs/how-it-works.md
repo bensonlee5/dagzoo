@@ -36,12 +36,15 @@ features/targets, and applying quality/realism controls.
 - `hardware`: inspect detected backend/device/profile.
 
 ```mermaid
-flowchart TB
-    CLI["cauchy-gen CLI"] --> GEN["generate"]
-    CLI --> BENCH["benchmark"]
-    CLI --> HW["hardware"]
+flowchart LR
+    CLI["cauchy-gen CLI"]
 
-    subgraph GeneratePath["generate command"]
+    CLI --> Cfg
+    CLI --> BCfg
+    CLI --> Detect
+
+    subgraph GeneratePath["generate"]
+        direction TB
         Cfg["Load GeneratorConfig"] --> Tune["detect_hardware + apply_hardware_profile"]
         Tune --> Loop["generate_batch_iter"]
         Loop --> Seed["derive dataset/component seeds"]
@@ -56,14 +59,16 @@ flowchart TB
         Bundle --> Diag["optional diagnostics aggregator"]
     end
 
-    subgraph BenchPath["benchmark command"]
+    subgraph BenchPath["benchmark"]
+        direction TB
         BCfg["resolve suite/profile specs"] --> BTune["per-profile hardware tuning"]
         BTune --> Runs["run benchmark suite"]
         Runs --> Guards["emit guardrails (runtime/metadata)"]
         Guards --> Reports["write summary JSON/Markdown"]
     end
 
-    subgraph HardwarePath["hardware command"]
+    subgraph HardwarePath["hardware"]
+        direction TB
         Detect["detect_hardware"] --> Print["print backend/device/profile"]
     end
 ```
