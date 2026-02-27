@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
 
 from cauchy_generator.core.curriculum import _CURRICULUM_MONOTONICITY_AXES
+from cauchy_generator.core.shift import ShiftRuntimeParams, mechanism_nonlinear_mass
 from cauchy_generator.io.lineage_schema import (
     LINEAGE_SCHEMA_NAME,
     LINEAGE_SCHEMA_VERSION,
@@ -88,3 +90,26 @@ def _build_curriculum_metadata(
     payload["stage_bounds"] = stage_bounds_payload
     payload["monotonicity_axes"] = list(_CURRICULUM_MONOTONICITY_AXES)
     return payload
+
+
+def _build_shift_metadata(*, shift_params: ShiftRuntimeParams) -> dict[str, Any]:
+    """Build resolved shift metadata for one emitted dataset bundle."""
+
+    nonlinear_mass = mechanism_nonlinear_mass(
+        mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt)
+    )
+    edge_odds_multiplier = float(math.exp(shift_params.edge_logit_bias_shift))
+    noise_variance_multiplier = float(shift_params.noise_sigma_multiplier**2)
+    return {
+        "enabled": bool(shift_params.enabled),
+        "profile": str(shift_params.profile),
+        "graph_scale": float(shift_params.graph_scale),
+        "mechanism_scale": float(shift_params.mechanism_scale),
+        "noise_scale": float(shift_params.noise_scale),
+        "edge_logit_bias_shift": float(shift_params.edge_logit_bias_shift),
+        "mechanism_logit_tilt": float(shift_params.mechanism_logit_tilt),
+        "noise_sigma_multiplier": float(shift_params.noise_sigma_multiplier),
+        "edge_odds_multiplier": float(edge_odds_multiplier),
+        "noise_variance_multiplier": float(noise_variance_multiplier),
+        "mechanism_nonlinear_mass": float(nonlinear_mass),
+    }

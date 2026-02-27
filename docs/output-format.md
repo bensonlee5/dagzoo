@@ -100,6 +100,7 @@ Each dataset's `metadata.json` contains:
 | `attempt_used`           | int         | Generation attempt index (0-based)                           |
 | `lineage`                | object      | DAG lineage record (see Lineage below)                       |
 | `curriculum`             | object      | Curriculum metadata (see below)                              |
+| `shift`                  | object      | Resolved shift settings and realized observability signals   |
 | `config`                 | object      | Full serialized generator configuration                      |
 | `filter`                 | object      | Filter results (see below)                                   |
 | `class_structure`        | object      | Present only for classification (see below)                  |
@@ -127,6 +128,25 @@ The `realized_complexity` object contains: `n_rows_total`, `n_train`,
 The `stage_bounds` object contains nullable min/max pairs:
 `n_features_min`, `n_features_max`, `n_nodes_min`, `n_nodes_max`,
 `depth_min`, `depth_max`.
+
+### Shift sub-object
+
+Present for all generated bundles. When shift is disabled, scales are `0.0` and
+multipliers are `1.0`.
+
+| Key                         | Type  | Description                                                 |
+| --------------------------- | ----- | ----------------------------------------------------------- |
+| `enabled`                   | bool  | Whether shift controls were enabled                         |
+| `profile`                   | str   | Resolved shift profile (`off`, `graph_drift`, etc.)         |
+| `graph_scale`               | float | Resolved graph drift scale                                  |
+| `mechanism_scale`           | float | Resolved mechanism drift scale                              |
+| `noise_scale`               | float | Resolved noise drift scale                                  |
+| `edge_logit_bias_shift`     | float | Additive shift applied to edge logits                       |
+| `mechanism_logit_tilt`      | float | Mechanism-family tilt applied at sampling                   |
+| `noise_sigma_multiplier`    | float | Sigma multiplier applied to stochastic noise                |
+| `edge_odds_multiplier`      | float | Edge-odds multiplier (`exp(edge_logit_bias_shift)`)         |
+| `noise_variance_multiplier` | float | Noise-variance multiplier (`noise_sigma_multiplier^2`)      |
+| `mechanism_nonlinear_mass`  | float | Probability mass on nonlinear mechanism families (`[0, 1]`) |
 
 ### Filter sub-object
 

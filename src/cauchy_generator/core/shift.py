@@ -39,6 +39,13 @@ MECHANISM_FAMILY_BASE_LOGITS: dict[str, float] = {
     "em": -0.3,
     "product": 0.9,
 }
+NONLINEAR_MECHANISM_FAMILIES: tuple[str, ...] = (
+    "nn",
+    "tree",
+    "discretization",
+    "gp",
+    "product",
+)
 
 _PROFILE_DEFAULT_SCALES: dict[str, tuple[float, float, float]] = {
     SHIFT_PROFILE_OFF: (0.0, 0.0, 0.0),
@@ -98,6 +105,24 @@ def mechanism_family_probabilities(
     }
 
 
+def mechanism_nonlinear_mass(
+    *,
+    mechanism_logit_tilt: float,
+    families: tuple[str, ...] = MECHANISM_FAMILY_ORDER,
+    nonlinear_families: tuple[str, ...] = NONLINEAR_MECHANISM_FAMILIES,
+) -> float:
+    """Return probability mass over nonlinear mechanism families."""
+
+    if not families:
+        return 0.0
+    probs = mechanism_family_probabilities(
+        mechanism_logit_tilt=mechanism_logit_tilt,
+        families=families,
+    )
+    nonlinear_set = set(nonlinear_families)
+    return float(sum(prob for family, prob in probs.items() if family in nonlinear_set))
+
+
 def resolve_shift_runtime_params(config: GeneratorConfig) -> ShiftRuntimeParams:
     """Resolve shift profile/defaults/overrides into runtime coefficients."""
 
@@ -146,8 +171,10 @@ def resolve_shift_runtime_params(config: GeneratorConfig) -> ShiftRuntimeParams:
 __all__ = [
     "MECHANISM_FAMILY_BASE_LOGITS",
     "MECHANISM_FAMILY_ORDER",
+    "NONLINEAR_MECHANISM_FAMILIES",
     "ShiftRuntimeParams",
     "centered_mechanism_family_logits",
+    "mechanism_nonlinear_mass",
     "mechanism_family_probabilities",
     "resolve_shift_runtime_params",
 ]

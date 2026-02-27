@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import fields
+import math
 from typing import Any
 
 import torch
@@ -64,6 +65,16 @@ def extract_dataset_metrics(
     def _int_or_none(v: Any) -> int | None:
         return int(v) if v is not None else None
 
+    def _float_or_none(v: Any) -> float | None:
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return None
+        as_float = float(v)
+        return as_float if math.isfinite(as_float) else None
+
+    def _float_or_default(v: Any, default: float) -> float:
+        value = _float_or_none(v)
+        return default if value is None else value
+
     return DatasetMetrics(
         task=str(raw["task"]),
         n_rows=int(raw["n_rows"]),
@@ -71,6 +82,20 @@ def extract_dataset_metrics(
         n_classes=_int_or_none(raw.get("n_classes")),
         n_categorical_features=int(raw["n_categorical_features"]),
         categorical_ratio=float(raw["categorical_ratio"]),
+        graph_edge_density=_float_or_none(raw.get("graph_edge_density")),
+        shift_enabled=_float_or_default(raw.get("shift_enabled"), 0.0),
+        shift_graph_scale=_float_or_default(raw.get("shift_graph_scale"), 0.0),
+        shift_mechanism_scale=_float_or_default(raw.get("shift_mechanism_scale"), 0.0),
+        shift_noise_scale=_float_or_default(raw.get("shift_noise_scale"), 0.0),
+        shift_edge_odds_multiplier=_float_or_default(raw.get("shift_edge_odds_multiplier"), 1.0),
+        shift_mechanism_nonlinear_mass=_float_or_default(
+            raw.get("shift_mechanism_nonlinear_mass"),
+            0.0,
+        ),
+        shift_noise_variance_multiplier=_float_or_default(
+            raw.get("shift_noise_variance_multiplier"),
+            1.0,
+        ),
         linearity_proxy=raw.get("linearity_proxy"),
         nonlinearity_proxy=raw.get("nonlinearity_proxy"),
         wins_ratio_proxy=raw.get("wins_ratio_proxy"),

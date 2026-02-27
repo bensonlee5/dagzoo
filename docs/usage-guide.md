@@ -173,6 +173,16 @@ Run with any shift-enabled config:
 cauchy-gen generate --config path/to/shift_config.yaml --num-datasets 25 --out data/run_shift
 ```
 
+How to interpret outputs:
+
+- Per-dataset `metadata.json` now includes `shift` with resolved profile/scales
+  and derived multipliers (`edge_odds_multiplier`,
+  `noise_variance_multiplier`, `mechanism_nonlinear_mass`).
+- Diagnostics coverage summaries include shift observability metrics such as
+  `shift_graph_scale`, `shift_edge_odds_multiplier`,
+  `shift_mechanism_nonlinear_mass`, and
+  `shift_noise_variance_multiplier`.
+
 ______________________________________________________________________
 
 ## 7. Benchmark workflows and guardrails

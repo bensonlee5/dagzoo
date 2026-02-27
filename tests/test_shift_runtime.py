@@ -13,6 +13,7 @@ from cauchy_generator.config import (
 )
 from cauchy_generator.core.shift import (
     MECHANISM_FAMILY_ORDER,
+    mechanism_nonlinear_mass,
     mechanism_family_probabilities,
     resolve_shift_runtime_params,
 )
@@ -111,3 +112,11 @@ def test_mechanism_family_probabilities_tilt_increases_nonlinear_mass() -> None:
 
     assert _nonlinear_mass(probs_tilted) > _nonlinear_mass(probs_uniform)
     assert entropy_tilted < entropy_uniform
+
+
+def test_mechanism_nonlinear_mass_matches_probability_sum() -> None:
+    tilt = 0.7
+    probs = mechanism_family_probabilities(mechanism_logit_tilt=tilt)
+    assert mechanism_nonlinear_mass(mechanism_logit_tilt=tilt) == pytest.approx(
+        _nonlinear_mass(probs)
+    )

@@ -1,6 +1,7 @@
+import numpy as np
 import pytest
 import torch
-import numpy as np
+import math
 
 from cauchy_generator.config import CurriculumStageConfig, GeneratorConfig
 from cauchy_generator.core.dataset import (
@@ -10,6 +11,7 @@ from cauchy_generator.core.dataset import (
     generate_batch_iter,
     generate_one,
 )
+from cauchy_generator.core.shift import mechanism_nonlinear_mass, resolve_shift_runtime_params
 from cauchy_generator.io.lineage_schema import (
     LINEAGE_SCHEMA_NAME,
     LINEAGE_SCHEMA_VERSION,
@@ -198,6 +200,58 @@ def test_generate_one_shift_disabled_preserves_baseline_outputs() -> None:
     assert bundle_base.metadata["graph_edges"] == bundle_disabled.metadata["graph_edges"]
     assert bundle_base.metadata["graph_edge_density"] == pytest.approx(
         bundle_disabled.metadata["graph_edge_density"]
+    )
+
+
+def test_generate_one_shift_metadata_emits_disabled_defaults() -> None:
+    cfg = _tiny_regression_config()
+    cfg.shift.enabled = False
+    cfg.shift.profile = "off"
+
+    bundle = generate_one(cfg, seed=1882, device="cpu")
+    shift_metadata = bundle.metadata["shift"]
+    assert shift_metadata["enabled"] is False
+    assert shift_metadata["profile"] == "off"
+    assert shift_metadata["graph_scale"] == pytest.approx(0.0)
+    assert shift_metadata["mechanism_scale"] == pytest.approx(0.0)
+    assert shift_metadata["noise_scale"] == pytest.approx(0.0)
+    assert shift_metadata["edge_logit_bias_shift"] == pytest.approx(0.0)
+    assert shift_metadata["mechanism_logit_tilt"] == pytest.approx(0.0)
+    assert shift_metadata["noise_sigma_multiplier"] == pytest.approx(1.0)
+    assert shift_metadata["edge_odds_multiplier"] == pytest.approx(1.0)
+    assert shift_metadata["noise_variance_multiplier"] == pytest.approx(1.0)
+    assert shift_metadata["mechanism_nonlinear_mass"] == pytest.approx(
+        mechanism_nonlinear_mass(mechanism_logit_tilt=0.0)
+    )
+
+
+def test_generate_one_shift_metadata_matches_resolved_runtime_params() -> None:
+    cfg = _tiny_regression_config()
+    cfg.shift.enabled = True
+    cfg.shift.profile = "custom"
+    cfg.shift.graph_scale = 0.6
+    cfg.shift.mechanism_scale = 0.3
+    cfg.shift.noise_scale = 0.4
+    runtime = resolve_shift_runtime_params(cfg)
+
+    bundle = generate_one(cfg, seed=1883, device="cpu")
+    shift_metadata = bundle.metadata["shift"]
+    assert shift_metadata["enabled"] is True
+    assert shift_metadata["profile"] == "custom"
+    assert shift_metadata["graph_scale"] == pytest.approx(runtime.graph_scale)
+    assert shift_metadata["mechanism_scale"] == pytest.approx(runtime.mechanism_scale)
+    assert shift_metadata["noise_scale"] == pytest.approx(runtime.noise_scale)
+    assert shift_metadata["edge_logit_bias_shift"] == pytest.approx(runtime.edge_logit_bias_shift)
+    assert shift_metadata["mechanism_logit_tilt"] == pytest.approx(runtime.mechanism_logit_tilt)
+    assert shift_metadata["noise_sigma_multiplier"] == pytest.approx(runtime.noise_sigma_multiplier)
+    assert shift_metadata["edge_odds_multiplier"] == pytest.approx(
+        math.exp(runtime.edge_logit_bias_shift)
+    )
+    assert shift_metadata["noise_variance_multiplier"] == pytest.approx(
+        runtime.noise_sigma_multiplier**2
+    )
+    assert shift_metadata["mechanism_nonlinear_mass"] == pytest.approx(
+        mechanism_nonlinear_mass(mechanism_logit_tilt=runtime.mechanism_logit_tilt)
     )
 
 

@@ -17,6 +17,7 @@ from cauchy_generator.core.metric_constants import (
     resolve_task_from_metadata,
     validate_metric_shapes,
 )
+from cauchy_generator.core.shift import mechanism_nonlinear_mass
 from cauchy_generator.filtering import apply_torch_rf_filter
 from cauchy_generator.types import DatasetBundle
 
@@ -81,6 +82,7 @@ def extract_steering_metrics(
         metrics["class_entropy"] = None
         metrics["majority_minority_ratio"] = None
     metrics["n_classes"] = n_classes
+    metrics.update(_extract_shift_observability(bundle.metadata))
 
     needs_pearson = (
         bool(
@@ -173,6 +175,77 @@ def _concat_targets(y_train: torch.Tensor, y_test: torch.Tensor) -> torch.Tensor
         "y_train/y_test rank mismatch is unsupported: "
         f"{tuple(y_train.shape)!r} vs {tuple(y_test.shape)!r}"
     )
+
+
+def _extract_shift_observability(metadata: dict[str, Any]) -> dict[str, float | None]:
+    shift_raw = metadata.get("shift")
+    shift_payload = shift_raw if isinstance(shift_raw, dict) else {}
+    graph_edge_density = _coerce_optional_finite_float(metadata.get("graph_edge_density"))
+    shift_enabled = _coerce_bool(shift_payload.get("enabled"), default=False)
+    shift_graph_scale = _coerce_finite_float(shift_payload.get("graph_scale"), default=0.0)
+    shift_mechanism_scale = _coerce_finite_float(
+        shift_payload.get("mechanism_scale"),
+        default=0.0,
+    )
+    shift_noise_scale = _coerce_finite_float(shift_payload.get("noise_scale"), default=0.0)
+    shift_edge_odds_multiplier = _coerce_finite_float(
+        shift_payload.get("edge_odds_multiplier"),
+        default=1.0,
+    )
+    shift_noise_variance_multiplier = _coerce_finite_float(
+        shift_payload.get("noise_variance_multiplier"),
+        default=1.0,
+    )
+    if shift_edge_odds_multiplier <= 0.0:
+        shift_edge_odds_multiplier = 1.0
+    if shift_noise_variance_multiplier <= 0.0:
+        shift_noise_variance_multiplier = 1.0
+
+    shift_mechanism_nonlinear_mass = _coerce_optional_finite_float(
+        shift_payload.get("mechanism_nonlinear_mass")
+    )
+    if shift_mechanism_nonlinear_mass is None:
+        mechanism_logit_tilt = _coerce_finite_float(
+            shift_payload.get("mechanism_logit_tilt"),
+            default=shift_mechanism_scale,
+        )
+        shift_mechanism_nonlinear_mass = mechanism_nonlinear_mass(
+            mechanism_logit_tilt=mechanism_logit_tilt
+        )
+    shift_mechanism_nonlinear_mass = min(1.0, max(0.0, shift_mechanism_nonlinear_mass))
+
+    return {
+        "graph_edge_density": graph_edge_density,
+        "shift_enabled": 1.0 if shift_enabled else 0.0,
+        "shift_graph_scale": float(shift_graph_scale),
+        "shift_mechanism_scale": float(shift_mechanism_scale),
+        "shift_noise_scale": float(shift_noise_scale),
+        "shift_edge_odds_multiplier": float(shift_edge_odds_multiplier),
+        "shift_mechanism_nonlinear_mass": float(shift_mechanism_nonlinear_mass),
+        "shift_noise_variance_multiplier": float(shift_noise_variance_multiplier),
+    }
+
+
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    return default
+
+
+def _coerce_optional_finite_float(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    as_float = float(value)
+    if not math.isfinite(as_float):
+        return None
+    return as_float
+
+
+def _coerce_finite_float(value: Any, *, default: float) -> float:
+    as_float = _coerce_optional_finite_float(value)
+    if as_float is None:
+        return default
+    return as_float
 
 
 def resolve_task(metadata: dict[str, Any], y_all: torch.Tensor) -> str:

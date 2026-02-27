@@ -25,6 +25,14 @@ def _metric_fixture(**overrides: float | int | str | None) -> DatasetMetrics:
         n_classes=3,
         n_categorical_features=4,
         categorical_ratio=0.25,
+        graph_edge_density=0.4,
+        shift_enabled=0.0,
+        shift_graph_scale=0.0,
+        shift_mechanism_scale=0.0,
+        shift_noise_scale=0.0,
+        shift_edge_odds_multiplier=1.0,
+        shift_mechanism_nonlinear_mass=0.625,
+        shift_noise_variance_multiplier=1.0,
         linearity_proxy=0.5,
         nonlinearity_proxy=0.1,
         wins_ratio_proxy=0.6,
@@ -225,3 +233,4 @@ def test_generate_no_write_with_coverage_enabled_emits_artifacts(
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["num_datasets"] == 1
     assert "linearity_proxy" in payload["metrics"]
+    assert "shift_edge_odds_multiplier" in payload["metrics"]

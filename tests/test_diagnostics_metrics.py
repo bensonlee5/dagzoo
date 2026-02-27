@@ -22,6 +22,17 @@ def _tiny_config(task: str) -> GeneratorConfig:
     return cfg
 
 
+def _tiny_shift_config(*, profile: str, scale_field: str, scale_value: float) -> GeneratorConfig:
+    cfg = _tiny_config("regression")
+    cfg.filter.enabled = False
+    cfg.graph.n_nodes_min = 20
+    cfg.graph.n_nodes_max = 20
+    cfg.shift.enabled = True
+    cfg.shift.profile = profile
+    setattr(cfg.shift, scale_field, scale_value)
+    return cfg
+
+
 def test_extract_dataset_metrics_classification_invariants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -44,6 +55,11 @@ def test_extract_dataset_metrics_classification_invariants(
     assert metrics.wins_ratio_proxy == pytest.approx(0.75)
     assert metrics.nonlinearity_proxy is not None and metrics.nonlinearity_proxy >= 0.0
     assert 0.0 <= metrics.categorical_ratio <= 1.0
+    assert metrics.graph_edge_density is not None and 0.0 <= metrics.graph_edge_density <= 1.0
+    assert metrics.shift_enabled in {0.0, 1.0}
+    assert metrics.shift_edge_odds_multiplier >= 1.0
+    assert 0.0 <= metrics.shift_mechanism_nonlinear_mass <= 1.0
+    assert metrics.shift_noise_variance_multiplier >= 1.0
     if metrics.pearson_abs_mean is not None:
         assert 0.0 <= metrics.pearson_abs_mean <= 1.0
     if metrics.pearson_abs_max is not None:
@@ -73,6 +89,12 @@ def test_extract_dataset_metrics_regression_branch(
     assert metrics.linearity_proxy is not None and 0.0 <= metrics.linearity_proxy <= 1.0
     assert metrics.wins_ratio_proxy == pytest.approx(0.55)
     assert metrics.snr_proxy_db is None or np.isfinite(metrics.snr_proxy_db)
+    assert metrics.shift_enabled == pytest.approx(0.0)
+    assert metrics.shift_graph_scale == pytest.approx(0.0)
+    assert metrics.shift_mechanism_scale == pytest.approx(0.0)
+    assert metrics.shift_noise_scale == pytest.approx(0.0)
+    assert metrics.shift_edge_odds_multiplier == pytest.approx(1.0)
+    assert metrics.shift_noise_variance_multiplier == pytest.approx(1.0)
 
 
 def test_extract_dataset_metrics_spearman_toggle(
@@ -121,6 +143,67 @@ def test_extract_dataset_metrics_reproducible_for_fixed_input(
     metrics_3 = extract_dataset_metrics(bundle_b)
     assert metrics_1 == metrics_2
     assert metrics_1 == metrics_3
+
+
+def test_extract_dataset_metrics_exposes_shift_metadata_fields() -> None:
+    cfg = _tiny_shift_config(profile="custom", scale_field="graph_scale", scale_value=0.7)
+    cfg.shift.mechanism_scale = 0.4
+    cfg.shift.noise_scale = 0.3
+
+    bundle = generate_one(cfg, seed=3123, device="cpu")
+    metrics = extract_dataset_metrics(bundle)
+    shift_payload = bundle.metadata["shift"]
+
+    assert metrics.shift_enabled == pytest.approx(1.0)
+    assert metrics.shift_graph_scale == pytest.approx(float(shift_payload["graph_scale"]))
+    assert metrics.shift_mechanism_scale == pytest.approx(float(shift_payload["mechanism_scale"]))
+    assert metrics.shift_noise_scale == pytest.approx(float(shift_payload["noise_scale"]))
+    assert metrics.shift_edge_odds_multiplier == pytest.approx(
+        float(shift_payload["edge_odds_multiplier"])
+    )
+    assert metrics.shift_noise_variance_multiplier == pytest.approx(
+        float(shift_payload["noise_variance_multiplier"])
+    )
+    assert metrics.shift_mechanism_nonlinear_mass == pytest.approx(
+        float(shift_payload["mechanism_nonlinear_mass"])
+    )
+
+
+def test_extract_dataset_metrics_shift_profiles_move_in_expected_directions() -> None:
+    baseline = _tiny_config("regression")
+    baseline.filter.enabled = False
+    baseline.graph.n_nodes_min = 20
+    baseline.graph.n_nodes_max = 20
+
+    graph_cfg = _tiny_shift_config(
+        profile="graph_drift", scale_field="graph_scale", scale_value=1.0
+    )
+    mechanism_cfg = _tiny_shift_config(
+        profile="mechanism_drift",
+        scale_field="mechanism_scale",
+        scale_value=1.0,
+    )
+    noise_cfg = _tiny_shift_config(
+        profile="noise_drift", scale_field="noise_scale", scale_value=1.0
+    )
+
+    base_metrics = extract_dataset_metrics(generate_one(baseline, seed=3188, device="cpu"))
+    graph_metrics = extract_dataset_metrics(generate_one(graph_cfg, seed=3188, device="cpu"))
+    mechanism_metrics = extract_dataset_metrics(
+        generate_one(mechanism_cfg, seed=3188, device="cpu")
+    )
+    noise_metrics = extract_dataset_metrics(generate_one(noise_cfg, seed=3188, device="cpu"))
+
+    assert graph_metrics.graph_edge_density is not None
+    assert base_metrics.graph_edge_density is not None
+    assert graph_metrics.graph_edge_density >= base_metrics.graph_edge_density
+    assert (
+        mechanism_metrics.shift_mechanism_nonlinear_mass
+        > base_metrics.shift_mechanism_nonlinear_mass
+    )
+    assert (
+        noise_metrics.shift_noise_variance_multiplier > base_metrics.shift_noise_variance_multiplier
+    )
 
 
 def test_extract_dataset_metrics_handles_degenerate_constant_columns(
@@ -201,6 +284,14 @@ def test_extract_dataset_metrics_normalizes_bundle_to_cpu_before_extraction(
             "n_classes": None,
             "n_categorical_features": 0.0,
             "categorical_ratio": 0.0,
+            "graph_edge_density": 0.3,
+            "shift_enabled": 1.0,
+            "shift_graph_scale": 0.4,
+            "shift_mechanism_scale": 0.2,
+            "shift_noise_scale": 0.1,
+            "shift_edge_odds_multiplier": 1.2,
+            "shift_mechanism_nonlinear_mass": 0.7,
+            "shift_noise_variance_multiplier": 1.1,
             "linearity_proxy": 0.25,
             "nonlinearity_proxy": 0.0,
             "wins_ratio_proxy": 0.25,
@@ -237,3 +328,6 @@ def test_extract_dataset_metrics_normalizes_bundle_to_cpu_before_extraction(
     assert captured["include_spearman"] is False
     assert metrics.n_rows == 3
     assert metrics.n_features == 2
+    assert metrics.graph_edge_density == pytest.approx(0.3)
+    assert metrics.shift_enabled == pytest.approx(1.0)
+    assert metrics.shift_edge_odds_multiplier == pytest.approx(1.2)

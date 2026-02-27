@@ -22,7 +22,11 @@ from cauchy_generator.core.constants import (
     STEERING_TARGET_BAND_MIN_WIDTH,
 )
 from cauchy_generator.core.layout import _build_node_specs, _sample_layout
-from cauchy_generator.core.metadata import _build_curriculum_metadata, _build_lineage_metadata
+from cauchy_generator.core.metadata import (
+    _build_curriculum_metadata,
+    _build_lineage_metadata,
+    _build_shift_metadata,
+)
 from cauchy_generator.core.shift import ShiftRuntimeParams, resolve_shift_runtime_params
 from cauchy_generator.core.steering_metrics import extract_steering_metrics
 from cauchy_generator.core.validation import _classification_split_valid, _stratified_split_indices
@@ -288,6 +292,7 @@ def _generate_torch(
             n_test=int(x_test.shape[0]),
             n_features=int(x_train.shape[1]),
         )
+        shift_metadata = _build_shift_metadata(shift_params=shift_params)
 
         metadata = {
             "backend": "torch",
@@ -305,6 +310,7 @@ def _generate_torch(
             "attempt_used": attempt,
             "filter": aux_meta.get("filter", {}),
             "curriculum": curriculum_metadata,
+            "shift": shift_metadata,
             "config": asdict(config),
         }
         if missingness_summary is not None:

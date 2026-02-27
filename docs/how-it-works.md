@@ -129,6 +129,9 @@ Interpretation:
 - `noise_scale = 1.0` corresponds to +3 dB variance (2x variance).
 - `mechanism_scale > 0` shifts mass toward nonlinear families (`nn`, `tree`,
   `discretization`, `gp`, `product`) while remaining probabilistic.
+- Emitted bundle metadata includes resolved shift settings and derived signals
+  (`edge_odds_multiplier`, `noise_variance_multiplier`,
+  `mechanism_nonlinear_mass`) used by diagnostics coverage summaries.
 
 ### 5. Optional steering and diagnostics
 
