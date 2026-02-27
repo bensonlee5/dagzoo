@@ -1,0 +1,29 @@
+seed: 47
+
+dataset:
+  task: classification
+  n_train: 256
+  n_test: 256
+  n_features_min: 8
+  n_features_max: 24
+  n_classes_min: 24
+  n_classes_max: 24
+
+graph:
+  n_nodes_min: 2
+  n_nodes_max: 12
+
+runtime:
+  device: cpu
+
+output:
+  out_dir: data/run_many_class_smoke
+
+diagnostics:
+  enabled: false
+
+steering:
+  enabled: false
+
+filter:
+  enabled: false

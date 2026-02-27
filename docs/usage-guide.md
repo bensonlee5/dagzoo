@@ -97,7 +97,26 @@ cauchy-gen generate --config configs/preset_curriculum_auto_staged.yaml --num-da
 
 ______________________________________________________________________
 
-## 5. Benchmark workflows and guardrails
+## 5. Many-class workflows
+
+Use many-class presets to exercise the current rollout envelope (`n_classes_max <= 32`) with smoke-stable defaults.
+
+```bash
+cauchy-gen generate --config configs/preset_many_class_generate_smoke.yaml --num-datasets 25 --out data/run_many_class_smoke
+
+cauchy-gen benchmark \
+  --config configs/preset_many_class_benchmark_smoke.yaml \
+  --profile custom \
+  --suite smoke \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_many_class
+```
+
+The benchmark summary includes throughput/latency plus standard guardrail payloads (for example, `lineage_guardrails`).
+
+______________________________________________________________________
+
+## 6. Benchmark workflows and guardrails
 
 Use smoke benchmarks for quick validation and standard benchmarks for broader
 performance checks.
