@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Architecture documentation with mermaid diagrams (`docs/architecture.md`)
+- Architecture documentation with mermaid diagrams (`docs/how-it-works.md`)
+- Design decisions record for foundational technical choices (`docs/design-decisions.md`)
+- Domain glossary for generator terminology (`docs/glossary.md`)
+- Formal output format specification and metadata contract (`docs/output-format.md`)
 - Torch-native steering metric extractor (`core/steering_metrics.py`) — avoids NumPy conversion during candidate scoring
 - Deterministic MCAR/MAR/MNAR missingness mask samplers with typed config validation coverage
 - End-to-end missingness injection in generation/postprocess path with compact metadata summaries for configured and realized rates

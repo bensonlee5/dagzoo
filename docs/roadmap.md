@@ -12,9 +12,9 @@ It maps the mission and strategic pillars in `README.md` to:
 Related docs:
 
 - Decision rubric and go/no-go gates: `docs/backlog_decision_rules.md`
-- Evidence appendix: `docs/literature_evidence_2026.md`
-- Current implementation details: `docs/implementation.md`
-- Historical pointer only (non-canonical): `docs/improvement_ideas.md`
+- Evidence appendix: `reference/literature_evidence_2026.md`
+- System behavior walkthrough: `docs/how-it-works.md`
+- Output contract: `docs/output-format.md`
 
 ## Status Labels
 
@@ -66,6 +66,140 @@ Lower rank means higher priority. Rank `0` is reserved for completed items retai
 | Hardware-native performance (Torch + hardware-aware tuning)         | `partial`     | Torch CPU/CUDA/MPS path, hardware detection, coarse profile-based tuning, and benchmark suite                                                            | Hardware-adaptive autotuning is not implemented; parallel/distributed generation is not implemented               | RD-010, RD-009                         |
 | Parallel streaming Parquet sharding                                 | `partial`     | Streaming Parquet writing exists                                                                                                                         | Writing is currently single-process sequential                                                                    | RD-009                                 |
 
+## Current Implementation Baseline
+
+This section captures the current implementation baseline. For control/data-flow
+walkthroughs, see `docs/how-it-works.md`.
+
+### Source of Truth
+
+- Normative behavior: `reference/TabICLv2.pdf` Appendix E (`E.2`-`E.14`).
+- Clarification-only sources:
+  - `reference/A Closer Look at TabPFN v2.pdf`
+  - `reference/Accurate predictions on small data with a tabular foundation model.pdf`
+
+### Public Interfaces
+
+#### Python API
+
+- `generate_one(config: GeneratorConfig, *, seed: int | None = None, device: str | None = None) -> DatasetBundle`
+- `generate_batch(config: GeneratorConfig, *, num_datasets: int, seed: int | None = None, device: str | None = None) -> list[DatasetBundle]`
+- `write_parquet_shards(bundles, out_dir, shard_size, compression="zstd")`
+- `DatasetConfig` missingness controls:
+  - `missing_rate`
+  - `missing_mechanism` (`none|mcar|mar|mnar`)
+  - `missing_mar_observed_fraction`
+  - `missing_mar_logit_scale`
+  - `missing_mnar_logit_scale`
+
+#### CLI
+
+- `cauchy-gen generate --config ... --num-datasets ... --device cuda --seed ...`
+- `cauchy-gen generate --missing-rate ... --missing-mechanism ... --missing-mar-observed-fraction ... --missing-mar-logit-scale ... --missing-mnar-logit-scale ...`
+- `cauchy-gen benchmark --suite standard --profile all --baseline ... --fail-on-regression`
+
+#### Output Contract
+
+See `docs/output-format.md` for the DatasetBundle field spec, Parquet layout,
+metadata JSON contract, and DAG lineage schema.
+
+### Runtime Profiles
+
+- `configs/default.yaml`: balanced local development profile.
+- `configs/benchmark_cpu.yaml`: CPU benchmark profile.
+- `configs/benchmark_cuda_desktop.yaml`: desktop CUDA benchmark profile.
+- `configs/benchmark_cuda_h100.yaml`: H100 CUDA benchmark profile.
+- `configs/preset_cuda_h100.yaml`: high-throughput datacenter preset.
+- `configs/preset_missingness_mcar.yaml`: MCAR missingness preset.
+- `configs/preset_missingness_mar.yaml`: MAR missingness preset.
+- `configs/preset_missingness_mnar.yaml`: MNAR missingness preset.
+- `configs/preset_curriculum_stage1.yaml`: fixed stage-1 curriculum preset.
+- `configs/preset_curriculum_stage2.yaml`: fixed stage-2 curriculum preset.
+- `configs/preset_curriculum_stage3.yaml`: fixed stage-3 curriculum preset.
+- `configs/preset_curriculum_auto_staged.yaml`: auto-sampled staged curriculum
+  preset.
+- `configs/preset_curriculum_benchmark_smoke.yaml`: CPU smoke benchmark preset
+  for staged curriculum guardrail checks.
+- `configs/preset_lineage_benchmark_smoke.yaml`: CPU smoke benchmark preset for
+  lineage export guardrail checks.
+- Runtime currently applies coarse profile-tier overrides from GPU FLOPS lookup
+  and fallback behavior; adaptive autotuning is tracked in RD-010.
+
+### Module Mapping (Appendix E)
+
+- `sampling/correlated.py`: correlated scalar sampler (`E.2`)
+- `core/dataset.py`: dataset orchestration entrypoint (`E.3`)
+- `core/curriculum.py`: curriculum and stagewise row sampling (`E.3`)
+- `core/layout.py`: dataset layout, graph sampling, and node assignments
+  (`E.3`, `E.4`)
+- `graph/cauchy_graph.py`: random Cauchy DAG (`E.4`)
+- `core/node_pipeline.py`: per-node flow (`E.5`)
+- `converters/numeric.py`, `converters/categorical.py`: converters (`E.6`)
+- `functions/multi.py`: concatenation vs per-parent aggregation (`E.7`)
+- `functions/random_functions.py`: NN/tree/discretization/GP/linear/quadratic/EM/product (`E.8`)
+- `functions/activations.py`: fixed + parametric activations (`E.9`)
+- `linalg/random_matrices.py`: five matrix families and postprocessing (`E.10`)
+- `sampling/random_weights.py`: positive normalized weights (`E.11`)
+- `sampling/random_points.py`: base distributions + random function transform
+  (`E.12`)
+- `postprocess/postprocess.py`: cleanup, scaling, class/index permutation
+  (`E.13`)
+- `filtering/torch_rf_filter.py`: Torch-native RF OOB filter (`E.14`)
+
+### Performance Strategy
+
+1. Current generator path runs Torch on all devices (CPU/CUDA/MPS); diagnostics
+   extraction converts bundles to CPU before computing metrics (see
+   `docs/how-it-works.md` for diagnostics data flow).
+1. Keep kernels batch-oriented with vectorized torch operations and avoid Python
+   loops in inner math paths.
+1. Use optional filtering (`E.14`) behind config flags to avoid CPU bottlenecks
+   in throughput benchmarks.
+1. Profile with `bench/throughput.py` and track JSON baseline regressions by
+   preset.
+1. Missingness-enabled benchmark runs include acceptance/runtime guardrails
+   against missingness-off controls.
+1. Staged-curriculum benchmark runs include metadata/runtime guardrails
+   (`curriculum_guardrails`) against curriculum-off controls.
+1. Benchmark profile summaries include lineage-export persistence overhead
+   guardrails (`lineage_guardrails`) against lineage-stripped control
+   persistence runs.
+1. Next hardware-aware step is bounded adaptive autotuning with explicit
+   telemetry/guardrails (RD-010).
+1. Next roadmap step for throughput is controlled multi-worker execution
+   (RD-009) while preserving seeded behavior.
+
+### Reproducibility Strategy
+
+1. Global run seed -> per-dataset seed -> per-component derived seeds.
+1. Central RNG utilities provide deterministic seed derivation and
+   `torch.Generator` helpers.
+1. Document expected backend variation (best effort, not strict bitwise
+   determinism).
+
+### Validation and Benchmarks
+
+#### Correctness
+
+- Unit invariants for ranges, shapes, DAG validity, converter class ranges, and
+  matrix normalization.
+- Unit/integration coverage for missingness mask invariants, deterministic
+  behavior, and end-to-end metadata emission.
+- Integration tests for end-to-end classification/regression paths.
+
+#### Reproducibility
+
+- Fixed seed should reproduce metadata exactly and numeric outputs within
+  tolerance.
+
+#### Performance
+
+- Benchmark suites: `smoke`, `standard`, `full`.
+- Artifacts: JSON + Markdown summaries under
+  `benchmarks/results/<timestamp>/`.
+- Soft regression gate: warn at configurable threshold, fail only on severe
+  regression with `--fail-on-regression`.
+
 ## Roadmap Items
 
 ### RD-001: Ground-Truth DAG Artifact Export
@@ -108,14 +242,14 @@ Lower rank means higher priority. Rank `0` is reserved for completed items retai
 - Pillar alignment: tabular realism
 - Goal: provide configurable missing-data mechanisms with deterministic seeded behavior and benchmark-time acceptance/runtime guardrails.
 - Delivered scope:
-  - `DatasetConfig` supports missingness controls (`missing_rate`, mechanism, MAR/MNAR scales).
+  - `DatasetConfig` supports missingness controls (`missing_rate`, mechanism, MAR/MNAR scales). See [how-it-works.md](how-it-works.md) for MCAR/MAR/MNAR mechanism definitions.
   - `cauchy-gen generate` supports missingness CLI overrides.
-  - Generation path injects deterministic MCAR/MAR/MNAR masks and emits per-bundle missingness metadata.
+  - Generation path injects deterministic missingness masks and emits per-bundle metadata.
   - Benchmark profiles emit `missingness_guardrails` including metadata coverage, realized-rate accuracy, and runtime degradation checks.
 - Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/sampling/missingness.py`, `src/cauchy_generator/postprocess/postprocess.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/cli.py`, `src/cauchy_generator/bench/suite.py`
 - Completion evidence:
   - Config and CLI support opt-in mechanism selection and missing rate controls.
-  - Tests validate expected missing-rate and dependency behavior for MCAR/MAR/MNAR.
+  - Tests validate expected missing-rate and dependency behavior.
   - Benchmark summaries include missingness guardrail metrics and status.
 
 ### RD-004: Shift-Aware SCM Generation
@@ -185,7 +319,7 @@ Lower rank means higher priority. Rank `0` is reserved for completed items retai
 - Milestone: `Now`
 - Mission alignment: foundation model pretraining
 - Pillar alignment: tabular realism
-- Goal: maintain and harden soft steering loop using existing diagnostics coverage targets.
+- Goal: maintain and harden soft steering loop using existing diagnostics coverage targets. See [design-decisions.md](design-decisions.md) ADR 4 for the softmax selection rationale.
 - Repo touchpoints: `src/cauchy_generator/diagnostics/coverage.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/cli.py`
 - Exit criteria:
   - Steering can be enabled/disabled without breaking existing flows.

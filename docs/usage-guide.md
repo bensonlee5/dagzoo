@@ -1,0 +1,162 @@
+# Usage Guide
+
+Operational guide for end users running generation and benchmarking workflows.
+This document describes the current baseline CLI surface; function-family sets
+and parameterizations can expand over time with backward-compatible defaults.
+
+______________________________________________________________________
+
+## Prerequisites
+
+Install `cauchy-generator`:
+
+```bash
+uv tool install cauchy-generator
+```
+
+For development checkouts, use:
+
+```bash
+uv sync --group dev
+source .venv/bin/activate
+```
+
+______________________________________________________________________
+
+## 1. Basic generation
+
+Use this when you want a default high-quality batch.
+
+```bash
+cauchy-gen generate --config configs/default.yaml --num-datasets 10 --out data/run1
+```
+
+______________________________________________________________________
+
+## 2. Diagnostics and meta steering
+
+Use diagnostics to emit per-dataset artifacts; add steering when coverage needs
+to favor specific meta-feature bands.
+
+```bash
+cauchy-gen generate \
+  --config configs/default.yaml \
+  --num-datasets 50 \
+  --diagnostics \
+  --steer-meta \
+  --meta-target linearity_proxy=0.25:0.75:1.5 \
+  --out data/run_steer
+```
+
+If you want discoverable conservative defaults:
+
+```bash
+cauchy-gen generate --config configs/preset_diagnostics_on.yaml --num-datasets 25 --diagnostics --out data/run_diag
+cauchy-gen generate --config configs/preset_steering_conservative.yaml --num-datasets 25 --diagnostics --out data/run_steering
+```
+
+______________________________________________________________________
+
+## 3. Missingness workflows
+
+Use presets for standard MCAR/MAR/MNAR runs:
+
+```bash
+cauchy-gen generate --config configs/preset_missingness_mcar.yaml --num-datasets 25 --out data/run_missing_mcar
+cauchy-gen generate --config configs/preset_missingness_mar.yaml --num-datasets 25 --out data/run_missing_mar
+cauchy-gen generate --config configs/preset_missingness_mnar.yaml --num-datasets 25 --out data/run_missing_mnar
+```
+
+Use CLI overrides for targeted MAR calibration:
+
+```bash
+cauchy-gen generate \
+  --config configs/default.yaml \
+  --num-datasets 25 \
+  --device cpu \
+  --missing-rate 0.25 \
+  --missing-mechanism mar \
+  --missing-mar-observed-fraction 0.6 \
+  --missing-mar-logit-scale 1.4 \
+  --out data/run_missing_cli_mar
+```
+
+______________________________________________________________________
+
+## 4. Curriculum workflows
+
+Use fixed stages for controlled complexity progression, or auto mode for
+sampled stage assignment.
+
+```bash
+cauchy-gen generate --config configs/preset_curriculum_stage1.yaml --num-datasets 25 --out data/run_curriculum_stage1
+cauchy-gen generate --config configs/preset_curriculum_stage2.yaml --num-datasets 25 --out data/run_curriculum_stage2
+cauchy-gen generate --config configs/preset_curriculum_stage3.yaml --num-datasets 25 --out data/run_curriculum_stage3
+cauchy-gen generate --config configs/preset_curriculum_auto_staged.yaml --num-datasets 25 --out data/run_curriculum_auto
+```
+
+______________________________________________________________________
+
+## 5. Benchmark workflows and guardrails
+
+Use smoke benchmarks for quick validation and standard benchmarks for broader
+performance checks.
+
+```bash
+cauchy-gen benchmark --suite smoke --profile cpu --out-dir benchmarks/results/smoke_cpu
+cauchy-gen benchmark --suite standard --profile cpu --out-dir benchmarks/results/standard_cpu
+```
+
+Benchmark diagnostics-enabled runs:
+
+```bash
+cauchy-gen benchmark \
+  --suite smoke \
+  --profile cpu \
+  --diagnostics \
+  --out-dir benchmarks/results/smoke_cpu_diag
+```
+
+Benchmark missingness and curriculum guardrails:
+
+```bash
+cauchy-gen benchmark \
+  --config configs/preset_missingness_mar.yaml \
+  --profile custom \
+  --suite smoke \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_missing_mar
+
+cauchy-gen benchmark \
+  --config configs/preset_curriculum_benchmark_smoke.yaml \
+  --profile custom \
+  --suite smoke \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_curriculum_guardrails
+```
+
+For regression gating in CI-like checks:
+
+```bash
+cauchy-gen benchmark \
+  --config configs/preset_curriculum_benchmark_smoke.yaml \
+  --profile custom \
+  --suite smoke \
+  --warn-threshold-pct 10 \
+  --fail-threshold-pct 20 \
+  --fail-on-regression \
+  --no-hardware-aware \
+  --no-memory \
+  --out-dir benchmarks/results/ci_smoke_curriculum_local
+```
+
+When available in a run, review benchmark summary sections such as
+`missingness_guardrails`, `lineage_guardrails`, and `curriculum_guardrails`.
+
+______________________________________________________________________
+
+## Related documents
+
+- Output contract: [output-format.md](output-format.md)
+- System guide and terminology: [how-it-works.md](how-it-works.md)
+- Architecture rationale and evolution policy: [design-decisions.md](design-decisions.md)
