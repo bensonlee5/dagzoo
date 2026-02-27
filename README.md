@@ -163,18 +163,6 @@ Presets follow the `preset_<category>_<variant>.yaml` naming convention. You can
 
 ______________________________________________________________________
 
-## Development
-
-```bash
-uv sync --group dev
-source .venv/bin/activate
-
-uv run pytest              # run the full test suite
-uv run pytest -x -q        # stop on first failure, quiet output
-```
-
-______________________________________________________________________
-
 ## Feature Highlights
 
 - **Configurable Missingness:** Native support for MCAR, MAR, and MNAR mechanisms with deterministic seeded behavior and benchmark guardrails.
