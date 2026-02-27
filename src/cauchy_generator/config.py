@@ -39,6 +39,30 @@ _MISSINGNESS_MECHANISM_VALUE_MAP: dict[str, MissingnessMechanism] = {
     MISSINGNESS_MECHANISM_MNAR: MISSINGNESS_MECHANISM_MNAR,
 }
 
+ShiftProfile = Literal[
+    "off",
+    "graph_drift",
+    "mechanism_drift",
+    "noise_drift",
+    "mixed",
+    "custom",
+]
+SHIFT_PROFILE_OFF: Literal["off"] = "off"
+SHIFT_PROFILE_GRAPH_DRIFT: Literal["graph_drift"] = "graph_drift"
+SHIFT_PROFILE_MECHANISM_DRIFT: Literal["mechanism_drift"] = "mechanism_drift"
+SHIFT_PROFILE_NOISE_DRIFT: Literal["noise_drift"] = "noise_drift"
+SHIFT_PROFILE_MIXED: Literal["mixed"] = "mixed"
+SHIFT_PROFILE_CUSTOM: Literal["custom"] = "custom"
+
+_SHIFT_PROFILE_VALUE_MAP: dict[str, ShiftProfile] = {
+    SHIFT_PROFILE_OFF: SHIFT_PROFILE_OFF,
+    SHIFT_PROFILE_GRAPH_DRIFT: SHIFT_PROFILE_GRAPH_DRIFT,
+    SHIFT_PROFILE_MECHANISM_DRIFT: SHIFT_PROFILE_MECHANISM_DRIFT,
+    SHIFT_PROFILE_NOISE_DRIFT: SHIFT_PROFILE_NOISE_DRIFT,
+    SHIFT_PROFILE_MIXED: SHIFT_PROFILE_MIXED,
+    SHIFT_PROFILE_CUSTOM: SHIFT_PROFILE_CUSTOM,
+}
+
 MAX_SUPPORTED_CLASS_COUNT = 32
 
 
@@ -71,6 +95,26 @@ def normalize_missing_mechanism(value: str) -> MissingnessMechanism:
     return result
 
 
+def normalize_shift_profile(value: object) -> ShiftProfile:
+    """Normalize shift profile into a validated internal value."""
+
+    if value is False:
+        return SHIFT_PROFILE_OFF
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise ValueError(
+            "Unsupported shift.profile "
+            f"'{value}'. Expected off, graph_drift, mechanism_drift, noise_drift, mixed, or custom."
+        )
+    normalized = value.strip().lower()
+    result = _SHIFT_PROFILE_VALUE_MAP.get(normalized)
+    if result is None:
+        raise ValueError(
+            "Unsupported shift.profile "
+            f"'{value}'. Expected off, graph_drift, mechanism_drift, noise_drift, mixed, or custom."
+        )
+    return result
+
+
 def _validate_finite_float_field(
     *,
     field_name: str,
@@ -96,6 +140,31 @@ def _validate_finite_float_field(
     if not math.isfinite(parsed) or not (lo_ok and hi_ok):
         raise ValueError(f"{field_name} must be {expectation}, got {parsed!r}.")
     return parsed
+
+
+def _validate_optional_finite_float_field(
+    *,
+    field_name: str,
+    value: Any,
+    lo: float,
+    hi: float | None,
+    lo_inclusive: bool,
+    hi_inclusive: bool,
+    expectation: str,
+) -> float | None:
+    """Validate an optional float field against finite bounds and normalize it."""
+
+    if value is None:
+        return None
+    return _validate_finite_float_field(
+        field_name=field_name,
+        value=value,
+        lo=lo,
+        hi=hi,
+        lo_inclusive=lo_inclusive,
+        hi_inclusive=hi_inclusive,
+        expectation=expectation,
+    )
 
 
 def _validate_int_field(
@@ -408,6 +477,79 @@ class CurriculumConfig:
 
 
 @dataclass(slots=True)
+class ShiftConfig:
+    enabled: bool = False
+    profile: ShiftProfile = SHIFT_PROFILE_OFF
+    graph_scale: float | None = None
+    mechanism_scale: float | None = None
+    noise_scale: float | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError(f"shift.enabled must be a boolean, got {self.enabled!r}.")
+        self.profile = normalize_shift_profile(self.profile)
+        self.graph_scale = _validate_optional_finite_float_field(
+            field_name="shift.graph_scale",
+            value=self.graph_scale,
+            lo=0.0,
+            hi=1.0,
+            lo_inclusive=True,
+            hi_inclusive=True,
+            expectation="a finite value in [0, 1]",
+        )
+        self.mechanism_scale = _validate_optional_finite_float_field(
+            field_name="shift.mechanism_scale",
+            value=self.mechanism_scale,
+            lo=0.0,
+            hi=1.0,
+            lo_inclusive=True,
+            hi_inclusive=True,
+            expectation="a finite value in [0, 1]",
+        )
+        self.noise_scale = _validate_optional_finite_float_field(
+            field_name="shift.noise_scale",
+            value=self.noise_scale,
+            lo=0.0,
+            hi=1.0,
+            lo_inclusive=True,
+            hi_inclusive=True,
+            expectation="a finite value in [0, 1]",
+        )
+
+        has_overrides = any(
+            scale is not None
+            for scale in (self.graph_scale, self.mechanism_scale, self.noise_scale)
+        )
+        if not self.enabled:
+            if self.profile != SHIFT_PROFILE_OFF:
+                raise ValueError("shift.profile must be 'off' when shift.enabled is false.")
+            if has_overrides:
+                raise ValueError("shift override scales must be unset when shift.enabled is false.")
+            return
+
+        if self.profile == SHIFT_PROFILE_OFF:
+            raise ValueError("shift.profile must not be 'off' when shift.enabled is true.")
+
+        if self.profile == SHIFT_PROFILE_CUSTOM and not has_overrides:
+            raise ValueError("shift.profile 'custom' requires at least one override scale.")
+
+        if self.profile == SHIFT_PROFILE_GRAPH_DRIFT and (
+            self.mechanism_scale is not None or self.noise_scale is not None
+        ):
+            raise ValueError("shift.profile 'graph_drift' only allows shift.graph_scale override.")
+        if self.profile == SHIFT_PROFILE_MECHANISM_DRIFT and (
+            self.graph_scale is not None or self.noise_scale is not None
+        ):
+            raise ValueError(
+                "shift.profile 'mechanism_drift' only allows shift.mechanism_scale override."
+            )
+        if self.profile == SHIFT_PROFILE_NOISE_DRIFT and (
+            self.graph_scale is not None or self.mechanism_scale is not None
+        ):
+            raise ValueError("shift.profile 'noise_drift' only allows shift.noise_scale override.")
+
+
+@dataclass(slots=True)
 class RuntimeConfig:
     device: str = "auto"
     torch_dtype: str = "float32"
@@ -483,6 +625,7 @@ class GeneratorConfig:
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     graph: GraphConfig = field(default_factory=GraphConfig)
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
+    shift: ShiftConfig = field(default_factory=ShiftConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
@@ -503,6 +646,7 @@ class GeneratorConfig:
             graph_data["n_nodes_max"] = graph_data.pop("n_nodes_log2_max")
         graph = GraphConfig(**graph_data)
         curriculum = CurriculumConfig.from_dict(data.get("curriculum"))
+        shift = ShiftConfig(**(data.get("shift") or {}))
         runtime = RuntimeConfig(**(data.get("runtime") or {}))
         output = OutputConfig(**(data.get("output") or {}))
         diagnostics = DiagnosticsConfig(**(data.get("diagnostics") or {}))
@@ -520,6 +664,7 @@ class GeneratorConfig:
             dataset=dataset,
             graph=graph,
             curriculum=curriculum,
+            shift=shift,
             runtime=runtime,
             output=output,
             diagnostics=diagnostics,
