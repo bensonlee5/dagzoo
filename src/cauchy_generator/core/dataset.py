@@ -13,6 +13,7 @@ from cauchy_generator.config import (
     CURRICULUM_STAGE_AUTO,
     GeneratorConfig,
     normalize_curriculum_stage,
+    validate_class_split_feasibility,
 )
 from cauchy_generator.core import curriculum as curriculum_core
 from cauchy_generator.core.constants import (
@@ -323,6 +324,16 @@ def _generate_one_seeded(
     data_seed = manager.child("data")
     n_train = int(curriculum["n_train"])
     n_test = int(curriculum["n_test"])
+    if config.dataset.task == "classification":
+        validate_class_split_feasibility(
+            n_classes=int(layout["n_classes"]),
+            n_train=n_train,
+            n_test=n_test,
+            context=(
+                "sampled classification split constraints "
+                f"(curriculum_mode={curriculum.get('mode')}, stage={curriculum.get('stage')})"
+            ),
+        )
 
     if requested_device == "auto" and resolved_device == "mps":
         try:
