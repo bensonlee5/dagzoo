@@ -75,7 +75,7 @@ Lower rank means higher priority. Rank `0` is reserved for completed items retai
 - Mission alignment: causal discovery
 - Pillar alignment: causal structural integrity
 - Goal: persist full adjacency matrix and node assignment lineage as stable dataset artifacts.
-- Repo touchpoints: `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/types.py`
+- Repo touchpoints: `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/core/layout.py`, `src/cauchy_generator/io/parquet_writer.py`, `src/cauchy_generator/types.py`
 - Delivered scope:
   - Every generated dataset emits lineage metadata with adjacency + assignment lineage and deterministic seed behavior.
   - Persisted shard outputs rewrite dense adjacency into compact bit-packed artifacts with per-shard index files.
@@ -154,7 +154,7 @@ Lower rank means higher priority. Rank `0` is reserved for completed items retai
 - Pillar alignment: tabular realism
 - Goal: extend curriculum stages beyond row count to feature/node/depth complexity.
 - GitHub tracking: epic `#49`; dependency chain `#50 -> #51 -> #90 -> #52 -> #53`
-- Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/core/dataset.py`, `configs/curriculum_tabiclv2.yaml`
+- Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/core/curriculum.py`, `configs/curriculum_tabiclv2.yaml`
 - Delivered scope:
   - Stage definitions include row, feature, node, and graph-depth controls.
   - Monotonicity diagnostics/metadata validate non-decreasing stage complexity axes.
