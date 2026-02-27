@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Architecture documentation with mermaid diagrams (`docs/architecture.md`)
+- Architecture documentation with mermaid diagrams (`docs/how-it-works.md`)
 - Design decisions record for foundational technical choices (`docs/design-decisions.md`)
 - Domain glossary for generator terminology (`docs/glossary.md`)
 - Formal output format specification and metadata contract (`docs/output-format.md`)

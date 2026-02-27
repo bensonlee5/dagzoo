@@ -5,9 +5,8 @@ This appendix links roadmap items in `docs/roadmap.md` to primary sources and cu
 Related docs:
 
 - Canonical roadmap: `docs/roadmap.md`
-- Historical pointer only: `docs/improvement_ideas.md`
 - Decision rubric: `docs/backlog_decision_rules.md`
-- Implementation baseline: `docs/implementation.md`
+- Implementation baseline: `docs/roadmap.md` (`Current Implementation Baseline`)
 
 Conventions:
 

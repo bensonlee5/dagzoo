@@ -5,9 +5,8 @@ This document defines how roadmap items are ranked and when they are ready for i
 Related docs:
 
 - Canonical roadmap: `docs/roadmap.md`
-- Historical pointer only: `docs/improvement_ideas.md`
-- Evidence appendix: `docs/literature_evidence_2026.md`
-- Implementation baseline: `docs/implementation.md`
+- Evidence appendix: `reference/literature_evidence_2026.md`
+- Implementation baseline: `docs/roadmap.md` (`Current Implementation Baseline`)
 
 ## Objective
 

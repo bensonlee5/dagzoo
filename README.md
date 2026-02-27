@@ -43,19 +43,28 @@ Performance is a first-class citizen. The engine is built for datacenter-scale t
 
 ______________________________________________________________________
 
+## How cauchy-generator Works
+
+The current baseline generation flow is:
+
+1. Load config and resolve hardware-aware runtime defaults.
+1. Derive deterministic run, dataset, and component seeds.
+1. Sample curriculum stage, layout, and DAG structure.
+1. Execute node pipelines in topological order to generate latent signals.
+1. Convert node outputs into observable features and targets.
+1. Apply optional filtering, postprocessing, and missingness injection.
+1. Emit `DatasetBundle` outputs, then optionally persist Parquet shards and diagnostics artifacts.
+
+Read the full walkthrough and terminology guide: [docs/how-it-works.md](docs/how-it-works.md).
+
+______________________________________________________________________
+
 ## Quick Start
 
 ### Installation
 
-Install `cauchy-generator` as a standalone tool (recommended) or in editable mode for development:
-
 ```bash
-# Recommended: Install as a standalone CLI tool
 uv tool install cauchy-generator
-
-# Development: Install dependencies and activate the environment
-uv sync --group dev
-source .venv/bin/activate
 ```
 
 ### Basic Generation
@@ -65,132 +74,113 @@ source .venv/bin/activate
 cauchy-gen generate --config configs/default.yaml --num-datasets 10 --out data/run1
 ```
 
+### Steering & Realism
+
 ```bash
-# Enable diagnostics artifacts and opt-in meta-feature steering
+# Enable meta-feature steering for specific linearity and SNR targets
 cauchy-gen generate \
   --config configs/default.yaml \
-  --num-datasets 50 \
-  --diagnostics \
   --steer-meta \
-  --meta-target linearity_proxy=0.25:0.75:1.5
+  --meta-target linearity_proxy=0.25:0.75:1.0 \
+  --meta-target snr_proxy_db=10:30:1.5 \
+  --num-datasets 25
 ```
 
 ```bash
-# Use discoverable presets for diagnostics-only and conservative steering runs
-cauchy-gen generate --config configs/preset_diagnostics_on.yaml --num-datasets 25 --diagnostics --out data/run_diag
-cauchy-gen generate --config configs/preset_steering_conservative.yaml --num-datasets 25 --diagnostics --out data/run_steering
-```
-
-```bash
-# Missingness presets (MCAR/MAR/MNAR)
-cauchy-gen generate --config configs/preset_missingness_mcar.yaml --num-datasets 25 --out data/run_missing_mcar
-cauchy-gen generate --config configs/preset_missingness_mar.yaml --num-datasets 25 --out data/run_missing_mar
-cauchy-gen generate --config configs/preset_missingness_mnar.yaml --num-datasets 25 --out data/run_missing_mnar
-```
-
-```bash
-# Override missingness controls directly from CLI with strict validation
+# Inject 20% MAR (Missing At Random) values with custom logit scale
 cauchy-gen generate \
-  --config configs/default.yaml \
-  --num-datasets 25 \
-  --device cpu \
-  --missing-rate 0.25 \
+  --missing-rate 0.2 \
   --missing-mechanism mar \
-  --missing-mar-observed-fraction 0.6 \
-  --missing-mar-logit-scale 1.4 \
-  --out data/run_missing_cli_mar
+  --missing-mar-logit-scale 1.5 \
+  --num-datasets 10
 ```
+
+### Benchmarking
 
 ```bash
-# Staged curriculum presets (fixed stages and auto-sampled mode)
-cauchy-gen generate --config configs/preset_curriculum_stage1.yaml --num-datasets 25 --out data/run_curriculum_stage1
-cauchy-gen generate --config configs/preset_curriculum_stage2.yaml --num-datasets 25 --out data/run_curriculum_stage2
-cauchy-gen generate --config configs/preset_curriculum_stage3.yaml --num-datasets 25 --out data/run_curriculum_stage3
-cauchy-gen generate --config configs/preset_curriculum_auto_staged.yaml --num-datasets 25 --out data/run_curriculum_auto
+# Run a quick smoke benchmark on CPU
+cauchy-gen benchmark --suite smoke --profile cpu --out-dir benchmarks/results/smoke_cpu
 ```
 
-### Benchmarking Performance
+### Inspect Hardware
 
 ```bash
-# Run the standard benchmark suite for the CPU profile
-cauchy-gen benchmark --suite standard --profile cpu
+# Show detected compute backend, GPU model, and performance profile
+cauchy-gen hardware
 ```
-
-```bash
-# Collect diagnostics during benchmark runs and emit artifact pointers in summary outputs
-cauchy-gen benchmark \
-  --suite smoke \
-  --profile cpu \
-  --diagnostics \
-  --out-dir benchmarks/results/smoke_cpu_diag
-```
-
-```bash
-# Benchmark a missingness-enabled custom config with runtime + acceptance guardrails
-cauchy-gen benchmark \
-  --config configs/preset_missingness_mar.yaml \
-  --profile custom \
-  --suite smoke \
-  --no-memory \
-  --out-dir benchmarks/results/smoke_missing_mar
-```
-
-```bash
-# Benchmark lineage artifact export overhead guardrails on a CPU smoke preset
-cauchy-gen benchmark \
-  --config configs/preset_lineage_benchmark_smoke.yaml \
-  --profile custom \
-  --suite smoke \
-  --no-memory \
-  --out-dir benchmarks/results/smoke_lineage_guardrails
-```
-
-```bash
-# Benchmark staged curriculum overhead guardrails on a CPU smoke preset
-cauchy-gen benchmark \
-  --config configs/preset_curriculum_benchmark_smoke.yaml \
-  --profile custom \
-  --suite smoke \
-  --no-memory \
-  --out-dir benchmarks/results/smoke_curriculum_guardrails
-```
-
-When missingness is enabled, benchmark summaries include `missingness_guardrails` per profile,
-lineage export checks are reported under `lineage_guardrails`, and guardrail warnings/failures
-are reflected in overall regression status. When staged curriculum is enabled, benchmark summaries
-also include `curriculum_guardrails` with metadata coverage and staged-vs-off runtime checks.
-
-### Contributor Workflow
-
-```bash
-# Validate staged curriculum smoke benchmarks against regression thresholds
-cauchy-gen benchmark \
-  --config configs/preset_curriculum_benchmark_smoke.yaml \
-  --profile custom \
-  --suite smoke \
-  --warn-threshold-pct 10 \
-  --fail-threshold-pct 20 \
-  --fail-on-regression \
-  --no-hardware-aware \
-  --no-memory \
-  --out-dir benchmarks/results/ci_smoke_curriculum_local
-```
-
-When intentional performance changes occur, regenerate baseline payloads only after reviewing
-`summary.json`/`summary.md` and documenting rationale in the PR.
 
 ______________________________________________________________________
 
-## Research & Roadmap
+## Documentation Map
 
-The development of `cauchy-generator` is strictly driven by recent literature in Tabular Deep Learning.
+- [docs/how-it-works.md](docs/how-it-works.md): System walkthrough and terminology.
+- [docs/usage-guide.md](docs/usage-guide.md): End-user workflows for generation and benchmark runs.
+- [docs/output-format.md](docs/output-format.md): Output schema and persistence contract.
+- [docs/design-decisions.md](docs/design-decisions.md): Architecture decisions and evolution policy.
+- [docs/roadmap.md](docs/roadmap.md): Canonical roadmap and current implementation baseline.
+- [docs/backlog_decision_rules.md](docs/backlog_decision_rules.md): Ranking rubric and go/no-go implementation gates.
+- [reference/literature_evidence_2026.md](reference/literature_evidence_2026.md): Evidence appendix mapped to roadmap items.
 
-- **Meta-Feature Diagnostics:** A diagnostics module computes structural metrics per dataset and aggregates coverage across generation runs. Soft steering is available to bias selection toward under-represented target bands.
-- **Missingness Generation:** Configurable MAR/MCAR/MNAR mechanisms with CLI overrides and benchmark guardrails.
-- **Staged Curriculum Controls:** Stage-aware feature/node/depth scaling with discoverable presets and benchmark guardrails.
-- **Shift-Aware SCMs:** Expanding the graph pipeline to support distribution shift and temporal drift.
+______________________________________________________________________
 
-See [docs/roadmap.md](docs/roadmap.md) for the canonical prioritized research backlog.
+## Python API
+
+```python
+from cauchy_generator import GeneratorConfig, generate_one
+
+config = GeneratorConfig.from_yaml("configs/default.yaml")
+bundle = generate_one(config, seed=42)
+
+print(bundle.X_train.shape)      # (n_train, n_features)
+print(bundle.feature_types)      # ["num", "cat", "num", ...]
+```
+
+For bulk generation, use `generate_batch` (returns an eager list) or `generate_batch_iter` (returns a lazy iterator):
+
+```python
+from cauchy_generator import GeneratorConfig, generate_batch, generate_batch_iter
+
+config = GeneratorConfig.from_yaml("configs/default.yaml")
+
+bundles = generate_batch(config, num_datasets=50, seed=0)           # list[DatasetBundle]
+for bundle in generate_batch_iter(config, num_datasets=500, seed=0):  # lazy iterator
+    process(bundle)
+```
+
+______________________________________________________________________
+
+## Configuration Presets
+
+| Category    | Example file                                 | What it controls                                 |
+| ----------- | -------------------------------------------- | ------------------------------------------------ |
+| Default     | `configs/default.yaml`                       | Balanced baseline for classification             |
+| Curriculum  | `configs/preset_curriculum_auto_staged.yaml` | Staged difficulty (features, nodes, depth)       |
+| Missingness | `configs/preset_missingness_mcar.yaml`       | Synthetic missing-data injection (MCAR/MAR/MNAR) |
+| Steering    | `configs/preset_steering_conservative.yaml`  | Soft selection toward meta-feature target bands  |
+| Benchmark   | `configs/benchmark_cpu.yaml`                 | Hardware-specific benchmark parameters           |
+
+Presets follow the `preset_<category>_<variant>.yaml` naming convention. You can compose presets by layering CLI `--config` with flag overrides.
+
+______________________________________________________________________
+
+## Development
+
+```bash
+uv sync --group dev
+source .venv/bin/activate
+
+uv run pytest              # run the full test suite
+uv run pytest -x -q        # stop on first failure, quiet output
+```
+
+______________________________________________________________________
+
+## Feature Highlights
+
+- **Configurable Missingness:** Native support for MCAR, MAR, and MNAR mechanisms with deterministic seeded behavior and benchmark guardrails.
+- **Complexity Curriculum:** Stage-aware scaling of row counts, feature counts, node counts, and graph depth to support progressive model training.
+- **Meta-Feature Steering:** soft-steering loop that biases generation toward target meta-feature bands (e.g., specific linearity or SNR ranges) using under-coverage reweighting.
+- **Lineage Integrity:** Every dataset includes a versioned DAG lineage artifact with adjacency matrices and feature-to-node assignments.
 
 ______________________________________________________________________
 
@@ -200,4 +190,4 @@ ______________________________________________________________________
 - **TabPFN v2 (2025):** Insights into meta-feature coverage and tabular foundation model sensitivity.
 - **TabICL (2025):** Methodology for complexity-based curriculum scheduling.
 
-Detailed implementation notes and paper mappings can be found in [docs/implementation.md](docs/implementation.md).
+Implementation baseline and paper mappings can be found in [docs/roadmap.md](docs/roadmap.md) and [reference/literature_evidence_2026.md](reference/literature_evidence_2026.md).

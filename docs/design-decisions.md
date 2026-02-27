@@ -26,6 +26,9 @@ where A is a scalar, B_i is per-source-node, and C_j is per-target-node, all
 drawn from the standard Cauchy distribution. Only upper-triangular entries are
 kept to enforce acyclicity.
 
+This documents the current baseline implementation and may be extended via
+future roadmap work while preserving backward-compatible defaults.
+
 ### Rationale
 
 - **Heavy tails** — the Cauchy distribution produces occasional extreme
@@ -63,6 +66,10 @@ could use NumPy, PyTorch, or a mix.
 All tensor computation in the generation pipeline uses PyTorch exclusively.
 NumPy is used only at the I/O boundary (Parquet serialization).
 
+This reflects the current baseline execution path; future roadmap work may
+expand mechanism/noise controls (RD-011/RD-012) while keeping generation
+backend strategy explicit.
+
 ### Rationale
 
 - **Device-agnostic** — the same code path runs on CPU, CUDA, and MPS
@@ -95,6 +102,9 @@ steering, missingness, etc.). The derivation function must map
 
 Child seeds are derived via BLAKE2s hashing: encode the base seed and path
 components as UTF-8, hash them, and extract a 32-bit integer from the digest.
+
+This is the current seeded reproducibility baseline and can be revisited only
+with an explicit migration plan for compatibility.
 
 ### Rationale
 
@@ -135,6 +145,9 @@ score candidates and select probabilistically.
 The steering system generates multiple candidates per dataset slot, scores
 each candidate against target meta-feature bands, and selects via softmax
 (temperature-scaled multinomial sampling) with under-coverage reweighting.
+
+This describes the current selection policy and can evolve as long as
+steering remains opt-in and benchmark-guarded.
 
 ### Rationale
 
@@ -177,6 +190,8 @@ Python dataclasses default to storing attributes in a per-instance `__dict__`.
 
 All dataclasses in the codebase use `@dataclass(slots=True)`.
 
+This is a codebase-wide convention today, not a protocol contract.
+
 ### Rationale
 
 - **Memory** — eliminates the per-instance `__dict__` allocation. When
@@ -199,7 +214,7 @@ All dataclasses in the codebase use `@dataclass(slots=True)`.
 
 ______________________________________________________________________
 
-## 6. These specific function families
+## 6. Current function-family baseline
 
 ### Context
 
@@ -209,11 +224,14 @@ the space of possible data-generating processes.
 
 ### Decision
 
-Eight families: neural network, tree ensemble, discretization (nearest
+Current default family set includes eight families: neural network, tree ensemble, discretization (nearest
 center), Gaussian process (random Fourier features), linear projection,
 quadratic forms, EM-style soft assignment, and product (elementwise product
 of two sub-families). Multi-parent nodes additionally use aggregation
 strategies (sum, product, max, logsumexp).
+
+Family and parameterization expansion is an explicit roadmap direction
+(RD-011), with related noise-family expansion tracked separately (RD-012).
 
 ### Rationale
 
@@ -238,3 +256,13 @@ strategies (sum, product, max, logsumexp).
   archetypes.
 - **Symbolic regression / GP trees** — expressive but hard to control for
   numerical stability and output distribution.
+
+______________________________________________________________________
+
+## Evolution Policy
+
+- These ADRs document the current baseline implementation and rationale.
+- Roadmap items may supersede ADR specifics; `docs/roadmap.md` is authoritative
+  for planned evolution.
+- When roadmap delivery changes a decision detail materially, update this file
+  in the same PR and record the rationale.
