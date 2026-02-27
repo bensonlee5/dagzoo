@@ -178,6 +178,7 @@ ______________________________________________________________________
 
 - **Configurable Missingness:** Native support for MCAR, MAR, and MNAR mechanisms with deterministic seeded behavior and benchmark guardrails.
 - **Complexity Curriculum:** Stage-aware scaling of row counts, feature counts, node counts, and graph depth to support progressive model training.
+- **Configurable Shift/Drift:** Opt-in graph/mechanism/noise shift profiles with interpretable scale semantics and deterministic seed behavior.
 - **Meta-Feature Steering:** soft-steering loop that biases generation toward target meta-feature bands (e.g., specific linearity or SNR ranges) using under-coverage reweighting.
 - **Lineage Integrity:** Every dataset includes a versioned DAG lineage artifact with adjacency matrices and feature-to-node assignments.
 

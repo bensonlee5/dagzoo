@@ -107,6 +107,28 @@ flowchart LR
 - Postprocess standardizes/clips/permutes as configured.
 - Missingness injection (MCAR/MAR/MNAR) is optional and applied after
   postprocess, before bundle emission.
+- Shift/drift controls are optional and can bias graph density, mechanism-family
+  sampling, and stochastic noise magnitudes.
+
+### 4.5 Shift/drift controls
+
+Shift controls are opt-in (`shift.enabled: true`). When disabled, generation
+follows the baseline path unchanged.
+
+The three shift axes use explicit scale semantics:
+
+| Axis              | What changes                           | Scale mapping                                       |
+| ----------------- | -------------------------------------- | --------------------------------------------------- |
+| `graph_scale`     | DAG edge-density prior                 | `edge_logit_bias_shift = ln(2) * graph_scale`       |
+| `mechanism_scale` | function-family sampling probabilities | `softmax(mechanism_scale * centered_family_logits)` |
+| `noise_scale`     | stochastic noise magnitude             | `sigma_multiplier = exp((ln(2)/2) * noise_scale)`   |
+
+Interpretation:
+
+- `graph_scale = 1.0` doubles edge odds relative to baseline.
+- `noise_scale = 1.0` corresponds to +3 dB variance (2x variance).
+- `mechanism_scale > 0` shifts mass toward nonlinear families (`nn`, `tree`,
+  `discretization`, `gp`, `product`) while remaining probabilistic.
 
 ### 5. Optional steering and diagnostics
 
@@ -185,6 +207,8 @@ sections such as `missingness_guardrails`, `lineage_guardrails`, and
 - **stage bounds**: min/max constraints for features, nodes, and depth.
 - **learnability filter**: random-forest-based gate for signal quality.
 - **wins ratio**: bootstrap fraction where model beats baseline.
+- **shift profile**: opt-in distribution-drift control over graph, mechanism,
+  and noise sampling axes.
 
 ### Steering and metrics
 

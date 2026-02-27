@@ -16,11 +16,16 @@ def _sample_unit_ball(n: int, d: int, generator: torch.Generator, device: str) -
 
 
 def _sample_random_covariance_normal(
-    n: int, d: int, generator: torch.Generator, device: str
+    n: int,
+    d: int,
+    generator: torch.Generator,
+    device: str,
+    *,
+    sigma_multiplier: float = 1.0,
 ) -> torch.Tensor:
     """Sample normal points with random anisotropic covariance transform."""
     x = torch.randn(n, d, generator=generator, device=device)
-    w = sample_random_weights(d, generator, device)
+    w = sample_random_weights(d, generator, device, sigma_multiplier=sigma_multiplier)
     a = torch.randn(d, d, generator=generator, device=device)
     return (x * w.unsqueeze(0)) @ a.t()
 
@@ -30,6 +35,9 @@ def sample_random_points(
     dim: int,
     generator: torch.Generator,
     device: str,
+    *,
+    mechanism_logit_tilt: float = 0.0,
+    noise_sigma_multiplier: float = 1.0,
 ) -> torch.Tensor:
     """Sample base points and transform through a random function in torch."""
     if n_rows <= 0 or dim <= 0:
@@ -46,6 +54,18 @@ def sample_random_points(
     elif base_kind == "unit_ball":
         base = _sample_unit_ball(n_rows, dim, generator, device)
     else:
-        base = _sample_random_covariance_normal(n_rows, dim, generator, device)
+        base = _sample_random_covariance_normal(
+            n_rows,
+            dim,
+            generator,
+            device,
+            sigma_multiplier=noise_sigma_multiplier,
+        )
 
-    return apply_random_function(base, generator, out_dim=dim)
+    return apply_random_function(
+        base,
+        generator,
+        out_dim=dim,
+        mechanism_logit_tilt=mechanism_logit_tilt,
+        noise_sigma_multiplier=noise_sigma_multiplier,
+    )

@@ -42,6 +42,25 @@ def test_deterministic() -> None:
     torch.testing.assert_close(y1, y2)
 
 
+def test_deterministic_with_shift_tilt_and_noise_multiplier() -> None:
+    x = torch.randn(32, 4)
+    y1 = apply_random_function(
+        x.clone(),
+        _make_generator(8),
+        out_dim=3,
+        mechanism_logit_tilt=0.7,
+        noise_sigma_multiplier=1.35,
+    )
+    y2 = apply_random_function(
+        x.clone(),
+        _make_generator(8),
+        out_dim=3,
+        mechanism_logit_tilt=0.7,
+        noise_sigma_multiplier=1.35,
+    )
+    torch.testing.assert_close(y1, y2)
+
+
 @pytest.mark.parametrize(
     "family",
     ["nn", "tree", "discretization", "gp", "linear", "quadratic", "em", "product"],

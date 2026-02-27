@@ -223,6 +223,8 @@ def _sample_stagewise_graph(
     depth_max: int | None,
     generator: torch.Generator,
     device: str,
+    *,
+    edge_logit_bias_shift: float = 0.0,
 ) -> tuple[torch.Tensor, int, float]:
     """Sample DAG adjacency with optional stage-conditioned structure/depth constraints."""
 
@@ -230,6 +232,7 @@ def _sample_stagewise_graph(
         edge_logit_bias = 0.0
     else:
         edge_logit_bias = _CURRICULUM_STAGE_STRUCTURE_EDGE_LOGIT_BIAS.get(stage, 0.0)
+    edge_logit_bias += float(edge_logit_bias_shift)
     effective_depth_min = int(depth_min) if depth_min is not None else 1
     effective_depth_max = int(depth_max) if depth_max is not None else int(n_nodes)
     if effective_depth_min > effective_depth_max:

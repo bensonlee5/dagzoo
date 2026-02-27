@@ -6,6 +6,7 @@ import math
 
 import torch
 
+from cauchy_generator.core.shift import MECHANISM_FAMILY_ORDER, mechanism_family_probabilities
 from cauchy_generator.core.trees import compute_odt_leaf_indices, sample_odt_splits
 from cauchy_generator.functions.activations import apply_random_activation
 from cauchy_generator.linalg.random_matrices import sample_random_matrix
@@ -23,13 +24,31 @@ def _standardize(x: torch.Tensor) -> torch.Tensor:
     return _standardize_base(x)
 
 
-def _apply_linear(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
+def _apply_linear(
+    x: torch.Tensor,
+    out_dim: int,
+    generator: torch.Generator,
+    *,
+    noise_sigma_multiplier: float = 1.0,
+) -> torch.Tensor:
     """Apply a sampled random linear map in torch."""
-    m = sample_random_matrix(out_dim, x.shape[1], generator, str(x.device))
+    m = sample_random_matrix(
+        out_dim,
+        x.shape[1],
+        generator,
+        str(x.device),
+        noise_sigma_multiplier=noise_sigma_multiplier,
+    )
     return x @ m.t()
 
 
-def _apply_quadratic(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
+def _apply_quadratic(
+    x: torch.Tensor,
+    out_dim: int,
+    generator: torch.Generator,
+    *,
+    noise_sigma_multiplier: float = 1.0,
+) -> torch.Tensor:
     """Apply quadratic forms in torch."""
     d_cap = min(x.shape[1], 20)
     if x.shape[1] > d_cap:
@@ -41,12 +60,24 @@ def _apply_quadratic(x: torch.Tensor, out_dim: int, generator: torch.Generator) 
 
     y = torch.empty(x_aug.shape[0], out_dim, device=x.device)
     for i in range(out_dim):
-        m = sample_random_matrix(x_aug.shape[1], x_aug.shape[1], generator, str(x.device))
+        m = sample_random_matrix(
+            x_aug.shape[1],
+            x_aug.shape[1],
+            generator,
+            str(x.device),
+            noise_sigma_multiplier=noise_sigma_multiplier,
+        )
         y[:, i] = torch.sum((x_aug @ m) * x_aug, dim=1)
     return y
 
 
-def _apply_nn(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
+def _apply_nn(
+    x: torch.Tensor,
+    out_dim: int,
+    generator: torch.Generator,
+    *,
+    noise_sigma_multiplier: float = 1.0,
+) -> torch.Tensor:
     """Apply a shallow random NN in torch."""
     n_layers = torch.randint(1, 4, (1,), generator=generator).item()
     hidden = int(_log_uniform(generator, 1.0, 127.0, str(x.device)))
@@ -60,7 +91,13 @@ def _apply_nn(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torc
         y = apply_random_activation(y, generator)
 
     for din, dout in zip(widths[:-1], widths[1:], strict=True):
-        m = sample_random_matrix(dout, din, generator, str(x.device))
+        m = sample_random_matrix(
+            dout,
+            din,
+            generator,
+            str(x.device),
+            noise_sigma_multiplier=noise_sigma_multiplier,
+        )
         y = y @ m.t()
         if dout != out_dim:
             y = apply_random_activation(y, generator)
@@ -99,7 +136,11 @@ def _apply_tree(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> to
 
 
 def _apply_discretization(
-    x: torch.Tensor, out_dim: int, generator: torch.Generator
+    x: torch.Tensor,
+    out_dim: int,
+    generator: torch.Generator,
+    *,
+    noise_sigma_multiplier: float = 1.0,
 ) -> torch.Tensor:
     """Apply discretization function in torch."""
     n_centers = int(_log_uniform(generator, 2.0, 128.0, str(x.device)))
@@ -111,7 +152,7 @@ def _apply_discretization(
     dist = torch.pow(torch.abs(x.unsqueeze(1) - centers.unsqueeze(0)), p).sum(dim=2)
     nearest = torch.argmin(dist, dim=1)
     y = centers[nearest]
-    return _apply_linear(y, out_dim, generator)
+    return _apply_linear(y, out_dim, generator, noise_sigma_multiplier=noise_sigma_multiplier)
 
 
 def _sample_radial_ha(
@@ -126,7 +167,13 @@ def _sample_radial_ha(
     return torch.pow(1.0 - u, 1.0 / (1.0 - a)) - 1.0
 
 
-def _apply_gp(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
+def _apply_gp(
+    x: torch.Tensor,
+    out_dim: int,
+    generator: torch.Generator,
+    *,
+    noise_sigma_multiplier: float = 1.0,
+) -> torch.Tensor:
     """Apply GP approximation in torch."""
     din = x.shape[1]
     p = 256
@@ -148,7 +195,7 @@ def _apply_gp(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torc
         r = _sample_radial_ha(p, generator, device, a=a)
         omega = z * r.unsqueeze(1)
 
-        w = sample_random_weights(din, generator, device)
+        w = sample_random_weights(din, generator, device, sigma_multiplier=noise_sigma_multiplier)
         alpha = _log_uniform(generator, 0.5, 10.0, device)
         a_mat = torch.randn(din, din, generator=generator, device=device)
         m = alpha * (w.unsqueeze(1) * a_mat)
@@ -160,7 +207,13 @@ def _apply_gp(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torc
     return (phi @ z_out.t()) / math.sqrt(float(p))
 
 
-def _apply_em(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
+def _apply_em(
+    x: torch.Tensor,
+    out_dim: int,
+    generator: torch.Generator,
+    *,
+    noise_sigma_multiplier: float = 1.0,
+) -> torch.Tensor:
     """Apply EM assignment function in torch."""
     m_val = int(_log_uniform(generator, 2.0, float(max(16, 2 * out_dim)), str(x.device)))
     m_val = max(2, m_val)
@@ -178,18 +231,59 @@ def _apply_em(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torc
         dist_p / torch.clamp(sigma, min=1e-6), q_val
     )
     probs = torch.softmax(logits, dim=1)
-    return _apply_linear(probs, out_dim, generator)
+    return _apply_linear(probs, out_dim, generator, noise_sigma_multiplier=noise_sigma_multiplier)
 
 
-def _apply_product(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
+def _apply_product(
+    x: torch.Tensor,
+    out_dim: int,
+    generator: torch.Generator,
+    *,
+    mechanism_logit_tilt: float = 0.0,
+    noise_sigma_multiplier: float = 1.0,
+) -> torch.Tensor:
     """Apply product function in torch."""
     allowed = ["tree", "discretization", "gp", "linear", "quadratic"]
     idx_f = torch.randint(0, len(allowed), (1,), generator=generator).item()
     idx_g = torch.randint(0, len(allowed), (1,), generator=generator).item()
 
-    fx = apply_random_function(x, generator, out_dim=out_dim, function_type=allowed[int(idx_f)])
-    gx = apply_random_function(x, generator, out_dim=out_dim, function_type=allowed[int(idx_g)])
+    fx = apply_random_function(
+        x,
+        generator,
+        out_dim=out_dim,
+        function_type=allowed[int(idx_f)],
+        mechanism_logit_tilt=mechanism_logit_tilt,
+        noise_sigma_multiplier=noise_sigma_multiplier,
+    )
+    gx = apply_random_function(
+        x,
+        generator,
+        out_dim=out_dim,
+        function_type=allowed[int(idx_g)],
+        mechanism_logit_tilt=mechanism_logit_tilt,
+        noise_sigma_multiplier=noise_sigma_multiplier,
+    )
     return fx * gx
+
+
+def _sample_function_family(generator: torch.Generator, *, mechanism_logit_tilt: float) -> str:
+    """Sample one function family with optional logit tilt."""
+
+    if mechanism_logit_tilt <= 0.0:
+        idx = torch.randint(0, len(MECHANISM_FAMILY_ORDER), (1,), generator=generator).item()
+        return MECHANISM_FAMILY_ORDER[int(idx)]
+
+    probs_by_family = mechanism_family_probabilities(
+        mechanism_logit_tilt=mechanism_logit_tilt,
+        families=MECHANISM_FAMILY_ORDER,
+    )
+    draw = float(torch.rand(1, generator=generator).item())
+    cumulative = 0.0
+    for family in MECHANISM_FAMILY_ORDER:
+        cumulative += float(probs_by_family[family])
+        if draw <= cumulative:
+            return family
+    return MECHANISM_FAMILY_ORDER[-1]
 
 
 def apply_random_function(
@@ -198,6 +292,8 @@ def apply_random_function(
     *,
     out_dim: int | None = None,
     function_type: str | None = None,
+    mechanism_logit_tilt: float = 0.0,
+    noise_sigma_multiplier: float = 1.0,
 ) -> torch.Tensor:
     """Apply one sampled random function family to `x` in torch."""
     y = x.to(torch.float32)
@@ -208,34 +304,34 @@ def apply_random_function(
     dout = out_dim if out_dim is not None else y.shape[1]
 
     if function_type is None:
-        families = [
-            "nn",
-            "tree",
-            "discretization",
-            "gp",
-            "linear",
-            "quadratic",
-            "em",
-            "product",
-        ]
-        idx = torch.randint(0, len(families), (1,), generator=generator).item()
-        function_type = families[int(idx)]
+        function_type = _sample_function_family(
+            generator,
+            mechanism_logit_tilt=mechanism_logit_tilt,
+        )
 
     if function_type == "nn":
-        return _apply_nn(y, dout, generator)
+        return _apply_nn(y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier)
     if function_type == "tree":
         return _apply_tree(y, dout, generator)
     if function_type == "discretization":
-        return _apply_discretization(y, dout, generator)
+        return _apply_discretization(
+            y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier
+        )
     if function_type == "gp":
-        return _apply_gp(y, dout, generator)
+        return _apply_gp(y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier)
     if function_type == "linear":
-        return _apply_linear(y, dout, generator)
+        return _apply_linear(y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier)
     if function_type == "quadratic":
-        return _apply_quadratic(y, dout, generator)
+        return _apply_quadratic(y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier)
     if function_type == "em":
-        return _apply_em(y, dout, generator)
+        return _apply_em(y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier)
     if function_type == "product":
-        return _apply_product(y, dout, generator)
+        return _apply_product(
+            y,
+            dout,
+            generator,
+            mechanism_logit_tilt=mechanism_logit_tilt,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+        )
 
     raise ValueError(f"Unknown random function family: {function_type}")

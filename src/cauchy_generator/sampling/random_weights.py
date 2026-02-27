@@ -18,10 +18,13 @@ def sample_random_weights(
     sigma_max: float = 10.0,
     q: float | None = None,
     sigma: float | None = None,
+    sigma_multiplier: float = 1.0,
 ) -> torch.Tensor:
     """Sample positive normalized weights using torch."""
     if dim <= 0:
         raise ValueError(f"dim must be > 0, got {dim}")
+    if not math.isfinite(float(sigma_multiplier)) or float(sigma_multiplier) <= 0.0:
+        raise ValueError(f"sigma_multiplier must be a finite value > 0, got {sigma_multiplier!r}")
 
     m = torch.arange(1, dim + 1, dtype=torch.float32, device=device)
     if q is None:
@@ -29,8 +32,9 @@ def sample_random_weights(
         q = _log_uniform(generator, q_low, max_q, device)
     if sigma is None:
         sigma = _log_uniform(generator, sigma_min, sigma_max, device)
+    effective_sigma = float(sigma) * float(sigma_multiplier)
 
-    noise = torch.randn(dim, generator=generator, device=device) * sigma
+    noise = torch.randn(dim, generator=generator, device=device) * effective_sigma
     w = torch.pow(m, -q) * torch.exp(noise)
     w = torch.clamp(w, min=1e-12)
     w /= torch.sum(w)

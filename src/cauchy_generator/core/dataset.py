@@ -23,6 +23,7 @@ from cauchy_generator.core.constants import (
 )
 from cauchy_generator.core.layout import _build_node_specs, _sample_layout
 from cauchy_generator.core.metadata import _build_curriculum_metadata, _build_lineage_metadata
+from cauchy_generator.core.shift import ShiftRuntimeParams, resolve_shift_runtime_params
 from cauchy_generator.core.steering_metrics import extract_steering_metrics
 from cauchy_generator.core.validation import _classification_split_valid, _stratified_split_indices
 from cauchy_generator.filtering import apply_torch_rf_filter
@@ -108,6 +109,8 @@ def _generate_graph_dataset_torch(
     device: str,
     *,
     n_rows: int,
+    mechanism_logit_tilt: float = 0.0,
+    noise_sigma_multiplier: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
     """Generate raw X/y tensors via the Torch graph pipeline."""
     generator = torch.Generator(device=device)
@@ -134,7 +137,15 @@ def _generate_graph_dataset_torch(
         spec_gen.manual_seed(seed + node_idx + NODE_SPEC_SEED_OFFSET)
         specs = _build_node_specs(node_idx, layout, task, spec_gen)
 
-        x_node, extracted = apply_node_pipeline(parent_data, n_rows, specs, generator, device)
+        x_node, extracted = apply_node_pipeline(
+            parent_data,
+            n_rows,
+            specs,
+            generator,
+            device,
+            mechanism_logit_tilt=mechanism_logit_tilt,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+        )
         node_outputs[node_idx] = x_node
 
         for key, values in extracted.items():
@@ -183,9 +194,11 @@ def _generate_torch(
     n_train: int,
     n_test: int,
     curriculum: dict[str, Any],
+    shift_params: ShiftRuntimeParams | None = None,
 ) -> DatasetBundle:
     """Generate one dataset in Torch while preserving postprocess/filter contracts."""
 
+    shift_params = shift_params or resolve_shift_runtime_params(config)
     attempts = max(1, int(config.filter.max_attempts))
     last_reason = "unknown"
     dtype = _torch_dtype(config)
@@ -199,6 +212,8 @@ def _generate_torch(
                 seed + attempt,
                 device,
                 n_rows=n_rows,
+                mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
+                noise_sigma_multiplier=float(shift_params.noise_sigma_multiplier),
             )
         except Exception as exc:
             last_reason = f"generation_exception:{exc.__class__.__name__}"
@@ -362,6 +377,7 @@ def _generate_one_seeded(
     )
     layout_gen = manager.torch_rng("layout")
     layout = _sample_layout(config, layout_gen, "cpu", curriculum=curriculum)
+    shift_params = resolve_shift_runtime_params(config)
     data_seed = manager.child("data")
     n_train = int(curriculum["n_train"])
     n_test = int(curriculum["n_test"])
@@ -386,6 +402,7 @@ def _generate_one_seeded(
                 n_train=n_train,
                 n_test=n_test,
                 curriculum=curriculum,
+                shift_params=shift_params,
             )
         except Exception:
             # Keep auto mode robust on partially supported MPS runtimes by retrying on CPU.
@@ -397,6 +414,7 @@ def _generate_one_seeded(
                 n_train=n_train,
                 n_test=n_test,
                 curriculum=curriculum,
+                shift_params=shift_params,
             )
 
     return _generate_torch(
@@ -407,6 +425,7 @@ def _generate_one_seeded(
         n_train=n_train,
         n_test=n_test,
         curriculum=curriculum,
+        shift_params=shift_params,
     )
 
 

@@ -22,7 +22,14 @@ def _sample_gaussian(m: int, k: int, generator: torch.Generator, device: str) ->
     return torch.randn(m, k, generator=generator, device=device)
 
 
-def _sample_weights_matrix(m: int, k: int, generator: torch.Generator, device: str) -> torch.Tensor:
+def _sample_weights_matrix(
+    m: int,
+    k: int,
+    generator: torch.Generator,
+    device: str,
+    *,
+    noise_sigma_multiplier: float = 1.0,
+) -> torch.Tensor:
     """Sample weight-modulated Gaussian matrix in torch."""
     g = torch.randn(m, k, generator=generator, device=device)
     q_low = 0.1 / math.log(k + 1.0)
@@ -30,7 +37,14 @@ def _sample_weights_matrix(m: int, k: int, generator: torch.Generator, device: s
     shared_sigma = _log_uniform(generator, 1e-4, 10.0, device)
     rows = torch.stack(
         [
-            sample_random_weights(k, generator, device, q=shared_q, sigma=shared_sigma)
+            sample_random_weights(
+                k,
+                generator,
+                device,
+                q=shared_q,
+                sigma=shared_sigma,
+                sigma_multiplier=noise_sigma_multiplier,
+            )
             for _ in range(m)
         ],
         dim=0,
@@ -39,13 +53,18 @@ def _sample_weights_matrix(m: int, k: int, generator: torch.Generator, device: s
 
 
 def _sample_singular_values_matrix(
-    m: int, k: int, generator: torch.Generator, device: str
+    m: int,
+    k: int,
+    generator: torch.Generator,
+    device: str,
+    *,
+    noise_sigma_multiplier: float = 1.0,
 ) -> torch.Tensor:
     """Sample matrix with random singular values in torch."""
     d = min(m, k)
     u = torch.randn(m, d, generator=generator, device=device)
     v = torch.randn(d, k, generator=generator, device=device)
-    w = sample_random_weights(d, generator, device)
+    w = sample_random_weights(d, generator, device, sigma_multiplier=noise_sigma_multiplier)
     s = torch.diag(w)
     return u @ s @ v
 
@@ -71,6 +90,7 @@ def sample_random_matrix(
     device: str,
     *,
     kind: str | None = None,
+    noise_sigma_multiplier: float = 1.0,
 ) -> torch.Tensor:
     """Sample one of the supported matrix families in torch."""
     if out_dim <= 0 or in_dim <= 0:
@@ -84,15 +104,34 @@ def sample_random_matrix(
     if kind == "gaussian":
         m = _sample_gaussian(out_dim, in_dim, generator, device)
     elif kind == "weights":
-        m = _sample_weights_matrix(out_dim, in_dim, generator, device)
+        m = _sample_weights_matrix(
+            out_dim,
+            in_dim,
+            generator,
+            device,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+        )
     elif kind == "singular_values":
-        m = _sample_singular_values_matrix(out_dim, in_dim, generator, device)
+        m = _sample_singular_values_matrix(
+            out_dim,
+            in_dim,
+            generator,
+            device,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+        )
     elif kind == "kernel":
         m = _sample_kernel_matrix(out_dim, in_dim, generator, device)
     elif kind == "activation":
         other_kinds = ["gaussian", "weights", "singular_values", "kernel"]
         idx = torch.randint(0, len(other_kinds), (1,), generator=generator).item()
-        m = sample_random_matrix(out_dim, in_dim, generator, device, kind=other_kinds[int(idx)])
+        m = sample_random_matrix(
+            out_dim,
+            in_dim,
+            generator,
+            device,
+            kind=other_kinds[int(idx)],
+            noise_sigma_multiplier=noise_sigma_multiplier,
+        )
         m = apply_random_activation(m, generator, with_standardize=False)
         m = m + 1e-3 * torch.randn(m.shape, generator=generator, device=device)
     else:

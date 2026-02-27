@@ -31,6 +31,9 @@ def apply_node_pipeline(
     converter_specs: list[ConverterSpec],
     generator: torch.Generator,
     device: str,
+    *,
+    mechanism_logit_tilt: float = 0.0,
+    noise_sigma_multiplier: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Apply node transform in torch."""
     required_dim = int(sum(max(1, s.dim) for s in converter_specs))
@@ -38,15 +41,33 @@ def apply_node_pipeline(
     total_dim = required_dim + max(1, latent_extra)
 
     if parent_data:
-        x = apply_multi_function(parent_data, generator, out_dim=total_dim)
+        x = apply_multi_function(
+            parent_data,
+            generator,
+            out_dim=total_dim,
+            mechanism_logit_tilt=mechanism_logit_tilt,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+        )
     else:
-        x = sample_random_points(n_rows, total_dim, generator, device)
+        x = sample_random_points(
+            n_rows,
+            total_dim,
+            generator,
+            device,
+            mechanism_logit_tilt=mechanism_logit_tilt,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+        )
 
     x = torch.nan_to_num(x.to(torch.float32), nan=0.0, posinf=1e6, neginf=-1e6)
     x = torch.clamp(x, -1e6, 1e6)
     x = _standardize(x)
 
-    w = sample_random_weights(x.shape[1], generator, device)
+    w = sample_random_weights(
+        x.shape[1],
+        generator,
+        device,
+        sigma_multiplier=noise_sigma_multiplier,
+    )
     x = x * w.unsqueeze(0)
 
     mean_l2 = torch.mean(torch.norm(x, dim=1))

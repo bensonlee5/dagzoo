@@ -13,6 +13,7 @@ from cauchy_generator.core.curriculum import (
     _sample_log_uniform_int,
     _sample_stagewise_graph,
 )
+from cauchy_generator.core.shift import resolve_shift_runtime_params
 from cauchy_generator.core.node_pipeline import ConverterSpec
 from cauchy_generator.sampling import CorrelatedSampler
 
@@ -52,6 +53,7 @@ def _sample_layout(
 ) -> dict[str, Any]:
     """Sample dataset layout, graph, and node assignments for one dataset instance."""
 
+    shift_params = resolve_shift_runtime_params(config)
     bounds = _resolve_stagewise_layout_bounds(config, curriculum)
     n_features = int(
         torch.randint(
@@ -128,6 +130,7 @@ def _sample_layout(
         bounds.depth_max,
         generator,
         device,
+        edge_logit_bias_shift=float(shift_params.edge_logit_bias_shift),
     )
     feature_node_assignment = _sample_assignments(n_features, n_nodes, generator, device)
     target_node_assignment = _sample_assignments(1, n_nodes, generator, device)[0]

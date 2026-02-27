@@ -29,6 +29,15 @@ def _tiny_config() -> GeneratorConfig:
     return cfg
 
 
+def _tiny_regression_config() -> GeneratorConfig:
+    cfg = _tiny_config()
+    cfg.dataset.task = "regression"
+    cfg.filter.enabled = False
+    cfg.dataset.n_features_min = 8
+    cfg.dataset.n_features_max = 8
+    return cfg
+
+
 def _layout_stub(
     *,
     feature_types: list[str],
@@ -173,6 +182,105 @@ def test_generate_batch_reproducible_lineage_for_fixed_seed() -> None:
         assert bundle_a.metadata["lineage"] == bundle_b.metadata["lineage"]
 
 
+def test_generate_one_shift_disabled_preserves_baseline_outputs() -> None:
+    baseline = _tiny_regression_config()
+    disabled = _tiny_regression_config()
+    disabled.shift.enabled = False
+    disabled.shift.profile = "off"
+
+    bundle_base = generate_one(baseline, seed=1881, device="cpu")
+    bundle_disabled = generate_one(disabled, seed=1881, device="cpu")
+
+    torch.testing.assert_close(bundle_base.X_train, bundle_disabled.X_train)
+    torch.testing.assert_close(bundle_base.X_test, bundle_disabled.X_test)
+    torch.testing.assert_close(bundle_base.y_train, bundle_disabled.y_train)
+    torch.testing.assert_close(bundle_base.y_test, bundle_disabled.y_test)
+    assert bundle_base.metadata["graph_edges"] == bundle_disabled.metadata["graph_edges"]
+    assert bundle_base.metadata["graph_edge_density"] == pytest.approx(
+        bundle_disabled.metadata["graph_edge_density"]
+    )
+
+
+def test_generate_one_graph_drift_increases_edge_density_for_same_seed() -> None:
+    baseline = _tiny_regression_config()
+    baseline.graph.n_nodes_min = 20
+    baseline.graph.n_nodes_max = 20
+
+    shifted = _tiny_regression_config()
+    shifted.graph.n_nodes_min = 20
+    shifted.graph.n_nodes_max = 20
+    shifted.shift.enabled = True
+    shifted.shift.profile = "graph_drift"
+
+    bundle_base = generate_one(baseline, seed=2203, device="cpu")
+    bundle_shifted = generate_one(shifted, seed=2203, device="cpu")
+
+    assert int(bundle_shifted.metadata["graph_edges"]) >= int(bundle_base.metadata["graph_edges"])
+    assert float(bundle_shifted.metadata["graph_edge_density"]) >= float(
+        bundle_base.metadata["graph_edge_density"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("profile", "override_field", "override_value"),
+    [
+        ("mechanism_drift", "mechanism_scale", 1.0),
+        ("noise_drift", "noise_scale", 1.0),
+    ],
+)
+def test_generate_one_shift_profiles_change_outputs_for_same_seed(
+    profile: str, override_field: str, override_value: float
+) -> None:
+    baseline = _tiny_regression_config()
+    baseline.graph.n_nodes_min = 10
+    baseline.graph.n_nodes_max = 10
+
+    shifted = _tiny_regression_config()
+    shifted.graph.n_nodes_min = 10
+    shifted.graph.n_nodes_max = 10
+    shifted.shift.enabled = True
+    shifted.shift.profile = profile
+    setattr(shifted.shift, override_field, override_value)
+
+    bundle_base = generate_one(baseline, seed=2204, device="cpu")
+    bundle_shifted = generate_one(shifted, seed=2204, device="cpu")
+    assert not torch.allclose(bundle_base.X_train, bundle_shifted.X_train)
+    assert not torch.allclose(bundle_base.X_test, bundle_shifted.X_test)
+
+
+@pytest.mark.parametrize(
+    ("profile", "overrides"),
+    [
+        ("graph_drift", {"graph_scale": 1.0}),
+        ("mechanism_drift", {"mechanism_scale": 1.0}),
+        ("noise_drift", {"noise_scale": 1.0}),
+        ("mixed", {}),
+    ],
+)
+def test_generate_one_shift_profiles_are_seed_reproducible(
+    profile: str, overrides: dict[str, float]
+) -> None:
+    cfg = _tiny_regression_config()
+    cfg.graph.n_nodes_min = 10
+    cfg.graph.n_nodes_max = 10
+    cfg.shift.enabled = True
+    cfg.shift.profile = profile
+    for key, value in overrides.items():
+        setattr(cfg.shift, key, value)
+
+    bundle_a = generate_one(cfg, seed=2205, device="cpu")
+    bundle_b = generate_one(cfg, seed=2205, device="cpu")
+
+    torch.testing.assert_close(bundle_a.X_train, bundle_b.X_train)
+    torch.testing.assert_close(bundle_a.X_test, bundle_b.X_test)
+    torch.testing.assert_close(bundle_a.y_train, bundle_b.y_train)
+    torch.testing.assert_close(bundle_a.y_test, bundle_b.y_test)
+    assert bundle_a.metadata["graph_edges"] == bundle_b.metadata["graph_edges"]
+    assert bundle_a.metadata["graph_edge_density"] == pytest.approx(
+        bundle_b.metadata["graph_edge_density"]
+    )
+
+
 def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -200,7 +308,7 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
         lambda *_args, **_kwargs: layout,
     )
 
-    def _stub_generate_graph_dataset_torch(_config, _layout, _seed, _device, *, n_rows):
+    def _stub_generate_graph_dataset_torch(_config, _layout, _seed, _device, *, n_rows, **_kwargs):
         x = torch.arange(n_rows * 4, dtype=torch.float32).reshape(n_rows, 4)
         y = torch.linspace(0.0, 1.0, n_rows, dtype=torch.float32)
         return x, y, {"filter": {"enabled": False}}

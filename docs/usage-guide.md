@@ -116,7 +116,66 @@ The benchmark summary includes throughput/latency plus standard guardrail payloa
 
 ______________________________________________________________________
 
-## 6. Benchmark workflows and guardrails
+## 6. Shift workflows
+
+Use shift profiles when you want controlled distribution drift while preserving
+deterministic seeds.
+
+Profile examples:
+
+```yaml
+shift:
+  enabled: true
+  profile: graph_drift
+```
+
+```yaml
+shift:
+  enabled: true
+  profile: mechanism_drift
+```
+
+```yaml
+shift:
+  enabled: true
+  profile: noise_drift
+```
+
+```yaml
+shift:
+  enabled: true
+  profile: mixed
+```
+
+Custom overrides:
+
+```yaml
+shift:
+  enabled: true
+  profile: custom
+  graph_scale: 0.6
+  mechanism_scale: 0.2
+  noise_scale: 0.4
+```
+
+How to pick scales:
+
+- `graph_scale`: edge-odds multiplier is `exp(ln(2) * graph_scale)`. Start at
+  `0.5` for moderate structure drift.
+- `mechanism_scale`: increases probability mass on nonlinear mechanism
+  families. Start at `0.5` for moderate tilt.
+- `noise_scale`: variance multiplier is `exp(ln(2) * noise_scale)`. Start at
+  `0.5` (+1.5 dB) for moderate noise drift.
+
+Run with any shift-enabled config:
+
+```bash
+cauchy-gen generate --config path/to/shift_config.yaml --num-datasets 25 --out data/run_shift
+```
+
+______________________________________________________________________
+
+## 7. Benchmark workflows and guardrails
 
 Use smoke benchmarks for quick validation and standard benchmarks for broader
 performance checks.
