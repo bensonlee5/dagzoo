@@ -130,13 +130,19 @@ The `stage_bounds` object contains nullable min/max pairs:
 
 ### Filter sub-object
 
-| Key           | Type  | Description                               |
-| ------------- | ----- | ----------------------------------------- |
-| `enabled`     | bool  | Whether filtering was active              |
-| `wins_ratio`  | float | Bootstrap wins ratio (when enabled)       |
-| `n_valid_oob` | int   | OOB sample count (when enabled)           |
-| `backend`     | str   | Filter implementation (when enabled)      |
-| `accepted`    | bool  | Whether the dataset passed (when enabled) |
+| Key                   | Type        | Description                                                                                 |
+| --------------------- | ----------- | ------------------------------------------------------------------------------------------- |
+| `enabled`             | bool        | Whether filtering was active                                                                |
+| `wins_ratio`          | float       | Bootstrap wins ratio (when enabled)                                                         |
+| `n_valid_oob`         | int         | OOB sample count (when enabled)                                                             |
+| `backend`             | str         | Filter implementation (when enabled)                                                        |
+| `accepted`            | bool        | Whether the dataset passed (when enabled)                                                   |
+| `threshold_requested` | float       | Requested filter threshold before class-aware adjustment                                    |
+| `threshold_effective` | float       | Effective threshold used in acceptance decision                                             |
+| `threshold_policy`    | str         | Threshold policy identifier (`class_aware_piecewise_v1`)                                    |
+| `class_count`         | int or null | Realized class count used by filter (`null` for regression)                                 |
+| `class_bucket`        | str         | Class-count bucket for policy lookup (`<=8`, `9-16`, `17-24`, `25-32`, or `not_applicable`) |
+| `threshold_delta`     | float       | Difference between requested and effective threshold                                        |
 
 ### Class Structure sub-object (classification only)
 

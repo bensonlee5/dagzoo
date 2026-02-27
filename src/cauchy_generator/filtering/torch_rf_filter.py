@@ -9,6 +9,10 @@ from typing import Any
 import torch
 
 
+_CLASS_AWARE_THRESHOLD_POLICY = "class_aware_piecewise_v1"
+_CLASS_AWARE_THRESHOLD_FLOOR = 0.80
+
+
 @dataclass(slots=True)
 class _TreeModel:
     split_feature: list[int]
@@ -273,6 +277,52 @@ def _predict_tree(tree: _TreeModel, x: torch.Tensor) -> torch.Tensor:
     return leaf_values[node_ids]
 
 
+def _resolve_threshold_diagnostics(
+    *,
+    task: str,
+    requested_threshold: float,
+    class_count: int | None,
+) -> dict[str, Any]:
+    """Return class-aware threshold diagnostics and effective threshold."""
+
+    if task != "classification" or class_count is None:
+        effective_threshold = float(requested_threshold)
+        return {
+            "threshold_requested": float(requested_threshold),
+            "threshold_effective": effective_threshold,
+            "threshold_policy": _CLASS_AWARE_THRESHOLD_POLICY,
+            "class_count": None,
+            "class_bucket": "not_applicable",
+            "threshold_delta": float(requested_threshold) - effective_threshold,
+        }
+
+    if class_count <= 8:
+        class_bucket = "<=8"
+        threshold_delta = 0.00
+    elif class_count <= 16:
+        class_bucket = "9-16"
+        threshold_delta = 0.05
+    elif class_count <= 24:
+        class_bucket = "17-24"
+        threshold_delta = 0.10
+    else:
+        class_bucket = "25-32"
+        threshold_delta = 0.15
+
+    relaxed_threshold = max(
+        _CLASS_AWARE_THRESHOLD_FLOOR, float(requested_threshold) - threshold_delta
+    )
+    effective_threshold = min(float(requested_threshold), relaxed_threshold)
+    return {
+        "threshold_requested": float(requested_threshold),
+        "threshold_effective": float(effective_threshold),
+        "threshold_policy": _CLASS_AWARE_THRESHOLD_POLICY,
+        "class_count": int(class_count),
+        "class_bucket": class_bucket,
+        "threshold_delta": float(requested_threshold) - float(effective_threshold),
+    }
+
+
 def apply_torch_rf_filter(
     x: torch.Tensor,
     y: torch.Tensor,
@@ -310,15 +360,25 @@ def apply_torch_rf_filter(
     m_try = _resolve_max_features(max_features, n_features, task)
 
     if task == "classification":
-        y_cls = y.to(torch.int64).view(-1)
-        n_classes = int(torch.max(y_cls).item()) + 1
+        y_raw = y.to(torch.int64).view(-1)
+        unique_labels, y_cls = torch.unique(y_raw, sorted=True, return_inverse=True)
+        n_classes = int(unique_labels.numel())
+        class_count: int | None = n_classes
         y_target = torch.nn.functional.one_hot(y_cls, num_classes=n_classes).to(torch.float32)
     else:
         y_cls = None
         n_classes = 0
+        class_count = None
         y_target = y.to(torch.float32)
         if y_target.dim() == 1:
             y_target = y_target.unsqueeze(1)
+
+    threshold_details = _resolve_threshold_diagnostics(
+        task=task,
+        requested_threshold=float(threshold),
+        class_count=class_count,
+    )
+    effective_threshold = float(threshold_details["threshold_effective"])
 
     gen = torch.Generator(device=device)
     gen.manual_seed(seed)
@@ -361,6 +421,7 @@ def apply_torch_rf_filter(
             "reason": "insufficient_oob_predictions",
             "n_valid_oob": n_valid,
             "backend": "torch_rf",
+            **threshold_details,
         }
 
     pred = oob_pred_sum[valid_oob] / oob_count[valid_oob]
@@ -379,8 +440,9 @@ def apply_torch_rf_filter(
         wins += int((mse_pred < mse_base).sum().item())
 
     wins_ratio = wins / float(n_bootstrap)
-    return bool(wins_ratio >= threshold), {
+    return bool(wins_ratio >= effective_threshold), {
         "wins_ratio": float(wins_ratio),
         "n_valid_oob": n_valid,
         "backend": "torch_rf",
+        **threshold_details,
     }

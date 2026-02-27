@@ -271,7 +271,16 @@ def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch)
 
     def _stub_filter(*_args, **_kwargs):
         called["count"] += 1
-        return True, {"wins_ratio": 1.0, "n_valid_oob": 128}
+        return True, {
+            "wins_ratio": 1.0,
+            "n_valid_oob": 128,
+            "threshold_requested": 0.95,
+            "threshold_effective": 0.80,
+            "threshold_policy": "class_aware_piecewise_v1",
+            "class_count": 32,
+            "class_bucket": "25-32",
+            "threshold_delta": 0.15,
+        }
 
     monkeypatch.setattr("cauchy_generator.core.dataset.apply_torch_rf_filter", _stub_filter)
     cfg = _tiny_config()
@@ -282,6 +291,9 @@ def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch)
     assert bundle.metadata["backend"] == "torch"
     assert bundle.metadata["filter"]["enabled"] is True
     assert bundle.metadata["filter"]["accepted"] is True
+    assert bundle.metadata["filter"]["threshold_policy"] == "class_aware_piecewise_v1"
+    assert bundle.metadata["filter"]["class_bucket"] == "25-32"
+    assert float(bundle.metadata["filter"]["threshold_effective"]) == pytest.approx(0.80)
     assert "reason" not in bundle.metadata["filter"]
 
 

@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from cauchy_generator.filtering import apply_torch_rf_filter
@@ -23,9 +24,28 @@ def _make_classification_data(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     g = torch.Generator(device="cpu")
     g.manual_seed(seed)
-    x = torch.randn(n_rows, n_features, generator=g)
-    logits = x[:, :n_classes] + 0.1 * torch.randn(n_rows, n_classes, generator=g)
-    y = torch.argmax(logits, dim=1)
+    y = torch.arange(n_rows, dtype=torch.int64) % int(n_classes)
+    y = y[torch.randperm(n_rows, generator=g)]
+    centroids = torch.randn(n_classes, n_features, generator=g)
+    x = centroids[y] + 0.25 * torch.randn(n_rows, n_features, generator=g)
+    return x, y
+
+
+def _make_sparse_label_classification_data(
+    *,
+    seed: int = 91,
+    n_rows: int = 256,
+    n_features: int = 10,
+    labels: tuple[int, ...] = (10, 20, 30, 40),
+) -> tuple[torch.Tensor, torch.Tensor]:
+    g = torch.Generator(device="cpu")
+    g.manual_seed(seed)
+    class_ids = torch.arange(n_rows, dtype=torch.int64) % int(len(labels))
+    class_ids = class_ids[torch.randperm(n_rows, generator=g)]
+    label_values = torch.tensor(labels, dtype=torch.int64)
+    y = label_values[class_ids]
+    centroids = torch.randn(len(labels), n_features, generator=g)
+    x = centroids[class_ids] + 0.25 * torch.randn(n_rows, n_features, generator=g)
     return x, y
 
 
@@ -112,6 +132,12 @@ def test_torch_rf_filter_can_report_insufficient_oob_predictions() -> None:
     assert accepted is False
     assert details["reason"] == "insufficient_oob_predictions"
     assert details["backend"] == "torch_rf"
+    assert details["threshold_requested"] == pytest.approx(0.5)
+    assert details["threshold_effective"] == pytest.approx(0.5)
+    assert details["threshold_policy"] == "class_aware_piecewise_v1"
+    assert details["class_count"] is None
+    assert details["class_bucket"] == "not_applicable"
+    assert details["threshold_delta"] == pytest.approx(0.0)
 
 
 def test_torch_rf_filter_classification_smoke() -> None:
@@ -132,6 +158,162 @@ def test_torch_rf_filter_classification_smoke() -> None:
     assert "wins_ratio" in details
     assert "n_valid_oob" in details
     assert details["backend"] == "torch_rf"
+    assert details["threshold_requested"] == pytest.approx(0.5)
+    assert details["threshold_effective"] == pytest.approx(0.5)
+    assert details["threshold_policy"] == "class_aware_piecewise_v1"
+    assert int(details["class_count"]) >= 2
+    assert details["class_bucket"] == "<=8"
+    assert details["threshold_delta"] == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+    ("n_classes", "expected_bucket", "expected_effective"),
+    [
+        (4, "<=8", 0.95),
+        (10, "9-16", 0.90),
+        (18, "17-24", 0.85),
+        (28, "25-32", 0.80),
+        (32, "25-32", 0.80),
+    ],
+)
+def test_torch_rf_filter_class_aware_threshold_sweep(
+    n_classes: int,
+    expected_bucket: str,
+    expected_effective: float,
+) -> None:
+    x, y = _make_classification_data(
+        seed=211 + n_classes,
+        n_rows=512,
+        n_features=12,
+        n_classes=n_classes,
+    )
+    _, details = apply_torch_rf_filter(
+        x,
+        y,
+        task="classification",
+        seed=17,
+        n_trees=6,
+        depth=4,
+        min_samples_leaf=2,
+        n_bootstrap=16,
+        threshold=0.95,
+    )
+
+    assert details["class_bucket"] == expected_bucket
+    assert details["threshold_requested"] == pytest.approx(0.95)
+    assert details["threshold_effective"] == pytest.approx(expected_effective)
+    assert details["threshold_policy"] == "class_aware_piecewise_v1"
+    assert int(details["class_count"]) == n_classes
+    assert details["threshold_delta"] == pytest.approx(0.95 - expected_effective)
+
+
+def test_torch_rf_filter_regression_threshold_diagnostics_are_not_applicable() -> None:
+    x, y = _make_regression_data(seed=123)
+    _, details = apply_torch_rf_filter(
+        x,
+        y,
+        task="regression",
+        seed=88,
+        n_trees=6,
+        depth=4,
+        n_bootstrap=16,
+        threshold=0.75,
+    )
+
+    assert details["threshold_requested"] == pytest.approx(0.75)
+    assert details["threshold_effective"] == pytest.approx(0.75)
+    assert details["threshold_policy"] == "class_aware_piecewise_v1"
+    assert details["class_count"] is None
+    assert details["class_bucket"] == "not_applicable"
+    assert details["threshold_delta"] == pytest.approx(0.0)
+
+
+def test_torch_rf_filter_rejected_scored_run_keeps_threshold_diagnostics() -> None:
+    x, y = _make_classification_data(seed=77, n_rows=384, n_features=12, n_classes=32)
+    accepted, details = apply_torch_rf_filter(
+        x,
+        y,
+        task="classification",
+        seed=31,
+        n_trees=6,
+        depth=4,
+        min_samples_leaf=2,
+        n_bootstrap=16,
+        threshold=2.0,
+    )
+
+    assert accepted is False
+    assert "wins_ratio" in details
+    assert details["threshold_requested"] == pytest.approx(2.0)
+    assert details["threshold_effective"] == pytest.approx(1.85)
+    assert details["threshold_policy"] == "class_aware_piecewise_v1"
+    assert details["class_bucket"] == "25-32"
+    assert int(details["class_count"]) == 32
+    assert details["threshold_delta"] == pytest.approx(0.15)
+
+
+def test_torch_rf_filter_many_class_acceptance_rate_is_not_pathological() -> None:
+    seeds = [1701, 1702, 1703, 1704, 1705, 1706]
+    acceptance_rates: dict[int, float] = {}
+
+    for n_classes in (8, 16, 24, 32):
+        accepted = 0
+        for seed in seeds:
+            x, y = _make_classification_data(
+                seed=seed + (n_classes * 100),
+                n_rows=512,
+                n_features=12,
+                n_classes=n_classes,
+            )
+            is_accepted, _details = apply_torch_rf_filter(
+                x,
+                y,
+                task="classification",
+                seed=seed,
+                n_trees=6,
+                depth=4,
+                min_samples_leaf=2,
+                n_bootstrap=16,
+                threshold=0.95,
+            )
+            if is_accepted:
+                accepted += 1
+        acceptance_rates[n_classes] = accepted / float(len(seeds))
+
+    assert acceptance_rates[32] >= (acceptance_rates[8] - 0.25)
+
+
+@pytest.mark.parametrize(
+    ("labels", "expected_class_count", "expected_bucket", "expected_effective"),
+    [
+        ((10, 11), 2, "<=8", 0.95),
+        ((10, 20, 30, 40), 4, "<=8", 0.95),
+    ],
+)
+def test_torch_rf_filter_sparse_labels_use_realized_class_count(
+    labels: tuple[int, ...],
+    expected_class_count: int,
+    expected_bucket: str,
+    expected_effective: float,
+) -> None:
+    x, y = _make_sparse_label_classification_data(labels=labels)
+    _, details = apply_torch_rf_filter(
+        x,
+        y,
+        task="classification",
+        seed=123,
+        n_trees=6,
+        depth=4,
+        min_samples_leaf=2,
+        n_bootstrap=16,
+        threshold=0.95,
+    )
+
+    assert int(details["class_count"]) == expected_class_count
+    assert details["class_bucket"] == expected_bucket
+    assert details["threshold_requested"] == pytest.approx(0.95)
+    assert details["threshold_effective"] == pytest.approx(expected_effective)
+    assert details["threshold_delta"] == pytest.approx(0.95 - expected_effective)
 
 
 def test_predict_tree_returns_correct_leaf_values() -> None:
