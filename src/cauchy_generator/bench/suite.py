@@ -34,16 +34,20 @@ from cauchy_generator.bench.constants import (
     SMOKE_N_TRAIN_CAP,
     SMOKE_NUM_DATASETS_CAP,
     SMOKE_WARMUP_DATASETS_CAP,
+    SHIFT_GUARDRAIL_DIRECTIONAL_GATING_MIN_SAMPLE,
+    SHIFT_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE,
 )
 from cauchy_generator.bench.micro import run_microbenchmarks
 from cauchy_generator.bench.metrics import (
     degradation_percent,
+    percent_change,
     reproducibility_signature,
     summarize_latencies,
 )
 from cauchy_generator.bench.collectors import (
     _CurriculumMetadataCollector,
     _MissingnessAcceptanceCollector,
+    _ShiftGuardrailCollector,
     _compose_bundle_callback,
 )
 from cauchy_generator.bench.guardrails import (
@@ -60,8 +64,10 @@ from cauchy_generator.config import (
     CURRICULUM_STAGE_OFF,
     GeneratorConfig,
     MISSINGNESS_MECHANISM_NONE,
+    SHIFT_PROFILE_OFF,
 )
 from cauchy_generator.core.dataset import generate_batch_iter, generate_one
+from cauchy_generator.core.shift import resolve_shift_runtime_params
 from cauchy_generator.diagnostics import (
     CoverageAggregationConfig,
     CoverageAggregator,
@@ -266,6 +272,69 @@ def _is_missingness_enabled(config: GeneratorConfig) -> bool:
     )
 
 
+def _is_shift_enabled(config: GeneratorConfig) -> bool:
+    """Return whether shift controls are enabled in config."""
+
+    return bool(config.shift.enabled)
+
+
+def _build_shift_directional_check(
+    *,
+    metric: str,
+    enabled: bool,
+    gating_enabled: bool,
+    current: float | None,
+    baseline: float | None,
+    detail: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Build directional check payload and optional issue for one shift metric."""
+
+    payload: dict[str, Any] = {
+        "enabled": bool(enabled),
+        "gating_enabled": bool(gating_enabled),
+        "current": current,
+        "baseline": baseline,
+        "status": "not_applicable",
+        "detail": detail,
+    }
+    if not enabled:
+        payload["reason"] = "axis_inactive"
+        return payload, None
+    if not gating_enabled:
+        payload["status"] = "suppressed"
+        payload["reason"] = "insufficient_sample_size"
+        return payload, None
+    if current is None or baseline is None:
+        payload["status"] = "fail"
+        issue = _build_guardrail_issue(
+            metric=f"shift_{metric}_directionality_unavailable",
+            severity="fail",
+            current=current,
+            baseline=baseline,
+            degradation_pct=None,
+            detail=f"{detail} Directional check could not be computed from benchmark samples.",
+        )
+        return payload, issue
+    if float(current) > float(baseline):
+        payload["status"] = "pass"
+        return payload, None
+
+    payload["status"] = "fail"
+    current_value = float(current)
+    baseline_value = float(baseline)
+    raw_change = percent_change(current_value, baseline_value)
+    raw_degradation = -raw_change if raw_change is not None else None
+    issue = _build_guardrail_issue(
+        metric=f"shift_{metric}_directionality",
+        severity="fail",
+        current=current_value,
+        baseline=baseline_value,
+        degradation_pct=(float(raw_degradation) if raw_degradation is not None else None),
+        detail=detail,
+    )
+    return payload, issue
+
+
 def run_profile_benchmark(
     spec: ProfileRunSpec,
     *,
@@ -323,11 +392,14 @@ def run_profile_benchmark(
     curriculum_metadata = (
         _CurriculumMetadataCollector(expected_mode=curriculum_mode) if curriculum_enabled else None
     )
+    shift_enabled = _is_shift_enabled(config)
+    shift_guardrails = _ShiftGuardrailCollector() if shift_enabled else None
 
     on_bundle_callback = _compose_bundle_callback(
         diagnostics_aggregator=diagnostics_aggregator,
         missingness_acceptance=missingness_acceptance,
         curriculum_metadata=curriculum_metadata,
+        shift_guardrails=shift_guardrails,
     )
 
     result = run_throughput_benchmark(
@@ -350,6 +422,7 @@ def run_profile_benchmark(
     result["curriculum_guardrails"] = {"enabled": False}
     result["missingness_guardrails"] = {"enabled": False}
     result["lineage_guardrails"] = {"enabled": False}
+    result["shift_guardrails"] = {"enabled": False}
 
     latency_stats = _collect_latency(
         config,
@@ -403,6 +476,7 @@ def run_profile_benchmark(
             diagnostics_aggregator=curriculum_baseline_diagnostics_aggregator,
             missingness_acceptance=curriculum_baseline_missingness_acceptance,
             curriculum_metadata=curriculum_baseline_metadata,
+            shift_guardrails=_ShiftGuardrailCollector() if shift_enabled else None,
         )
 
         baseline_throughput = run_throughput_benchmark(
@@ -488,6 +562,7 @@ def run_profile_benchmark(
             diagnostics_aggregator=baseline_diagnostics_aggregator,
             missingness_acceptance=baseline_missingness_acceptance,
             curriculum_metadata=baseline_curriculum_metadata,
+            shift_guardrails=_ShiftGuardrailCollector() if shift_enabled else None,
         )
 
         baseline_throughput = run_throughput_benchmark(
@@ -536,6 +611,185 @@ def run_profile_benchmark(
             "rate_warn_abs_error": float(MISSINGNESS_RATE_WARN_ABS_ERROR),
             "rate_fail_abs_error": float(MISSINGNESS_RATE_FAIL_ABS_ERROR),
             "runtime_baseline_datasets_per_minute": baseline_dpm,
+            "runtime_degradation_pct": (
+                float(runtime_degradation) if runtime_degradation is not None else None
+            ),
+            "runtime_warn_threshold_pct": float(warn_threshold_pct),
+            "runtime_fail_threshold_pct": float(fail_threshold_pct),
+            "issues": issues,
+            "status": _status_from_issues(issues),
+        }
+
+    if shift_enabled and shift_guardrails is not None:
+        shift_params = resolve_shift_runtime_params(config)
+        baseline_config = _copy_runtime_config(config)
+        baseline_config.shift.enabled = False
+        baseline_config.shift.profile = SHIFT_PROFILE_OFF
+        baseline_config.shift.graph_scale = None
+        baseline_config.shift.mechanism_scale = None
+        baseline_config.shift.noise_scale = None
+        baseline_diagnostics_aggregator: CoverageAggregator | None = None
+        if diagnostics_aggregator is not None:
+            baseline_diagnostics_aggregator = _build_diagnostics_aggregator(baseline_config)
+        baseline_missingness_acceptance = (
+            _MissingnessAcceptanceCollector(target_rate=float(config.dataset.missing_rate))
+            if missingness_acceptance is not None
+            else None
+        )
+        baseline_curriculum_metadata = (
+            _CurriculumMetadataCollector(expected_mode=curriculum_mode)
+            if curriculum_metadata is not None
+            else None
+        )
+        baseline_shift_guardrails = _ShiftGuardrailCollector()
+        baseline_on_bundle_callback = _compose_bundle_callback(
+            diagnostics_aggregator=baseline_diagnostics_aggregator,
+            missingness_acceptance=baseline_missingness_acceptance,
+            curriculum_metadata=baseline_curriculum_metadata,
+            shift_guardrails=baseline_shift_guardrails,
+        )
+
+        baseline_throughput = run_throughput_benchmark(
+            baseline_config,
+            num_datasets=num_datasets,
+            warmup_datasets=warmup,
+            device=requested_device,
+            on_bundle=baseline_on_bundle_callback,
+        )
+        baseline_dpm = float(baseline_throughput.get("datasets_per_minute", 0.0))
+        current_dpm = float(result.get("datasets_per_minute", 0.0))
+        runtime_degradation = degradation_percent("datasets_per_minute", current_dpm, baseline_dpm)
+        runtime_degradation_value = (
+            float(runtime_degradation) if runtime_degradation is not None else 0.0
+        )
+        runtime_severity = _severity_from_thresholds(
+            runtime_degradation_value,
+            warn=float(warn_threshold_pct),
+            fail=float(fail_threshold_pct),
+        )
+        runtime_gating_enabled = num_datasets >= SHIFT_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE
+        directional_gating_enabled = num_datasets >= SHIFT_GUARDRAIL_DIRECTIONAL_GATING_MIN_SAMPLE
+
+        current_summary = shift_guardrails.build_summary()
+        baseline_summary = baseline_shift_guardrails.build_summary()
+
+        issues: list[dict[str, Any]] = []
+        metadata_coverage_rate = float(current_summary["metadata_coverage_rate"])
+        if metadata_coverage_rate < 1.0:
+            issues.append(
+                _build_guardrail_issue(
+                    metric="shift_metadata_coverage",
+                    severity="fail",
+                    current=metadata_coverage_rate,
+                    baseline=1.0,
+                    degradation_pct=float(max(0.0, (1.0 - metadata_coverage_rate) * 100.0)),
+                    detail="Shift metadata must be present for all shift-enabled bundles.",
+                )
+            )
+        shift_enabled_coverage_rate = float(current_summary["shift_enabled_coverage_rate"])
+        if shift_enabled_coverage_rate < 1.0:
+            issues.append(
+                _build_guardrail_issue(
+                    metric="shift_enabled_metadata_coverage",
+                    severity="fail",
+                    current=shift_enabled_coverage_rate,
+                    baseline=1.0,
+                    degradation_pct=float(max(0.0, (1.0 - shift_enabled_coverage_rate) * 100.0)),
+                    detail="Shift-enabled benchmark runs must emit shift.enabled=true metadata.",
+                )
+            )
+        if runtime_gating_enabled and runtime_severity != "pass":
+            issues.append(
+                _build_guardrail_issue(
+                    metric="shift_runtime_degradation_pct",
+                    severity=runtime_severity,
+                    current=current_dpm,
+                    baseline=baseline_dpm,
+                    degradation_pct=runtime_degradation_value,
+                    detail=(
+                        "Shift-enabled throughput regressed versus an equivalent "
+                        "shift-disabled control run."
+                    ),
+                )
+            )
+
+        graph_check, graph_issue = _build_shift_directional_check(
+            metric="graph_edge_density",
+            enabled=float(shift_params.graph_scale) > 0.0,
+            gating_enabled=directional_gating_enabled,
+            current=current_summary.get("mean_graph_edge_density"),
+            baseline=baseline_summary.get("mean_graph_edge_density"),
+            detail=(
+                "Graph shift should increase mean graph edge density "
+                "relative to a shift-disabled control run."
+            ),
+        )
+        mechanism_check, mechanism_issue = _build_shift_directional_check(
+            metric="mechanism_nonlinear_mass",
+            enabled=float(shift_params.mechanism_scale) > 0.0,
+            gating_enabled=directional_gating_enabled,
+            current=current_summary.get("mean_mechanism_nonlinear_mass"),
+            baseline=baseline_summary.get("mean_mechanism_nonlinear_mass"),
+            detail=(
+                "Mechanism shift should increase nonlinear family mass "
+                "relative to a shift-disabled control run."
+            ),
+        )
+        noise_check, noise_issue = _build_shift_directional_check(
+            metric="noise_variance_multiplier",
+            enabled=float(shift_params.noise_scale) > 0.0,
+            gating_enabled=directional_gating_enabled,
+            current=current_summary.get("mean_noise_variance_multiplier"),
+            baseline=baseline_summary.get("mean_noise_variance_multiplier"),
+            detail=(
+                "Noise shift should increase noise variance multiplier "
+                "relative to a shift-disabled control run."
+            ),
+        )
+        for maybe_issue in (graph_issue, mechanism_issue, noise_issue):
+            if maybe_issue is not None:
+                issues.append(maybe_issue)
+
+        result["shift_guardrails"] = {
+            "enabled": True,
+            "profile": str(shift_params.profile),
+            "graph_scale": float(shift_params.graph_scale),
+            "mechanism_scale": float(shift_params.mechanism_scale),
+            "noise_scale": float(shift_params.noise_scale),
+            "sample_datasets": int(num_datasets),
+            "metadata_coverage_rate": metadata_coverage_rate,
+            "shift_enabled_coverage_rate": shift_enabled_coverage_rate,
+            "runtime_gating_enabled": bool(runtime_gating_enabled),
+            "runtime_gating_min_sample_datasets": int(SHIFT_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE),
+            "runtime_gating_suppressed_reason": (
+                None if runtime_gating_enabled else "insufficient_sample_size"
+            ),
+            "directional_gating_enabled": bool(directional_gating_enabled),
+            "directional_gating_min_sample_datasets": int(
+                SHIFT_GUARDRAIL_DIRECTIONAL_GATING_MIN_SAMPLE
+            ),
+            "directional_gating_suppressed_reason": (
+                None if directional_gating_enabled else "insufficient_sample_size"
+            ),
+            "current_means": {
+                "graph_edge_density": current_summary.get("mean_graph_edge_density"),
+                "edge_odds_multiplier": current_summary.get("mean_edge_odds_multiplier"),
+                "mechanism_nonlinear_mass": current_summary.get("mean_mechanism_nonlinear_mass"),
+                "noise_variance_multiplier": current_summary.get("mean_noise_variance_multiplier"),
+            },
+            "baseline_means": {
+                "graph_edge_density": baseline_summary.get("mean_graph_edge_density"),
+                "edge_odds_multiplier": baseline_summary.get("mean_edge_odds_multiplier"),
+                "mechanism_nonlinear_mass": baseline_summary.get("mean_mechanism_nonlinear_mass"),
+                "noise_variance_multiplier": baseline_summary.get("mean_noise_variance_multiplier"),
+            },
+            "directional_checks": {
+                "graph_edge_density": graph_check,
+                "mechanism_nonlinear_mass": mechanism_check,
+                "noise_variance_multiplier": noise_check,
+            },
+            "runtime_baseline_datasets_per_minute": baseline_dpm,
+            "runtime_with_shift_datasets_per_minute": current_dpm,
             "runtime_degradation_pct": (
                 float(runtime_degradation) if runtime_degradation is not None else None
             ),
@@ -709,7 +963,10 @@ def run_benchmark_suite(
     curriculum_issues = _collect_guardrail_regression_issues(
         profile_results, guardrail_key="curriculum_guardrails"
     )
-    additional_issues = [*missingness_issues, *lineage_issues, *curriculum_issues]
+    shift_issues = _collect_guardrail_regression_issues(
+        profile_results, guardrail_key="shift_guardrails"
+    )
+    additional_issues = [*missingness_issues, *lineage_issues, *curriculum_issues, *shift_issues]
     if additional_issues:
         existing_issues = regression.get("issues", [])
         if not isinstance(existing_issues, list):

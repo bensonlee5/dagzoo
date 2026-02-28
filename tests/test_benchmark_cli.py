@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from cauchy_generator.cli import main
+from cauchy_generator.cli import _print_profile_result_line, main
 
 
 def test_benchmark_cli_writes_json(tmp_path) -> None:
@@ -285,6 +285,37 @@ def test_benchmark_cli_curriculum_stage1_smoke_preset_does_not_crash(tmp_path) -
     assert guardrails["enabled"] is True
 
 
+def test_benchmark_cli_shift_guardrails_are_emitted(tmp_path) -> None:
+    out = tmp_path / "summary_shift.json"
+    code = main(
+        [
+            "benchmark",
+            "--config",
+            "configs/preset_shift_benchmark_smoke.yaml",
+            "--profile",
+            "custom",
+            "--suite",
+            "smoke",
+            "--num-datasets",
+            "2",
+            "--warmup",
+            "0",
+            "--no-hardware-aware",
+            "--no-memory",
+            "--json-out",
+            str(out),
+        ]
+    )
+    assert code == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    profile = payload["profile_results"][0]
+    guardrails = profile["shift_guardrails"]
+    assert guardrails["enabled"] is True
+    assert guardrails["status"] in {"pass", "warn", "fail"}
+    assert "directional_checks" in guardrails
+    assert "runtime_gating_enabled" in guardrails
+
+
 def test_benchmark_cli_many_class_smoke_preset_emits_runtime_metrics(tmp_path) -> None:
     out = tmp_path / "summary_many_class_smoke.json"
     code = main(
@@ -316,3 +347,18 @@ def test_benchmark_cli_many_class_smoke_preset_emits_runtime_metrics(tmp_path) -
     guardrails = profile["lineage_guardrails"]
     assert isinstance(guardrails, dict)
     assert isinstance(guardrails["enabled"], bool)
+
+
+def test_print_profile_result_line_includes_shift_status(capsys) -> None:
+    _print_profile_result_line(
+        {
+            "profile_key": "shift_smoke",
+            "device": "cpu",
+            "hardware_backend": "cpu",
+            "datasets_per_minute": 123.0,
+            "latency_p95_ms": 4.2,
+            "shift_guardrails": {"enabled": True, "status": "pass"},
+        }
+    )
+    output = capsys.readouterr().out
+    assert "shift=pass" in output

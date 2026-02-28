@@ -34,8 +34,8 @@ def _build_profile_table(profile_results: list[dict[str, Any]]) -> list[str]:
     """Create a markdown table summarizing per-profile performance metrics."""
 
     lines = [
-        "| Profile | Device | Backend | Datasets/min | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) | Diagnostics | Missingness | Lineage |",
-        "|---|---|---:|---:|---:|---:|---:|---|---|---|",
+        "| Profile | Device | Backend | Datasets/min | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) | Diagnostics | Missingness | Lineage | Shift |",
+        "|---|---|---:|---:|---:|---:|---:|---|---|---|---|",
     ]
     for result in profile_results:
         diagnostics_state = "on" if bool(result.get("diagnostics_enabled")) else "off"
@@ -47,6 +47,10 @@ def _build_profile_table(profile_results: list[dict[str, Any]]) -> list[str]:
         lineage_guardrails = result.get("lineage_guardrails")
         if isinstance(lineage_guardrails, dict) and bool(lineage_guardrails.get("enabled")):
             lineage_state = str(lineage_guardrails.get("status", "pass"))
+        shift_state = "off"
+        shift_guardrails = result.get("shift_guardrails")
+        if isinstance(shift_guardrails, dict) and bool(shift_guardrails.get("enabled")):
+            shift_state = str(shift_guardrails.get("status", "pass"))
         lines.append(
             "| "
             f"{result.get('profile_key', '-')} | "
@@ -59,6 +63,7 @@ def _build_profile_table(profile_results: list[dict[str, Any]]) -> list[str]:
             f"{diagnostics_state} |"
             f" {missingness_state} |"
             f" {lineage_state} |"
+            f" {shift_state} |"
         )
     return lines
 

@@ -289,6 +289,69 @@ def test_generate_cli_many_class_preset_end_to_end_no_write(
         assert "accepted" not in filter_metadata
 
 
+@pytest.mark.parametrize(
+    ("config_path", "expected_profile"),
+    [
+        ("configs/preset_shift_graph_drift_generate_smoke.yaml", "graph_drift"),
+        ("configs/preset_shift_mechanism_drift_generate_smoke.yaml", "mechanism_drift"),
+        ("configs/preset_shift_noise_drift_generate_smoke.yaml", "noise_drift"),
+        ("configs/preset_shift_mixed_generate_smoke.yaml", "mixed"),
+    ],
+)
+def test_generate_cli_shift_presets_emit_shift_metadata_no_write(
+    monkeypatch: pytest.MonkeyPatch,
+    config_path: str,
+    expected_profile: str,
+) -> None:
+    from cauchy_generator.core import dataset as dataset_mod
+
+    captured_shift: list[dict[str, object]] = []
+    original_generate_batch_iter = dataset_mod.generate_batch_iter
+
+    def _capture_generate_batch_iter(
+        config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        for bundle in original_generate_batch_iter(
+            config,
+            num_datasets=num_datasets,
+            seed=seed,
+            device=device,
+        ):
+            payload = bundle.metadata["shift"]
+            assert isinstance(payload, dict)
+            captured_shift.append(payload)
+            yield bundle
+
+    monkeypatch.setattr(
+        "cauchy_generator.cli.generate_batch_iter",
+        _capture_generate_batch_iter,
+    )
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            config_path,
+            "--num-datasets",
+            "2",
+            "--device",
+            "cpu",
+            "--no-hardware-aware",
+            "--no-write",
+        ]
+    )
+
+    assert code == 0
+    assert len(captured_shift) == 2
+    for payload in captured_shift:
+        assert payload["enabled"] is True
+        assert payload["profile"] == expected_profile
+
+
 def test_benchmark_cli_rejects_negative_warmup() -> None:
     with pytest.raises(SystemExit) as exc:
         main(

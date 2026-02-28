@@ -1,0 +1,33 @@
+seed: 62
+
+dataset:
+  task: regression
+  n_train: 128
+  n_test: 32
+  n_features_min: 8
+  n_features_max: 12
+
+graph:
+  n_nodes_min: 8
+  n_nodes_max: 12
+
+shift:
+  enabled: true
+  profile: mechanism_drift
+
+runtime:
+  device: cpu
+
+output:
+  out_dir: data/run_shift_mechanism_drift_smoke
+  shard_size: 16
+  compression: zstd
+
+diagnostics:
+  enabled: false
+
+steering:
+  enabled: false
+
+filter:
+  enabled: false

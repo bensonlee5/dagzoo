@@ -161,14 +161,15 @@ ______________________________________________________________________
 
 ## Configuration Presets
 
-| Category    | Example file                                    | What it controls                                                 |
-| ----------- | ----------------------------------------------- | ---------------------------------------------------------------- |
-| Default     | `configs/default.yaml`                          | Balanced baseline for classification                             |
-| Curriculum  | `configs/preset_curriculum_auto_staged.yaml`    | Staged difficulty (features, nodes, depth)                       |
-| Missingness | `configs/preset_missingness_mcar.yaml`          | Synthetic missing-data injection (**MCAR**/MAR/MNAR - see below) |
-| Steering    | `configs/preset_steering_conservative.yaml`     | Soft selection toward meta-feature target bands                  |
-| Many-class  | `configs/preset_many_class_generate_smoke.yaml` | High-class-count generation within 32-class envelope             |
-| Benchmark   | `configs/benchmark_cpu.yaml`                    | Hardware-specific benchmark parameters                           |
+| Category    | Example file                                     | What it controls                                                 |
+| ----------- | ------------------------------------------------ | ---------------------------------------------------------------- |
+| Default     | `configs/default.yaml`                           | Balanced baseline for classification                             |
+| Curriculum  | `configs/preset_curriculum_auto_staged.yaml`     | Staged difficulty (features, nodes, depth)                       |
+| Missingness | `configs/preset_missingness_mcar.yaml`           | Synthetic missing-data injection (**MCAR**/MAR/MNAR - see below) |
+| Shift       | `configs/preset_shift_mixed_generate_smoke.yaml` | Opt-in graph/mechanism/noise shift workflows                     |
+| Steering    | `configs/preset_steering_conservative.yaml`      | Soft selection toward meta-feature target bands                  |
+| Many-class  | `configs/preset_many_class_generate_smoke.yaml`  | High-class-count generation within 32-class envelope             |
+| Benchmark   | `configs/benchmark_cpu.yaml`                     | Hardware-specific benchmark parameters                           |
 
 Presets follow the `preset_<category>_<variant>.yaml` naming convention. You can compose presets by layering CLI `--config` with flag overrides.
 

@@ -173,6 +173,15 @@ Run with any shift-enabled config:
 cauchy-gen generate --config path/to/shift_config.yaml --num-datasets 25 --out data/run_shift
 ```
 
+Discoverable shift presets:
+
+```bash
+cauchy-gen generate --config configs/preset_shift_graph_drift_generate_smoke.yaml --num-datasets 25 --out data/run_shift_graph
+cauchy-gen generate --config configs/preset_shift_mechanism_drift_generate_smoke.yaml --num-datasets 25 --out data/run_shift_mechanism
+cauchy-gen generate --config configs/preset_shift_noise_drift_generate_smoke.yaml --num-datasets 25 --out data/run_shift_noise
+cauchy-gen generate --config configs/preset_shift_mixed_generate_smoke.yaml --num-datasets 25 --out data/run_shift_mixed
+```
+
 How to interpret outputs:
 
 - Per-dataset `metadata.json` now includes `shift` with resolved profile/scales
@@ -221,6 +230,13 @@ cauchy-gen benchmark \
   --suite smoke \
   --no-memory \
   --out-dir benchmarks/results/smoke_curriculum_guardrails
+
+cauchy-gen benchmark \
+  --config configs/preset_shift_benchmark_smoke.yaml \
+  --profile custom \
+  --suite smoke \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_shift_guardrails
 ```
 
 For regression gating in CI-like checks:
@@ -239,7 +255,8 @@ cauchy-gen benchmark \
 ```
 
 When available in a run, review benchmark summary sections such as
-`missingness_guardrails`, `lineage_guardrails`, and `curriculum_guardrails`.
+`missingness_guardrails`, `lineage_guardrails`, `curriculum_guardrails`, and
+`shift_guardrails`.
 
 ______________________________________________________________________
 

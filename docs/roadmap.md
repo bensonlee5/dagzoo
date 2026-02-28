@@ -254,17 +254,22 @@ metadata JSON contract, and DAG lineage schema.
 
 ### RD-004: Shift-Aware SCM Generation
 
-- Status: `planned`
-- Milestone: `Next`
+- Status: `implemented`
+- Milestone: `Now` (completed via epics/issues `#64`, `#72`, `#73`, `#74`, and `#75`)
 - Mission alignment: robustness testing, causal discovery
 - Pillar alignment: causal structural integrity, tabular realism
 - Goal: introduce controlled distribution-shift/drift modes in graph and mechanism sampling.
 - GitHub tracking: epic `#64`; dependency chain `#72 -> #73 -> #74 -> #75`
-- Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/sampling/random_weights.py`
-- Exit criteria:
-  - Shift profiles are opt-in and backward-compatible.
-  - Drift metrics show measurable controlled shift under enabled profiles.
-  - No regression in baseline benchmark thresholds when shift is disabled.
+- Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/core/dataset.py`, `src/cauchy_generator/core/shift.py`, `src/cauchy_generator/diagnostics/`, `src/cauchy_generator/bench/`, `configs/preset_shift_*.yaml`
+- Delivered scope:
+  - Shift controls are integrated into graph/mechanism/noise sampling with deterministic seeded behavior.
+  - Per-bundle metadata and diagnostics expose resolved shift settings and observability signals.
+  - Discoverable shift presets are available for generation and benchmark smoke workflows.
+  - Benchmark profiles emit `shift_guardrails` with runtime, metadata-coverage, and directional checks against shift-disabled controls.
+- Completion evidence:
+  - Shift workflows are runnable directly from preset configs and documented in user-facing guides.
+  - Integration tests cover shift metadata/diagnostics propagation and preset/CLI execution paths.
+  - Benchmark summaries include `shift_guardrails` alongside existing guardrail families.
 
 ### RD-005: Robustness Stress Profiles (Hard-Task/Adversarial Regimes)
 
