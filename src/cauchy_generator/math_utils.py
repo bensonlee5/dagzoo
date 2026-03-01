@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import math
+from typing import TypeVar
 
 import numpy as np
 import torch
 
+_KT = TypeVar("_KT", bound=str)
+
 
 def normalize_positive_weights(
-    weights: dict[str, float],
+    weights: dict[_KT, float],
     *,
     field_name: str = "weights",
-) -> dict[str, float]:
+) -> dict[_KT, float]:
     """Numerically stable normalization: filter positive, scale-by-max, fsum, normalize."""
 
     positive = {k: v for k, v in weights.items() if v > 0.0}
