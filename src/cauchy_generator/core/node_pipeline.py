@@ -58,7 +58,10 @@ def apply_node_pipeline(
             noise_sigma_multiplier=noise_sigma_multiplier,
         )
 
-    x = torch.nan_to_num(x.to(torch.float32), nan=0.0, posinf=1e6, neginf=-1e6)
+    if x.dtype not in (torch.float32, torch.float64, torch.bfloat16):
+        x = x.to(torch.float32)
+
+    x = torch.nan_to_num(x, nan=0.0, posinf=1e6, neginf=-1e6)
     x = torch.clamp(x, -1e6, 1e6)
     x = _standardize(x)
 

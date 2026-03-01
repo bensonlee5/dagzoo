@@ -680,6 +680,13 @@ class RuntimeConfig:
     torch_dtype: str = "float32"
     hardware_aware: bool = True
 
+    def __post_init__(self) -> None:
+        valid_dtypes = ("float32", "float64", "bfloat16")
+        if self.torch_dtype not in valid_dtypes:
+            raise ValueError(
+                f"runtime.torch_dtype must be one of {valid_dtypes}, got {self.torch_dtype!r}."
+            )
+
 
 @dataclass(slots=True)
 class OutputConfig:

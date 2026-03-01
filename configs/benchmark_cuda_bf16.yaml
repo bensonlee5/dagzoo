@@ -1,0 +1,47 @@
+seed: 42
+
+dataset:
+  task: classification
+  n_train: 8192
+  n_test: 2048
+  n_features_min: 64
+  n_features_max: 256
+  n_classes_min: 2
+  n_classes_max: 32
+  categorical_ratio_min: 0.1
+  categorical_ratio_max: 0.5
+  max_categorical_cardinality: 64
+
+graph:
+  n_nodes_min: 8
+  n_nodes_max: 64
+
+runtime:
+  device: cuda
+  torch_dtype: bfloat16
+  hardware_aware: true
+
+output:
+  out_dir: data/benchmark_cuda_bf16
+  shard_size: 1024
+  compression: zstd
+
+benchmark:
+  profile_name: cuda_bf16
+  suite: standard
+  num_datasets: 5000
+  warmup_datasets: 100
+  warn_threshold_pct: 10.0
+  fail_threshold_pct: 20.0
+  collect_memory: true
+  collect_reproducibility: false
+  reproducibility_num_datasets: 2
+  latency_num_samples: 50
+  profiles:
+    cuda_bf16:
+      device: cuda
+      num_datasets: 5000
+      warmup_datasets: 100
+
+filter:
+  enabled: false

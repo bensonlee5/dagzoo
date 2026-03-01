@@ -18,6 +18,13 @@ def test_load_default_config() -> None:
     assert cfg.dataset.n_features_min <= cfg.dataset.n_features_max
     assert cfg.output.shard_size > 0
     assert cfg.diagnostics.enabled is False
+
+
+def test_load_bf16_config() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/benchmark_cuda_bf16.yaml")
+    assert cfg.runtime.torch_dtype == "bfloat16"
+    assert cfg.runtime.device == "cuda"
+    assert cfg.benchmark.profile_name == "cuda_bf16"
     assert cfg.diagnostics.histogram_bins > 0
     assert cfg.diagnostics.quantiles
     assert cfg.diagnostics.underrepresented_threshold >= 0

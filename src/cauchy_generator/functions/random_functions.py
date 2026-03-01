@@ -296,7 +296,7 @@ def apply_random_function(
     noise_sigma_multiplier: float = 1.0,
 ) -> torch.Tensor:
     """Apply one sampled random function family to `x` in torch."""
-    y = x.to(torch.float32)
+    y = x if x.dtype in (torch.float32, torch.float64, torch.bfloat16) else x.to(torch.float32)
     if y.dim() == 1:
         y = y.unsqueeze(1)
     y = _standardize(y)

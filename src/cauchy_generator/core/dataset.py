@@ -77,7 +77,11 @@ def _resolve_device(config: GeneratorConfig, device_override: str | None) -> str
 def _torch_dtype(config: GeneratorConfig) -> torch.dtype:
     """Map string runtime dtype configuration to a torch dtype."""
 
-    return torch.float64 if config.runtime.torch_dtype == "float64" else torch.float32
+    if config.runtime.torch_dtype == "float64":
+        return torch.float64
+    if config.runtime.torch_dtype == "bfloat16":
+        return torch.bfloat16
+    return torch.float32
 
 
 def _classification_class_structure(

@@ -130,6 +130,14 @@ gating.
 
 ```bash
 cauchy-gen benchmark --suite smoke --profile cpu --out-dir benchmarks/results/smoke_cpu
+
+# Run the BF16 CUDA profile via a custom benchmark config.
+cauchy-gen benchmark \
+  --profile custom \
+  --config configs/benchmark_cuda_bf16.yaml \
+  --suite smoke \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_cuda_bf16
 ```
 
 Detailed guide: [Benchmark Workflows and Guardrails](features/benchmark-guardrails.md)

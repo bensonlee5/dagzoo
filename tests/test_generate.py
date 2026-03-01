@@ -477,6 +477,16 @@ def test_generate_one_returns_torch_tensors_on_cpu() -> None:
     assert bundle.metadata["backend"] == "torch"
 
 
+def test_generate_one_bfloat16_emits_bfloat16_features_on_cpu() -> None:
+    cfg = _tiny_config()
+    cfg.runtime.torch_dtype = "bfloat16"
+
+    bundle = generate_one(cfg, seed=1235, device="cpu")
+    assert bundle.X_train.dtype == torch.bfloat16
+    assert bundle.X_test.dtype == torch.bfloat16
+    assert bundle.metadata["backend"] == "torch"
+
+
 def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     called: dict[str, int] = {"count": 0}
 
