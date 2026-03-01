@@ -133,10 +133,12 @@ Interpretation:
   (`edge_odds_multiplier`, `noise_variance_multiplier`,
   `mechanism_nonlinear_mass`) used by diagnostics coverage summaries.
 
-### 5. Optional diagnostics
+### 5. Optional diagnostics and fixed-layout generation
 
 - Diagnostics computes reporting metrics over emitted bundles and writes
   run-level summaries.
+- Fixed-layout API mode samples one reusable curriculum/layout plan and emits
+  many datasets that share structure while preserving per-dataset randomness.
 
 ## DAG/node data flow
 
@@ -164,9 +166,12 @@ flowchart TB
     Assemble --> Out["return dataset tensors + filter details"]
 ```
 
-## Diagnostics and benchmark guardrails
+## Diagnostics, fixed layout, and benchmark guardrails
 
-Diagnostics is reporting-time aggregation over emitted bundles.
+Diagnostics and fixed-layout generation are related but distinct:
+
+- Fixed-layout generation is a structure-control mode for dataset emission.
+- Diagnostics is reporting-time aggregation over emitted bundles.
 
 Benchmark mode adds guardrails to detect runtime/metadata regressions and emits
 sections such as `missingness_guardrails`, `lineage_guardrails`, and
@@ -208,8 +213,11 @@ sections such as `missingness_guardrails`, `lineage_guardrails`, and
 - **shift profile**: opt-in distribution-drift control over graph, mechanism,
   and noise sampling axes.
 
-### Diagnostics
+### Diagnostics and fixed layout
 
+- **fixed layout plan**: reusable sampled curriculum/layout used for many
+  generated datasets.
+- **layout signature**: deterministic fingerprint identifying a fixed layout.
 - **target band**: desired `[lo, hi]` interval for diagnostics coverage checks.
 - **meta-feature**: scalar dataset statistic used for reporting.
 - **linearity proxy / nonlinearity proxy / SNR proxy**: key diagnostics metrics.

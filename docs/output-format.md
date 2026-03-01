@@ -84,27 +84,30 @@ Each dataset's `metadata.json` contains:
 
 ### Top-level keys
 
-| Key                      | Type        | Description                                                  |
-| ------------------------ | ----------- | ------------------------------------------------------------ |
-| `backend`                | str         | Always `"torch"`                                             |
-| `device`                 | str         | Compute device (e.g., `"cpu"`, `"cuda"`)                     |
-| `compute_backend`        | str         | Implementation variant identifier                            |
-| `n_features`             | int         | Number of features                                           |
-| `n_categorical_features` | int         | Number of categorical features                               |
-| `n_classes`              | int or null | Realized class count in emitted labels (null for regression) |
-| `graph_nodes`            | int         | Number of nodes in the DAG                                   |
-| `graph_edges`            | int         | Number of edges in the DAG                                   |
-| `graph_depth_nodes`      | int         | Longest path length in the DAG                               |
-| `graph_edge_density`     | float       | Edge count / max possible edges                              |
-| `seed`                   | int         | Base seed for this dataset                                   |
-| `attempt_used`           | int         | Generation attempt index (0-based)                           |
-| `lineage`                | object      | DAG lineage record (see Lineage below)                       |
-| `curriculum`             | object      | Curriculum metadata (see below)                              |
-| `shift`                  | object      | Resolved shift settings and realized observability signals   |
-| `config`                 | object      | Full serialized generator configuration                      |
-| `filter`                 | object      | Filter results (see below)                                   |
-| `class_structure`        | object      | Present only for classification (see below)                  |
-| `missingness`            | object      | Present only when missingness is enabled                     |
+| Key                      | Type        | Description                                                    |
+| ------------------------ | ----------- | -------------------------------------------------------------- |
+| `backend`                | str         | Always `"torch"`                                               |
+| `device`                 | str         | Compute device (e.g., `"cpu"`, `"cuda"`)                       |
+| `compute_backend`        | str         | Implementation variant identifier                              |
+| `n_features`             | int         | Number of features                                             |
+| `n_categorical_features` | int         | Number of categorical features                                 |
+| `n_classes`              | int or null | Realized class count in emitted labels (null for regression)   |
+| `graph_nodes`            | int         | Number of nodes in the DAG                                     |
+| `graph_edges`            | int         | Number of edges in the DAG                                     |
+| `graph_depth_nodes`      | int         | Longest path length in the DAG                                 |
+| `graph_edge_density`     | float       | Edge count / max possible edges                                |
+| `seed`                   | int         | Base seed for this dataset                                     |
+| `attempt_used`           | int         | Generation attempt index (0-based)                             |
+| `lineage`                | object      | DAG lineage record (see Lineage below)                         |
+| `curriculum`             | object      | Curriculum metadata (see below)                                |
+| `shift`                  | object      | Resolved shift settings and realized observability signals     |
+| `config`                 | object      | Full serialized generator configuration                        |
+| `filter`                 | object      | Filter results (see below)                                     |
+| `class_structure`        | object      | Present only for classification (see below)                    |
+| `missingness`            | object      | Present only when missingness is enabled                       |
+| `layout_mode`            | str         | Optional layout mode metadata (`"fixed"` for fixed-layout API) |
+| `layout_plan_seed`       | int         | Optional fixed-layout plan seed                                |
+| `layout_signature`       | str         | Optional deterministic fixed-layout fingerprint                |
 
 ### Curriculum sub-object
 
@@ -175,6 +178,16 @@ Present only for classification datasets.
 | `train_test_class_match` | bool        | Whether train and test class sets are identical    |
 | `min_label`              | int or null | Minimum emitted class label                        |
 | `max_label`              | int or null | Maximum emitted class label                        |
+
+### Fixed-layout metadata (optional)
+
+Present only for outputs emitted by fixed-layout batch APIs.
+
+| Key                | Type | Description                                      |
+| ------------------ | ---- | ------------------------------------------------ |
+| `layout_mode`      | str  | `"fixed"`                                        |
+| `layout_plan_seed` | int  | Seed used to sample the shared fixed-layout plan |
+| `layout_signature` | str  | Stable fingerprint for the shared sampled layout |
 
 ### Missingness sub-object (optional)
 

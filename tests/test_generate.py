@@ -8,8 +8,11 @@ from cauchy_generator.core.dataset import (
     _sample_layout,
     _stratified_split_indices,
     generate_batch,
+    generate_batch_fixed_layout,
+    generate_batch_fixed_layout_iter,
     generate_batch_iter,
     generate_one,
+    sample_fixed_layout,
 )
 from cauchy_generator.core.shift import mechanism_nonlinear_mass, resolve_shift_runtime_params
 from cauchy_generator.io.lineage_schema import (
@@ -416,6 +419,52 @@ def test_generate_batch_iter_matches_batch_ordering() -> None:
         np.testing.assert_allclose(np.asarray(a.X_train), np.asarray(b.X_train), atol=1e-6)
         assert a.metadata["seed"] == b.metadata["seed"]
         assert a.metadata["curriculum"] == b.metadata["curriculum"]
+
+
+def test_sample_fixed_layout_is_deterministic_for_seed() -> None:
+    cfg = _tiny_regression_config()
+    plan_a = sample_fixed_layout(cfg, seed=90210, device="cpu")
+    plan_b = sample_fixed_layout(cfg, seed=90210, device="cpu")
+
+    assert plan_a.layout_signature == plan_b.layout_signature
+    assert plan_a.plan_seed == plan_b.plan_seed
+    assert plan_a.auto_stage == plan_b.auto_stage
+    assert int(plan_a.layout["n_features"]) == int(plan_b.layout["n_features"])
+    assert list(plan_a.layout["feature_types"]) == list(plan_b.layout["feature_types"])
+
+
+def test_generate_batch_fixed_layout_iter_matches_materialized_ordering() -> None:
+    cfg = _tiny_regression_config()
+    plan = sample_fixed_layout(cfg, seed=77, device="cpu")
+    batch = generate_batch_fixed_layout(cfg, plan=plan, num_datasets=3, seed=800)
+    streamed = list(generate_batch_fixed_layout_iter(cfg, plan=plan, num_datasets=3, seed=800))
+
+    assert len(batch) == len(streamed)
+    for a, b in zip(batch, streamed, strict=True):
+        np.testing.assert_allclose(np.asarray(a.X_train), np.asarray(b.X_train), atol=1e-6)
+        np.testing.assert_allclose(np.asarray(a.X_test), np.asarray(b.X_test), atol=1e-6)
+        assert a.metadata["seed"] == b.metadata["seed"]
+        assert a.metadata["layout_mode"] == "fixed"
+        assert b.metadata["layout_mode"] == "fixed"
+
+
+def test_generate_batch_fixed_layout_enforces_layout_reuse() -> None:
+    cfg = _tiny_regression_config()
+    plan = sample_fixed_layout(cfg, seed=101, device="cpu")
+    batch = generate_batch_fixed_layout(cfg, plan=plan, num_datasets=4, seed=404)
+
+    assert len(batch) == 4
+    n_features = int(batch[0].metadata["n_features"])
+    feature_types = list(batch[0].feature_types)
+    layout_signature = str(batch[0].metadata["layout_signature"])
+    for bundle in batch:
+        assert bundle.metadata["layout_mode"] == "fixed"
+        assert int(bundle.metadata["layout_plan_seed"]) == plan.plan_seed
+        assert str(bundle.metadata["layout_signature"]) == layout_signature
+        assert int(bundle.metadata["n_features"]) == n_features
+        assert list(bundle.feature_types) == feature_types
+    assert int(batch[0].metadata["seed"]) != int(batch[1].metadata["seed"])
+    assert not torch.equal(batch[0].X_train, batch[1].X_train)
 
 
 def test_generate_one_returns_torch_tensors_on_cpu() -> None:

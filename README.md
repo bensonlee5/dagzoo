@@ -42,6 +42,7 @@ cauchy-gen benchmark --help
 
 - Diagnostics: exposes per-dataset artifacts so you can verify coverage, inspect drift, and debug generation outcomes.
 - Missingness (MCAR/MAR/MNAR): injects deterministic null patterns to evaluate models under realistic incomplete-data regimes.
+- Fixed-layout batch generation: reuse one sampled layout/curriculum across many datasets for easier high-throughput generation and analysis.
 - Curriculum staging: lets you scale complexity from easier to harder regimes in a controlled, reproducible way.
 - Many-class workflows: stress-tests classification behavior near the current rollout envelope with stable preset and benchmark paths.
 - Shift/drift controls: introduces interpretable graph/mechanism/noise drift for robustness and distribution-shift evaluation.
@@ -69,7 +70,7 @@ The project is organized into functional modules that manage the lifecycle of a 
 The high-level logic that bridges CLI/API requests to the generation engine.
 
 - [`src/cauchy_generator/cli.py`](src/cauchy_generator/cli.py): Maps CLI flags to `GeneratorConfig` and handles command dispatch.
-- [`src/cauchy_generator/core/dataset.py`](src/cauchy_generator/core/dataset.py): The main orchestration engine. Manages batch generation and end-to-end synchronization.
+- [`src/cauchy_generator/core/dataset.py`](src/cauchy_generator/core/dataset.py): The main orchestration engine. Manages batch generation, fixed-layout planning, and end-to-end synchronization.
 
 ### 2. The Generation Pipeline (The "Assembly Line")
 
