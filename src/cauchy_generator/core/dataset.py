@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+import hashlib
+import json
 from typing import Any
 
 import torch
@@ -32,6 +34,20 @@ from cauchy_generator.core.node_pipeline import apply_node_pipeline
 from cauchy_generator.postprocess import inject_missingness, postprocess_dataset
 from cauchy_generator.rng import SeedManager
 from cauchy_generator.types import DatasetBundle
+
+
+@dataclass(slots=True)
+class FixedLayoutPlan:
+    """Pre-sampled curriculum/layout bundle for fixed-layout batch generation."""
+
+    curriculum: dict[str, Any]
+    layout: dict[str, Any]
+    requested_device: str
+    resolved_device: str
+    plan_seed: int
+    mode: str | int
+    auto_stage: int
+    layout_signature: str
 
 
 def _resolve_device(config: GeneratorConfig, device_override: str | None) -> str:
@@ -470,6 +486,70 @@ def _generate_one_with_resolved_layout(
     )
 
 
+def _layout_signature(layout: dict[str, Any]) -> str:
+    """Return a deterministic, stable signature for a sampled layout payload."""
+
+    adjacency = layout.get("adjacency")
+    adjacency_payload: list[list[int]]
+    if isinstance(adjacency, torch.Tensor):
+        adjacency_payload = adjacency.to(device="cpu", dtype=torch.int64).tolist()
+    else:
+        adjacency_payload = torch.as_tensor(adjacency, dtype=torch.int64, device="cpu").tolist()
+
+    signature_payload = {
+        "n_features": int(layout["n_features"]),
+        "n_classes": int(layout["n_classes"]),
+        "feature_types": list(layout["feature_types"]),
+        "card_by_feature": {
+            str(int(k)): int(v) for k, v in sorted(dict(layout["card_by_feature"]).items())
+        },
+        "graph_nodes": int(layout["graph_nodes"]),
+        "graph_edges": int(layout["graph_edges"]),
+        "graph_depth_nodes": int(layout["graph_depth_nodes"]),
+        "feature_node_assignment": [int(v) for v in list(layout["feature_node_assignment"])],
+        "target_node_assignment": int(layout["target_node_assignment"]),
+        "adjacency": adjacency_payload,
+    }
+    encoded = json.dumps(signature_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.blake2s(encoded, digest_size=16).hexdigest()
+
+
+def sample_fixed_layout(
+    config: GeneratorConfig,
+    *,
+    seed: int | None = None,
+    device: str | None = None,
+) -> FixedLayoutPlan:
+    """Sample one reusable layout/curriculum plan for fixed-layout batch generation."""
+
+    run_seed = seed if seed is not None else config.seed
+    mode = normalize_curriculum_stage(config.curriculum_stage)
+    requested_device = (device or config.runtime.device or "auto").lower()
+    resolved_device = _resolve_device(config, device)
+    auto_stage = _resolve_auto_stage(mode, seed=run_seed)
+    manager = SeedManager(run_seed)
+    curriculum = curriculum_core._sample_curriculum(
+        config,
+        manager,
+        auto_stage=auto_stage,
+        sample_stage_rows_fn=curriculum_core._sample_stage_rows,
+        split_counts_fn=curriculum_core._split_counts,
+    )
+    layout_gen = manager.torch_rng("layout")
+    layout = _sample_layout(config, layout_gen, "cpu", curriculum=curriculum)
+    _validate_class_split_for_layout(config, layout=layout, curriculum=curriculum)
+    return FixedLayoutPlan(
+        curriculum=curriculum,
+        layout=layout,
+        requested_device=requested_device,
+        resolved_device=resolved_device,
+        plan_seed=int(run_seed),
+        mode=mode,
+        auto_stage=int(auto_stage),
+        layout_signature=_layout_signature(layout),
+    )
+
+
 def generate_one(
     config: GeneratorConfig,
     *,
@@ -539,3 +619,60 @@ def generate_batch_iter(
             resolved_device=resolved_device,
             auto_stage=_resolve_auto_stage(mode, seed=dataset_seed),
         )
+
+
+def _annotate_fixed_layout_metadata(bundle: DatasetBundle, *, plan: FixedLayoutPlan) -> None:
+    """Attach fixed-layout provenance metadata to an emitted bundle."""
+
+    bundle.metadata["layout_mode"] = "fixed"
+    bundle.metadata["layout_plan_seed"] = int(plan.plan_seed)
+    bundle.metadata["layout_signature"] = str(plan.layout_signature)
+
+
+def generate_batch_fixed_layout_iter(
+    config: GeneratorConfig,
+    *,
+    plan: FixedLayoutPlan,
+    num_datasets: int,
+    seed: int | None = None,
+) -> Iterator[DatasetBundle]:
+    """Yield datasets that share one pre-sampled fixed layout and curriculum."""
+
+    if num_datasets < 0:
+        raise ValueError(f"num_datasets must be >= 0, got {num_datasets}")
+    if num_datasets == 0:
+        return
+
+    run_seed = seed if seed is not None else config.seed
+    manager = SeedManager(run_seed)
+    for i in range(num_datasets):
+        dataset_seed = manager.child("dataset", i)
+        bundle = _generate_one_with_resolved_layout(
+            config,
+            seed=dataset_seed,
+            requested_device=plan.requested_device,
+            resolved_device=plan.resolved_device,
+            curriculum=plan.curriculum,
+            layout=plan.layout,
+        )
+        _annotate_fixed_layout_metadata(bundle, plan=plan)
+        yield bundle
+
+
+def generate_batch_fixed_layout(
+    config: GeneratorConfig,
+    *,
+    plan: FixedLayoutPlan,
+    num_datasets: int,
+    seed: int | None = None,
+) -> list[DatasetBundle]:
+    """Generate a materialized fixed-layout batch using a reusable plan."""
+
+    return list(
+        generate_batch_fixed_layout_iter(
+            config,
+            plan=plan,
+            num_datasets=num_datasets,
+            seed=seed,
+        )
+    )

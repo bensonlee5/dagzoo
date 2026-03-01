@@ -50,7 +50,25 @@ Detailed guides:
 
 ______________________________________________________________________
 
-## 3. Missingness workflows
+## 3. Fixed-layout batch generation (Python API)
+
+Use a fixed layout plan when you want many datasets with consistent structure.
+
+```python
+from cauchy_generator import (
+    GeneratorConfig,
+    generate_batch_fixed_layout,
+    sample_fixed_layout,
+)
+
+cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+plan = sample_fixed_layout(cfg, seed=7, device="cpu")
+batch = generate_batch_fixed_layout(cfg, plan=plan, num_datasets=32, seed=101)
+```
+
+______________________________________________________________________
+
+## 4. Missingness workflows
 
 Use missingness workflows for MCAR/MAR/MNAR robustness regimes:
 
@@ -62,7 +80,7 @@ Detailed guide: [Missingness](features/missingness.md)
 
 ______________________________________________________________________
 
-## 4. Curriculum workflows
+## 5. Curriculum workflows
 
 Use curriculum workflows for staged complexity progression.
 
@@ -74,7 +92,7 @@ Detailed guide: [Curriculum](features/curriculum.md)
 
 ______________________________________________________________________
 
-## 5. Many-class workflows
+## 6. Many-class workflows
 
 Use many-class workflows to exercise the rollout envelope (`n_classes_max <= 32`).
 
@@ -93,7 +111,7 @@ Detailed guide: [Many-class](features/many-class.md)
 
 ______________________________________________________________________
 
-## 6. Shift workflows
+## 7. Shift workflows
 
 Use shift profiles for controlled graph/mechanism/noise drift:
 
@@ -105,7 +123,7 @@ Detailed guide: [Shift / Drift](features/shift.md)
 
 ______________________________________________________________________
 
-## 7. Benchmark workflows and guardrails
+## 8. Benchmark workflows and guardrails
 
 Use benchmark workflows for smoke checks, feature guardrails, and regression
 gating.
