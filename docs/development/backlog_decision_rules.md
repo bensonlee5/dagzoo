@@ -4,15 +4,16 @@ This document defines how roadmap items are ranked and when they are ready for i
 
 Related docs:
 
-- Canonical roadmap: `docs/roadmap.md`
+- Canonical roadmap: `docs/development/roadmap.md`
 - Evidence appendix: `reference/literature_evidence_2026.md`
-- Implementation baseline: `docs/roadmap.md` (`Current Implementation Baseline`)
+- Implementation baseline: `docs/development/roadmap.md` (`Current Implementation Baseline`)
 
 ## Objective
 
 Primary objective:
 
 - Maximize expected downstream model quality gain.
+- Prefer improvements that increase useful PFN task coverage breadth (classification, regression, and time-series when applicable).
 
 Secondary objectives:
 
@@ -58,7 +59,7 @@ Tie-breakers (in order):
 Every item must include:
 
 - `roadmap_id`:
-  stable ID from `docs/roadmap.md` (for example, `RD-003`).
+  stable ID from `docs/development/roadmap.md` (for example, `RD-003`).
 - `mission_alignment`:
   one or more README mission claims explicitly served by the item.
 - `pillar_alignment`:
@@ -115,4 +116,4 @@ Every future implementation PR should include:
 - Config schema updates and examples in `configs/`.
 - Tests covering invariants, reproducibility, and integration paths.
 - Benchmark delta summary for affected profiles.
-- Updated status/milestone/rank in `docs/roadmap.md`.
+- Updated status/milestone/rank in `docs/development/roadmap.md`.

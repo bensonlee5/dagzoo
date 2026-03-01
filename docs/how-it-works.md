@@ -251,4 +251,12 @@ sections such as `missingness_guardrails`, `lineage_guardrails`, and
 - Output contract: [output-format.md](output-format.md)
 - Design rationale and evolution policy: [design-decisions.md](design-decisions.md)
 - End-user command workflows: [usage-guide.md](usage-guide.md)
-- Mission-aligned roadmap and priorities: [roadmap.md](roadmap.md)
+- Feature deep dives:
+  [features/diagnostics.md](features/diagnostics.md),
+  [features/steering.md](features/steering.md),
+  [features/missingness.md](features/missingness.md),
+  [features/curriculum.md](features/curriculum.md),
+  [features/many-class.md](features/many-class.md),
+  [features/shift.md](features/shift.md),
+  [features/benchmark-guardrails.md](features/benchmark-guardrails.md)
+- Mission-aligned roadmap and priorities: [development/roadmap.md](development/roadmap.md)

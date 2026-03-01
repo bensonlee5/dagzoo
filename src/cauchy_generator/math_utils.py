@@ -3,9 +3,32 @@
 from __future__ import annotations
 
 import math
+from typing import TypeVar
 
 import numpy as np
 import torch
+
+_KT = TypeVar("_KT", bound=str)
+
+
+def normalize_positive_weights(
+    weights: dict[_KT, float],
+    *,
+    field_name: str = "weights",
+) -> dict[_KT, float]:
+    """Numerically stable normalization: filter positive, scale-by-max, fsum, normalize."""
+
+    positive = {k: v for k, v in weights.items() if v > 0.0}
+    if not positive:
+        raise ValueError(f"{field_name} must have a positive total weight.")
+
+    max_weight = max(positive.values())
+    scaled = {k: v / max_weight for k, v in positive.items()}
+    total = float(math.fsum(scaled.values()))
+    if not math.isfinite(total) or total <= 0.0:
+        raise ValueError(f"{field_name} must have a positive total weight.")
+
+    return {k: v / total for k, v in scaled.items()}
 
 
 def log_uniform(generator: torch.Generator, low: float, high: float, device: str) -> float:

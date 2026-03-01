@@ -26,7 +26,8 @@ _CURRICULUM_STAGE3_MIN_ROWS = 400
 _CURRICULUM_STAGE3_MAX_ROWS = 60_000
 _CURRICULUM_STAGE1_TRAIN_FRACTION_MIN = 0.30
 _CURRICULUM_STAGE1_TRAIN_FRACTION_MAX = 0.90
-_CURRICULUM_STAGE23_TRAIN_FRACTION = 0.80
+_CURRICULUM_STAGE2_TRAIN_FRACTION = 0.80
+_CURRICULUM_STAGE3_TRAIN_FRACTION = 0.80
 # Fixed stagewise structural prior for RD-006/RD-090 scope.
 # Tuning/configurability can be promoted to a later roadmap item if needed.
 _CURRICULUM_STAGE_STRUCTURE_EDGE_LOGIT_BIAS: dict[int, float] = {1: -0.75, 2: 0.0, 3: 0.75}
@@ -91,14 +92,14 @@ def _sample_stage_rows(stage: int, generator: torch.Generator, device: str) -> t
             _sample_log_uniform_int(
                 generator, device, _CURRICULUM_STAGE2_MIN_ROWS, _CURRICULUM_STAGE2_MAX_ROWS
             ),
-            _CURRICULUM_STAGE23_TRAIN_FRACTION,
+            _CURRICULUM_STAGE2_TRAIN_FRACTION,
         )
     if stage == 3:
         return (
             _sample_log_uniform_int(
                 generator, device, _CURRICULUM_STAGE3_MIN_ROWS, _CURRICULUM_STAGE3_MAX_ROWS
             ),
-            _CURRICULUM_STAGE23_TRAIN_FRACTION,
+            _CURRICULUM_STAGE3_TRAIN_FRACTION,
         )
     raise ValueError(f"Unsupported curriculum stage '{stage}'. Expected 1, 2, or 3.")
 

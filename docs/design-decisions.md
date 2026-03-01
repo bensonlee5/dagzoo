@@ -259,10 +259,54 @@ Family and parameterization expansion is an explicit roadmap direction
 
 ______________________________________________________________________
 
+## 7. Noise family selection for RD-012 phase 1
+
+### Context
+
+Current generation uses implicit Gaussian-driven stochasticity throughout
+matrix, weight, and point sampling, with optional global variance scaling via
+`noise_sigma_multiplier` from shift controls. Epic `#24` and issue `#25`
+introduce explicit user-facing noise-family configuration.
+
+### Decision
+
+Issue `#25` should start with five selectable modes:
+
+- `legacy` (default compatibility mode)
+- `gaussian`
+- `laplace`
+- `student_t`
+- `mixture`
+
+`mixture` is constrained to weighted combinations of Gaussian, Laplace, and
+Student-t components only.
+
+### Rationale
+
+- **Backward compatibility first** — `legacy` default preserves existing config
+  behavior and seeded reproducibility for users who do not opt in.
+- **Coverage without excessive surface area** — Gaussian, Laplace, and
+  Student-t provide progressively heavier tails with interpretable behavior.
+- **Controlled flexibility** — `mixture` allows blended regimes without opening
+  an unbounded family space in phase 1.
+- **Numerical stability guardrails** — `student_t` should require `df > 2`
+  to ensure finite variance and avoid unstable extreme draws.
+
+### Alternatives considered
+
+- **Expose Cauchy directly in phase 1** — rejected for now due infinite
+  variance and high instability risk in downstream transforms.
+- **Single-family only (Gaussian)** — rejected because it does not close the
+  realism/robustness coverage gap targeted by RD-012.
+- **Large family menu initially** — rejected to keep validation, docs, and
+  benchmarking tractable for first delivery.
+
+______________________________________________________________________
+
 ## Evolution Policy
 
 - These ADRs document the current baseline implementation and rationale.
-- Roadmap items may supersede ADR specifics; `docs/roadmap.md` is authoritative
+- Roadmap items may supersede ADR specifics; `development/roadmap.md` is authoritative
   for planned evolution.
 - When roadmap delivery changes a decision detail materially, update this file
   in the same PR and record the rationale.

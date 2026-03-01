@@ -11,7 +11,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from cauchy_generator.bench.baseline import build_baseline_payload, load_baseline, write_baseline
+from cauchy_generator.bench.baseline import (
+    build_baseline_payload,
+    load_baseline,
+    write_baseline,
+)
 from cauchy_generator.bench.report import write_suite_json, write_suite_markdown
 from cauchy_generator.bench.suite import resolve_profile_run_specs, run_benchmark_suite
 from cauchy_generator.config import (
@@ -386,7 +390,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Benchmark profile key. Repeat to run multiple profiles.",
     )
     b.add_argument(
-        "--baseline", default=None, help="Optional baseline JSON path for regression checks."
+        "--baseline",
+        default=None,
+        help="Optional baseline JSON path for regression checks.",
     )
     b.add_argument("--out-dir", default=None, help="Optional directory for summary artifacts.")
     b.add_argument(

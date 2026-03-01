@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 import yaml
 
+from cauchy_generator.math_utils import normalize_positive_weights
+
 CurriculumStage = Literal["off", "auto", 1, 2, 3]
 CURRICULUM_STAGE_OFF: Literal["off"] = "off"
 CURRICULUM_STAGE_AUTO: Literal["auto"] = "auto"
@@ -63,6 +65,32 @@ _SHIFT_PROFILE_VALUE_MAP: dict[str, ShiftProfile] = {
     SHIFT_PROFILE_CUSTOM: SHIFT_PROFILE_CUSTOM,
 }
 
+NoiseFamily = Literal["legacy", "gaussian", "laplace", "student_t", "mixture"]
+NOISE_FAMILY_LEGACY: Literal["legacy"] = "legacy"
+NOISE_FAMILY_GAUSSIAN: Literal["gaussian"] = "gaussian"
+NOISE_FAMILY_LAPLACE: Literal["laplace"] = "laplace"
+NOISE_FAMILY_STUDENT_T: Literal["student_t"] = "student_t"
+NOISE_FAMILY_MIXTURE: Literal["mixture"] = "mixture"
+
+_NOISE_FAMILY_VALUE_MAP: dict[str, NoiseFamily] = {
+    NOISE_FAMILY_LEGACY: NOISE_FAMILY_LEGACY,
+    NOISE_FAMILY_GAUSSIAN: NOISE_FAMILY_GAUSSIAN,
+    NOISE_FAMILY_LAPLACE: NOISE_FAMILY_LAPLACE,
+    NOISE_FAMILY_STUDENT_T: NOISE_FAMILY_STUDENT_T,
+    NOISE_FAMILY_MIXTURE: NOISE_FAMILY_MIXTURE,
+}
+
+NoiseMixtureComponent = Literal["gaussian", "laplace", "student_t"]
+NOISE_MIXTURE_COMPONENT_GAUSSIAN: Literal["gaussian"] = "gaussian"
+NOISE_MIXTURE_COMPONENT_LAPLACE: Literal["laplace"] = "laplace"
+NOISE_MIXTURE_COMPONENT_STUDENT_T: Literal["student_t"] = "student_t"
+
+_NOISE_MIXTURE_COMPONENT_VALUE_MAP: dict[str, NoiseMixtureComponent] = {
+    NOISE_MIXTURE_COMPONENT_GAUSSIAN: NOISE_MIXTURE_COMPONENT_GAUSSIAN,
+    NOISE_MIXTURE_COMPONENT_LAPLACE: NOISE_MIXTURE_COMPONENT_LAPLACE,
+    NOISE_MIXTURE_COMPONENT_STUDENT_T: NOISE_MIXTURE_COMPONENT_STUDENT_T,
+}
+
 MAX_SUPPORTED_CLASS_COUNT = 32
 
 
@@ -113,6 +141,69 @@ def normalize_shift_profile(value: object) -> ShiftProfile:
             f"'{value}'. Expected off, graph_drift, mechanism_drift, noise_drift, mixed, or custom."
         )
     return result
+
+
+def normalize_noise_family(value: object) -> NoiseFamily:
+    """Normalize noise family into a validated internal value."""
+
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise ValueError(
+            "Unsupported noise.family "
+            f"'{value}'. Expected legacy, gaussian, laplace, student_t, or mixture."
+        )
+    normalized = value.strip().lower()
+    result = _NOISE_FAMILY_VALUE_MAP.get(normalized)
+    if result is None:
+        raise ValueError(
+            "Unsupported noise.family "
+            f"'{value}'. Expected legacy, gaussian, laplace, student_t, or mixture."
+        )
+    return result
+
+
+def _normalize_noise_mixture_weights(
+    value: object | None,
+) -> dict[NoiseMixtureComponent, float] | None:
+    """Normalize optional noise-mixture weights mapping."""
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("noise.mixture_weights must be a mapping.")
+    if not value:
+        raise ValueError(
+            "noise.mixture_weights must include at least one of gaussian, laplace, or student_t."
+        )
+
+    weights: dict[NoiseMixtureComponent, float] = {}
+    for raw_key, raw_weight in value.items():
+        if isinstance(raw_key, bool) or not isinstance(raw_key, str):
+            raise ValueError(
+                "noise.mixture_weights keys must be gaussian, laplace, or student_t strings."
+            )
+        normalized_key = raw_key.strip().lower()
+        component = _NOISE_MIXTURE_COMPONENT_VALUE_MAP.get(normalized_key)
+        if component is None:
+            raise ValueError(
+                "Unsupported noise.mixture_weights key "
+                f"'{raw_key}'. Expected gaussian, laplace, or student_t."
+            )
+        if component in weights:
+            raise ValueError(
+                f"Duplicate noise.mixture_weights key '{raw_key}' after normalization."
+            )
+        weight = _validate_finite_float_field(
+            field_name=f"noise.mixture_weights.{component}",
+            value=raw_weight,
+            lo=0.0,
+            hi=None,
+            lo_inclusive=True,
+            hi_inclusive=False,
+            expectation="a finite value >= 0",
+        )
+        weights[component] = float(weight)
+
+    return normalize_positive_weights(weights, field_name="noise.mixture_weights")
 
 
 def _validate_finite_float_field(
@@ -550,6 +641,40 @@ class ShiftConfig:
 
 
 @dataclass(slots=True)
+class NoiseConfig:
+    family: NoiseFamily = NOISE_FAMILY_LEGACY
+    scale: float = 1.0
+    student_t_df: float = 5.0
+    mixture_weights: dict[NoiseMixtureComponent, float] | None = None
+
+    def __post_init__(self) -> None:
+        self.family = normalize_noise_family(self.family)
+        self.scale = _validate_finite_float_field(
+            field_name="noise.scale",
+            value=self.scale,
+            lo=0.0,
+            hi=None,
+            lo_inclusive=False,
+            hi_inclusive=False,
+            expectation="a finite value > 0",
+        )
+        self.student_t_df = _validate_finite_float_field(
+            field_name="noise.student_t_df",
+            value=self.student_t_df,
+            lo=2.0,
+            hi=None,
+            lo_inclusive=False,
+            hi_inclusive=False,
+            expectation="a finite value > 2",
+        )
+        self.mixture_weights = _normalize_noise_mixture_weights(self.mixture_weights)
+        if self.family != NOISE_FAMILY_MIXTURE and self.mixture_weights is not None:
+            raise ValueError(
+                "noise.mixture_weights is only allowed when noise.family is 'mixture'."
+            )
+
+
+@dataclass(slots=True)
 class RuntimeConfig:
     device: str = "auto"
     torch_dtype: str = "float32"
@@ -626,6 +751,7 @@ class GeneratorConfig:
     graph: GraphConfig = field(default_factory=GraphConfig)
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
     shift: ShiftConfig = field(default_factory=ShiftConfig)
+    noise: NoiseConfig = field(default_factory=NoiseConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
@@ -647,6 +773,7 @@ class GeneratorConfig:
         graph = GraphConfig(**graph_data)
         curriculum = CurriculumConfig.from_dict(data.get("curriculum"))
         shift = ShiftConfig(**(data.get("shift") or {}))
+        noise = NoiseConfig(**(data.get("noise") or {}))
         runtime = RuntimeConfig(**(data.get("runtime") or {}))
         output = OutputConfig(**(data.get("output") or {}))
         diagnostics = DiagnosticsConfig(**(data.get("diagnostics") or {}))
@@ -665,6 +792,7 @@ class GeneratorConfig:
             graph=graph,
             curriculum=curriculum,
             shift=shift,
+            noise=noise,
             runtime=runtime,
             output=output,
             diagnostics=diagnostics,
