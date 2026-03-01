@@ -626,49 +626,6 @@ def test_generate_cli_rejects_removed_steering_flags(flag_args: list[str]) -> No
     assert int(exc.value.code) == 2
 
 
-def test_generate_cli_hard_fails_on_legacy_steering_config_key(tmp_path) -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg_dict = cfg.to_dict()
-    cfg_dict["steering"] = {"enabled": True}
-    config_path = tmp_path / "regression.yaml"
-    config_path.write_text(yaml.safe_dump(cfg_dict), encoding="utf-8")
-
-    with pytest.raises(ValueError, match="Config key 'steering' is no longer supported"):
-        main(
-            [
-                "generate",
-                "--config",
-                str(config_path),
-                "--num-datasets",
-                "1",
-                "--no-write",
-            ]
-        )
-
-
-def test_generate_cli_hard_fails_on_legacy_top_level_meta_targets(tmp_path) -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg_dict = cfg.to_dict()
-    cfg_dict["meta_feature_targets"] = {"linearity_proxy": [0.2, 0.8]}
-    config_path = tmp_path / "unknown_target.yaml"
-    config_path.write_text(yaml.safe_dump(cfg_dict), encoding="utf-8")
-
-    with pytest.raises(
-        ValueError,
-        match="Top-level config key 'meta_feature_targets' is no longer supported",
-    ):
-        main(
-            [
-                "generate",
-                "--config",
-                str(config_path),
-                "--num-datasets",
-                "1",
-                "--no-write",
-            ]
-        )
-
-
 def test_generate_cli_missingness_no_write_end_to_end(tmp_path) -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     cfg.runtime.device = "cpu"

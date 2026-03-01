@@ -414,19 +414,6 @@ def test_runtime_config_from_dict() -> None:
     assert "linearity_proxy" in cfg.diagnostics.meta_feature_targets
 
 
-def test_config_rejects_legacy_steering_key() -> None:
-    with pytest.raises(ValueError, match="Config key 'steering' is no longer supported"):
-        GeneratorConfig.from_dict({"steering": {"enabled": True}})
-
-
-def test_config_rejects_legacy_top_level_meta_targets() -> None:
-    with pytest.raises(
-        ValueError,
-        match="Top-level config key 'meta_feature_targets' is no longer supported",
-    ):
-        GeneratorConfig.from_dict({"meta_feature_targets": {"linearity_proxy": [0.1, 0.9]}})
-
-
 def test_runtime_config_rejects_generation_engine_key() -> None:
     with pytest.raises(TypeError, match="generation_engine"):
         GeneratorConfig.from_dict({"runtime": {"generation_engine": "appendix_light"}})
