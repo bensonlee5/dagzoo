@@ -300,17 +300,13 @@ def _generate_torch(
             return_feature_index_map=True,
             preserve_feature_schema=preserve_feature_schema,
         )
-        x_train = x_train.to(device=device)
-        y_train = y_train.to(device=device)
-        x_test = x_test.to(device=device)
-        y_test = y_test.to(device=device)
         x_train, x_test, missingness_summary = inject_missingness(
             x_train,
             x_test,
             dataset_cfg=config.dataset,
             seed=seed,
             attempt=attempt,
-            device=device,
+            device="cpu",
         )
 
         if config.dataset.task == "classification" and not _classification_split_valid(
@@ -319,11 +315,11 @@ def _generate_torch(
             last_reason = "invalid_class_split"
             continue
 
-        x_train = x_train.to(dtype)
-        x_test = x_test.to(dtype)
+        x_train = x_train.to(device=device, dtype=dtype)
+        x_test = x_test.to(device=device, dtype=dtype)
         y_dtype = torch.int64 if config.dataset.task == "classification" else dtype
-        y_train = y_train.to(y_dtype)
-        y_test = y_test.to(y_dtype)
+        y_train = y_train.to(device=device, dtype=y_dtype)
+        y_test = y_test.to(device=device, dtype=y_dtype)
         class_structure: dict[str, Any] | None = None
         n_classes: int | None = None
         if config.dataset.task == "classification":

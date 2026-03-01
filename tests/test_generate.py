@@ -507,6 +507,91 @@ def test_generate_torch_calls_postprocess_on_cpu(
     assert captured["postprocess_rng_device"] == "cpu"
 
 
+def test_generate_torch_calls_missingness_on_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_regression_config()
+    captured: dict[str, str] = {}
+
+    class _MissingnessSentinel(Exception):
+        pass
+
+    def _stub_generate_graph_dataset_torch(
+        _config: GeneratorConfig,
+        _layout: dict[str, object],
+        _seed: int,
+        _device: str,
+        *,
+        n_rows: int,
+        **_kwargs: object,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
+        x = torch.arange(n_rows * 4, dtype=torch.float32).reshape(n_rows, 4)
+        y = torch.linspace(0.0, 1.0, n_rows, dtype=torch.float32)
+        return x, y, {"accepted": True, "filter": {"enabled": False}}
+
+    def _stub_postprocess_dataset(
+        x_train: torch.Tensor,
+        y_train: torch.Tensor,
+        x_test: torch.Tensor,
+        y_test: torch.Tensor,
+        feature_types: list[str],
+        _task: str,
+        _generator: torch.Generator,
+        _device: str,
+        *,
+        return_feature_index_map: bool = False,
+        preserve_feature_schema: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[str], list[int]]:
+        _ = return_feature_index_map
+        _ = preserve_feature_schema
+        feature_index_map = list(range(x_train.shape[1]))
+        return x_train, y_train, x_test, y_test, feature_types, feature_index_map
+
+    def _stub_inject_missingness(
+        x_train: torch.Tensor,
+        x_test: torch.Tensor,
+        *,
+        dataset_cfg,
+        seed: int,
+        attempt: int,
+        device: str,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, object] | None]:
+        _ = dataset_cfg
+        _ = seed
+        _ = attempt
+        captured["missingness_device_arg"] = device
+        captured["missingness_x_train_device"] = x_train.device.type
+        captured["missingness_x_test_device"] = x_test.device.type
+        raise _MissingnessSentinel
+
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset._generate_graph_dataset_torch",
+        _stub_generate_graph_dataset_torch,
+    )
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset.postprocess_dataset",
+        _stub_postprocess_dataset,
+    )
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset.inject_missingness",
+        _stub_inject_missingness,
+    )
+
+    with pytest.raises(_MissingnessSentinel):
+        _generate_torch(
+            cfg,
+            layout={"feature_types": ["num", "num", "num", "num"]},
+            seed=333,
+            device="cuda",
+            n_train=8,
+            n_test=4,
+        )
+
+    assert captured["missingness_device_arg"] == "cpu"
+    assert captured["missingness_x_train_device"] == "cpu"
+    assert captured["missingness_x_test_device"] == "cpu"
+
+
 def test_generate_batch_iter_matches_batch_ordering() -> None:
     cfg = _tiny_config()
     batch = generate_batch(cfg, num_datasets=2, seed=321, device="cpu")
