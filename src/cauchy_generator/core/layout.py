@@ -33,7 +33,9 @@ def _sample_node_count(
     """Sample graph node count using log-uniform bounds."""
 
     low = max(2, int(n_nodes_min))
-    high = max(low, int(n_nodes_max))
+    high = max(2, int(n_nodes_max))
+    if low > high:
+        raise ValueError(f"graph.n_nodes_min must be <= n_nodes_max, got {low} > {high}.")
     return _sample_log_uniform_int(generator, device, low, high)
 
 
@@ -58,10 +60,17 @@ def _sample_layout(
     """Sample dataset layout, graph, and node assignments for one dataset instance."""
 
     shift_params = resolve_shift_runtime_params(config)
+    sampled_feature_min = int(config.dataset.n_features_min)
+    sampled_feature_max = int(config.dataset.n_features_max)
+    if sampled_feature_min > sampled_feature_max:
+        raise ValueError(
+            "dataset.n_features_min must be <= n_features_max, "
+            f"got {sampled_feature_min} > {sampled_feature_max}."
+        )
     n_features = int(
         torch.randint(
-            int(config.dataset.n_features_min),
-            int(config.dataset.n_features_max) + 1,
+            sampled_feature_min,
+            sampled_feature_max + 1,
             (1,),
             generator=generator,
         ).item()
@@ -106,12 +115,9 @@ def _sample_layout(
     )
     n_classes = max(2, n_classes)
 
-    sampled_node_min = max(2, int(config.graph.n_nodes_min))
-    sampled_node_max = max(sampled_node_min, int(config.graph.n_nodes_max))
-
     n_nodes = _sample_node_count(
-        sampled_node_min,
-        sampled_node_max,
+        int(config.graph.n_nodes_min),
+        int(config.graph.n_nodes_max),
         generator,
         device,
     )

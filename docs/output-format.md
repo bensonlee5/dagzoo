@@ -168,6 +168,10 @@ column order, and lineage feature-to-node mapping).
 | `layout_plan_seed` | int  | Seed used to sample the shared fixed-layout plan |
 | `layout_signature` | str  | Stable fingerprint for the shared sampled layout |
 
+Fixed-layout APIs validate that the provided `config` remains compatible with
+the sampled plan before generation. This prevents plan-driven emitted tensors
+from disagreeing with `metadata.config` on layout-driving fields.
+
 ### Missingness sub-object (optional)
 
 Present only when missingness is enabled.

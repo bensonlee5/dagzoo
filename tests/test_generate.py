@@ -5,6 +5,7 @@ import math
 
 from cauchy_generator.config import GeneratorConfig
 from cauchy_generator.core.dataset import (
+    FixedLayoutPlan,
     _stratified_split_indices,
     generate_batch,
     generate_batch_fixed_layout,
@@ -435,6 +436,71 @@ def test_generate_batch_fixed_layout_enforces_layout_reuse() -> None:
     assert not torch.equal(batch[0].X_train, batch[1].X_train)
 
 
+def test_generate_batch_fixed_layout_rejects_plan_config_drift() -> None:
+    cfg = _tiny_regression_config()
+    plan = sample_fixed_layout(cfg, seed=111, device="cpu")
+
+    drifted = _tiny_regression_config()
+    drifted.dataset.n_train = cfg.dataset.n_train + 1
+
+    with pytest.raises(
+        ValueError,
+        match=r"Fixed-layout plan/config mismatch.*dataset\.n_train",
+    ):
+        list(generate_batch_fixed_layout_iter(drifted, plan=plan, num_datasets=1, seed=222))
+
+
+def test_generate_batch_fixed_layout_rejects_legacy_plan_without_compatibility_snapshot() -> None:
+    cfg = _tiny_regression_config()
+    sampled = sample_fixed_layout(cfg, seed=112, device="cpu")
+    legacy_plan = FixedLayoutPlan(
+        layout=sampled.layout,
+        requested_device=sampled.requested_device,
+        resolved_device=sampled.resolved_device,
+        plan_seed=sampled.plan_seed,
+        n_train=sampled.n_train,
+        n_test=sampled.n_test,
+        layout_signature=sampled.layout_signature,
+        compatibility_snapshot=None,
+    )
+
+    with pytest.raises(ValueError, match=r"missing compatibility snapshot"):
+        list(generate_batch_fixed_layout_iter(cfg, plan=legacy_plan, num_datasets=1, seed=223))
+
+
+def test_generate_batch_fixed_layout_allows_non_contract_config_drift() -> None:
+    cfg = _tiny_regression_config()
+    plan = sample_fixed_layout(cfg, seed=113, device="cpu")
+
+    drifted = _tiny_regression_config()
+    drifted.filter.max_attempts = cfg.filter.max_attempts + 1
+    drifted.shift.enabled = True
+    drifted.shift.profile = "noise_drift"
+
+    batch = list(generate_batch_fixed_layout_iter(drifted, plan=plan, num_datasets=2, seed=224))
+    assert len(batch) == 2
+    for bundle in batch:
+        assert bundle.metadata["layout_mode"] == "fixed"
+
+
+def test_generate_batch_fixed_layout_rejects_tampered_plan_layout_signature() -> None:
+    cfg = _tiny_regression_config()
+    plan = sample_fixed_layout(cfg, seed=114, device="cpu")
+    plan.layout["graph_edges"] = int(plan.layout["graph_edges"]) + 1
+
+    with pytest.raises(ValueError, match=r"plan integrity mismatch"):
+        list(generate_batch_fixed_layout_iter(cfg, plan=plan, num_datasets=1, seed=225))
+
+
+def test_generate_batch_fixed_layout_rejects_tampered_plan_resolved_device() -> None:
+    cfg = _tiny_regression_config()
+    plan = sample_fixed_layout(cfg, seed=115, device="cpu")
+    plan.resolved_device = "cuda"
+
+    with pytest.raises(ValueError, match=r"plan\.resolved_device"):
+        list(generate_batch_fixed_layout_iter(cfg, plan=plan, num_datasets=1, seed=226))
+
+
 def test_generate_batch_fixed_layout_raises_on_schema_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -566,6 +632,24 @@ def test_invalid_device_raises() -> None:
     cfg = _tiny_config()
     with pytest.raises(ValueError, match="Unsupported device"):
         generate_one(cfg, seed=123, device="cud")
+
+
+def test_generate_one_rejects_inverted_graph_node_bounds() -> None:
+    cfg = _tiny_config()
+    cfg.graph.n_nodes_min = 10
+    cfg.graph.n_nodes_max = 5
+
+    with pytest.raises(ValueError, match=r"graph\.n_nodes_min must be <= n_nodes_max"):
+        generate_one(cfg, seed=123, device="cpu")
+
+
+def test_generate_one_rejects_inverted_feature_bounds() -> None:
+    cfg = _tiny_config()
+    cfg.dataset.n_features_min = 10
+    cfg.dataset.n_features_max = 5
+
+    with pytest.raises(ValueError, match=r"dataset\.n_features_min must be <= n_features_max"):
+        generate_one(cfg, seed=123, device="cpu")
 
 
 def test_negative_num_datasets_raises() -> None:

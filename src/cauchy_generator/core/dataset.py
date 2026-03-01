@@ -43,6 +43,25 @@ class FixedLayoutPlan:
     n_train: int
     n_test: int
     layout_signature: str
+    compatibility_snapshot: dict[str, Any] | None = None
+
+
+_FIXED_LAYOUT_COMPAT_KEYS: tuple[str, ...] = (
+    "dataset.task",
+    "dataset.n_train",
+    "dataset.n_test",
+    "dataset.n_features_min",
+    "dataset.n_features_max",
+    "dataset.categorical_ratio_min",
+    "dataset.categorical_ratio_max",
+    "dataset.max_categorical_cardinality",
+    "dataset.n_classes_min",
+    "dataset.n_classes_max",
+    "graph.n_nodes_min",
+    "graph.n_nodes_max",
+    "shift.edge_logit_bias_shift",
+    "runtime.resolved_device",
+)
 
 
 def _resolve_split_sizes(config: GeneratorConfig) -> tuple[int, int]:
@@ -492,6 +511,32 @@ def _layout_signature(layout: dict[str, Any]) -> str:
     return hashlib.blake2s(encoded, digest_size=16).hexdigest()
 
 
+def _build_fixed_layout_compatibility_snapshot(
+    config: GeneratorConfig,
+    *,
+    resolved_device: str,
+) -> dict[str, Any]:
+    """Build a fixed-layout compatibility snapshot from effective generation inputs."""
+
+    shift_params = resolve_shift_runtime_params(config)
+    return {
+        "dataset.task": str(config.dataset.task),
+        "dataset.n_train": int(config.dataset.n_train),
+        "dataset.n_test": int(config.dataset.n_test),
+        "dataset.n_features_min": int(config.dataset.n_features_min),
+        "dataset.n_features_max": int(config.dataset.n_features_max),
+        "dataset.categorical_ratio_min": float(config.dataset.categorical_ratio_min),
+        "dataset.categorical_ratio_max": float(config.dataset.categorical_ratio_max),
+        "dataset.max_categorical_cardinality": int(config.dataset.max_categorical_cardinality),
+        "dataset.n_classes_min": int(config.dataset.n_classes_min),
+        "dataset.n_classes_max": int(config.dataset.n_classes_max),
+        "graph.n_nodes_min": int(config.graph.n_nodes_min),
+        "graph.n_nodes_max": int(config.graph.n_nodes_max),
+        "shift.edge_logit_bias_shift": float(shift_params.edge_logit_bias_shift),
+        "runtime.resolved_device": str(resolved_device),
+    }
+
+
 def sample_fixed_layout(
     config: GeneratorConfig,
     *,
@@ -516,6 +561,10 @@ def sample_fixed_layout(
         n_train=int(n_train),
         n_test=int(n_test),
         layout_signature=_layout_signature(layout),
+        compatibility_snapshot=_build_fixed_layout_compatibility_snapshot(
+            config,
+            resolved_device=resolved_device,
+        ),
     )
 
 
@@ -625,6 +674,79 @@ def _extract_emitted_schema_signature(
     return n_features, feature_types, feature_to_node
 
 
+def _validate_fixed_layout_plan_compatibility(
+    config: GeneratorConfig,
+    *,
+    plan: FixedLayoutPlan,
+) -> str:
+    """Validate that a fixed-layout plan is compatible with the active config."""
+
+    snapshot = plan.compatibility_snapshot
+    if snapshot is None:
+        raise ValueError(
+            "Fixed-layout plan is missing compatibility snapshot. "
+            "Resample with sample_fixed_layout(...) before generation."
+        )
+
+    computed_layout_signature = _layout_signature(plan.layout)
+    if str(plan.layout_signature) != computed_layout_signature:
+        raise ValueError(
+            "Fixed-layout plan integrity mismatch: layout_signature does not match plan.layout."
+        )
+
+    missing_keys = [key for key in _FIXED_LAYOUT_COMPAT_KEYS if key not in snapshot]
+    if missing_keys:
+        raise ValueError(
+            "Fixed-layout plan integrity mismatch: compatibility snapshot is missing keys: "
+            f"{', '.join(missing_keys)}."
+        )
+
+    if int(plan.n_train) != int(snapshot["dataset.n_train"]):
+        raise ValueError(
+            "Fixed-layout plan integrity mismatch: plan.n_train does not match "
+            "compatibility snapshot."
+        )
+    if int(plan.n_test) != int(snapshot["dataset.n_test"]):
+        raise ValueError(
+            "Fixed-layout plan integrity mismatch: plan.n_test does not match "
+            "compatibility snapshot."
+        )
+    if str(plan.resolved_device) != str(snapshot["runtime.resolved_device"]):
+        raise ValueError(
+            "Fixed-layout plan integrity mismatch: plan.resolved_device does not match "
+            "compatibility snapshot."
+        )
+
+    try:
+        resolved_device = _resolve_device(config, plan.requested_device)
+    except (RuntimeError, ValueError) as exc:
+        raise ValueError(
+            "Fixed-layout plan/config mismatch: unable to resolve the plan-requested "
+            f"device '{plan.requested_device}' for the current environment."
+        ) from exc
+    if str(plan.resolved_device) != str(resolved_device):
+        raise ValueError(
+            "Fixed-layout plan/config mismatch: plan.resolved_device does not match "
+            f"the currently resolved backend ({plan.resolved_device!r} != {resolved_device!r})."
+        )
+
+    current_snapshot = _build_fixed_layout_compatibility_snapshot(
+        config,
+        resolved_device=resolved_device,
+    )
+    mismatches: list[str] = []
+    for key in _FIXED_LAYOUT_COMPAT_KEYS:
+        plan_value = snapshot[key]
+        config_value = current_snapshot[key]
+        if plan_value != config_value:
+            mismatches.append(f"{key} (plan={plan_value!r}, config={config_value!r})")
+    if mismatches:
+        raise ValueError(
+            "Fixed-layout plan/config mismatch for compatibility fields: " + "; ".join(mismatches)
+        )
+    return str(resolved_device)
+
+
 def generate_batch_fixed_layout_iter(
     config: GeneratorConfig,
     *,
@@ -639,6 +761,7 @@ def generate_batch_fixed_layout_iter(
     if num_datasets == 0:
         return
 
+    validated_resolved_device = _validate_fixed_layout_plan_compatibility(config, plan=plan)
     run_seed = seed if seed is not None else config.seed
     manager = SeedManager(run_seed)
     expected_schema: tuple[int, tuple[str, ...], tuple[int, ...]] | None = None
@@ -648,7 +771,7 @@ def generate_batch_fixed_layout_iter(
             config,
             seed=dataset_seed,
             requested_device=plan.requested_device,
-            resolved_device=plan.resolved_device,
+            resolved_device=validated_resolved_device,
             n_train=int(plan.n_train),
             n_test=int(plan.n_test),
             layout=plan.layout,

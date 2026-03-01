@@ -67,6 +67,10 @@ plan = sample_fixed_layout(cfg, seed=7, device="cpu")
 batch = generate_batch_fixed_layout(cfg, plan=plan, num_datasets=32, seed=101)
 ```
 
+`generate_batch_fixed_layout(_iter)` validates plan/config compatibility before
+generation. If layout-driving config fields drift from the plan snapshot, it
+raises and asks you to resample the plan.
+
 ______________________________________________________________________
 
 ## 4. Missingness workflows
