@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 import yaml
 
+from cauchy_generator.math_utils import normalize_positive_weights
+
 CurriculumStage = Literal["off", "auto", 1, 2, 3]
 CURRICULUM_STAGE_OFF: Literal["off"] = "off"
 CURRICULUM_STAGE_AUTO: Literal["auto"] = "auto"
@@ -201,15 +203,7 @@ def _normalize_noise_mixture_weights(
         )
         weights[component] = float(weight)
 
-    total_weight = float(sum(weights.values()))
-    if total_weight <= 0.0:
-        raise ValueError("noise.mixture_weights must have a positive total weight.")
-
-    return {
-        component: float(weight / total_weight)
-        for component, weight in weights.items()
-        if weight > 0.0
-    }
+    return normalize_positive_weights(weights, field_name="noise.mixture_weights")
 
 
 def _validate_finite_float_field(

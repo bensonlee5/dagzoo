@@ -8,6 +8,26 @@ import numpy as np
 import torch
 
 
+def normalize_positive_weights(
+    weights: dict[str, float],
+    *,
+    field_name: str = "weights",
+) -> dict[str, float]:
+    """Numerically stable normalization: filter positive, scale-by-max, fsum, normalize."""
+
+    positive = {k: v for k, v in weights.items() if v > 0.0}
+    if not positive:
+        raise ValueError(f"{field_name} must have a positive total weight.")
+
+    max_weight = max(positive.values())
+    scaled = {k: v / max_weight for k, v in positive.items()}
+    total = float(math.fsum(scaled.values()))
+    if not math.isfinite(total) or total <= 0.0:
+        raise ValueError(f"{field_name} must have a positive total weight.")
+
+    return {k: v / total for k, v in scaled.items()}
+
+
 def log_uniform(generator: torch.Generator, low: float, high: float, device: str) -> float:
     """Sample from a log-uniform distribution using torch."""
     low_log = math.log(low)

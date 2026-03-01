@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import math
+import operator
 
 import torch
 
+from cauchy_generator.math_utils import normalize_positive_weights
 from cauchy_generator.config import (
     NOISE_FAMILY_GAUSSIAN,
     NOISE_FAMILY_LAPLACE,
@@ -28,7 +30,16 @@ _MAX_TORCH_SEED = (1 << 31) - 1
 def _coerce_shape(shape: Sequence[int] | torch.Size) -> tuple[int, ...]:
     """Validate and normalize output shape tuple."""
 
-    parsed = tuple(int(dim) for dim in shape)
+    parsed_dims: list[int] = []
+    for dim in shape:
+        if isinstance(dim, bool):
+            raise ValueError(f"shape dimensions must be integers, got {shape!r}.")
+        try:
+            parsed_dim = operator.index(dim)
+        except TypeError as exc:
+            raise ValueError(f"shape dimensions must be integers, got {shape!r}.") from exc
+        parsed_dims.append(int(parsed_dim))
+    parsed = tuple(parsed_dims)
     if not parsed:
         raise ValueError("shape must include at least one dimension.")
     if any(dim <= 0 for dim in parsed):
@@ -89,10 +100,7 @@ def _normalize_mixture_weights(
         weight = _validate_nonnegative_finite(f"mixture_weights.{key}", raw_weight)
         parsed[key] = float(weight)
 
-    total = float(sum(parsed.values()))
-    if total <= 0.0:
-        raise ValueError("mixture_weights must have a positive total weight.")
-    return {key: value / total for key, value in parsed.items() if value > 0.0}
+    return normalize_positive_weights(parsed, field_name="mixture_weights")
 
 
 def _laplace(shape: tuple[int, ...], *, generator: torch.Generator, device: str) -> torch.Tensor:
@@ -193,7 +201,7 @@ def _sample_mixture(
     """Sample element-wise noise from a configured family mixture."""
 
     normalized = _normalize_mixture_weights(mixture_weights)
-    components = list(normalized.keys())
+    components = [name for name in _MIXTURE_COMPONENTS if name in normalized]
     probs = torch.tensor(
         [normalized[name] for name in components], device=device, dtype=torch.float32
     )
@@ -202,19 +210,20 @@ def _sample_mixture(
         probs, num_samples=int(numel), replacement=True, generator=generator
     )
 
-    flat = torch.empty((int(numel),), device=device, dtype=torch.float32)
+    flat = torch.empty((int(numel),), device=device, dtype=torch.get_default_dtype())
     for idx, component in enumerate(components):
         mask = assignments == idx
         count = int(mask.sum().item())
         if count <= 0:
             continue
-        flat[mask] = _sample_family(
+        sampled = _sample_family(
             family=component,  # type: ignore[arg-type]
             shape=(count,),
             generator=generator,
             device=device,
             student_t_df=student_t_df,
         )
+        flat[mask] = sampled
     return flat.reshape(shape)
 
 

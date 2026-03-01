@@ -41,6 +41,41 @@ def test_sample_noise_is_deterministic_for_fixed_generator_seed(
     torch.testing.assert_close(a, b)
 
 
+def test_sample_noise_mixture_is_order_independent_for_same_seed() -> None:
+    a = sample_noise(
+        (64,),
+        generator=_make_generator(123),
+        device="cpu",
+        family="mixture",
+        mixture_weights={"gaussian": 0.7, "laplace": 0.3},
+    )
+    b = sample_noise(
+        (64,),
+        generator=_make_generator(123),
+        device="cpu",
+        family="mixture",
+        mixture_weights={"laplace": 0.3, "gaussian": 0.7},
+    )
+    torch.testing.assert_close(a, b)
+
+
+def test_sample_noise_mixture_supports_nondefault_global_dtype() -> None:
+    previous_dtype = torch.get_default_dtype()
+    torch.set_default_dtype(torch.float64)
+    try:
+        samples = sample_noise(
+            (64,),
+            generator=_make_generator(123),
+            device="cpu",
+            family="mixture",
+            mixture_weights={"gaussian": 0.7, "laplace": 0.3},
+        )
+    finally:
+        torch.set_default_dtype(previous_dtype)
+    assert samples.dtype == torch.float64
+    assert torch.all(torch.isfinite(samples))
+
+
 def test_sample_noise_scale_multiplier_is_applied() -> None:
     base = sample_noise(
         (64,), generator=_make_generator(314), device="cpu", family="gaussian", scale=1.0
@@ -54,6 +89,16 @@ def test_sample_noise_scale_multiplier_is_applied() -> None:
 def test_sample_noise_rejects_nonpositive_shape_dims() -> None:
     with pytest.raises(ValueError, match="shape dimensions must be > 0"):
         sample_noise((16, 0), generator=_make_generator(1), device="cpu", family="gaussian")
+
+
+def test_sample_noise_rejects_noninteger_shape_dims() -> None:
+    with pytest.raises(ValueError, match="shape dimensions must be integers"):
+        sample_noise((16, 3.9), generator=_make_generator(1), device="cpu", family="gaussian")
+
+
+def test_sample_noise_rejects_boolean_shape_dims() -> None:
+    with pytest.raises(ValueError, match="shape dimensions must be integers"):
+        sample_noise((16, True), generator=_make_generator(1), device="cpu", family="gaussian")
 
 
 def test_sample_noise_rejects_invalid_mixture_weights_usage() -> None:
@@ -94,6 +139,18 @@ def test_sample_noise_rejects_boolean_mixture_weights() -> None:
             family="mixture",
             mixture_weights={"gaussian": True},
         )
+
+
+def test_sample_noise_handles_large_mixture_weights_without_multinomial_failure() -> None:
+    samples = sample_noise(
+        (32,),
+        generator=_make_generator(2),
+        device="cpu",
+        family="mixture",
+        mixture_weights={"gaussian": 1e308, "laplace": 1e308},
+    )
+    assert samples.shape == (32,)
+    assert torch.all(torch.isfinite(samples))
 
 
 def test_sample_noise_laplace_clamps_uniform_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:

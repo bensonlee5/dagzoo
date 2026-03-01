@@ -94,3 +94,19 @@ def test_noise_config_rejects_mixture_weights_with_nonpositive_total() -> None:
                 }
             }
         )
+
+
+def test_noise_config_stably_normalizes_large_mixture_weights() -> None:
+    cfg = GeneratorConfig.from_dict(
+        {
+            "noise": {
+                "family": "mixture",
+                "mixture_weights": {"gaussian": 1e308, "laplace": 1e308},
+            }
+        }
+    )
+    weights = cfg.noise.mixture_weights
+    assert weights is not None
+    assert sum(weights.values()) == pytest.approx(1.0)
+    assert weights["gaussian"] == pytest.approx(0.5)
+    assert weights["laplace"] == pytest.approx(0.5)
