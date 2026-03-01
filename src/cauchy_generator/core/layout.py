@@ -124,7 +124,6 @@ def _sample_layout(
     adjacency = sample_cauchy_dag(
         n_nodes,
         generator,
-        device,
         edge_logit_bias=float(shift_params.edge_logit_bias_shift),
     )
     graph_depth_nodes = dag_longest_path_nodes(adjacency)

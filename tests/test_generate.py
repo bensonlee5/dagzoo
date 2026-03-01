@@ -6,6 +6,7 @@ import math
 from cauchy_generator.config import GeneratorConfig
 from cauchy_generator.core.dataset import (
     FixedLayoutPlan,
+    _generate_torch,
     _stratified_split_indices,
     generate_batch,
     generate_batch_fixed_layout,
@@ -374,6 +375,136 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
     bundle = generate_one(cfg, seed=777, device="cpu")
     assert int(bundle.metadata["n_features"]) == 3
     assert bundle.metadata["lineage"]["assignments"]["feature_to_node"] == [2, 0, 1]
+
+
+def test_generate_torch_forces_cpu_for_stratified_split(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "classification"
+    cfg.filter.enabled = False
+    captured: dict[str, str] = {}
+
+    class _SplitSentinel(Exception):
+        pass
+
+    def _stub_generate_graph_dataset_torch(
+        _config: GeneratorConfig,
+        _layout: dict[str, object],
+        _seed: int,
+        _device: str,
+        *,
+        n_rows: int,
+        **_kwargs: object,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
+        x = torch.arange(n_rows * 4, dtype=torch.float32).reshape(n_rows, 4)
+        y = torch.arange(n_rows, dtype=torch.int64) % 3
+        return x, y, {"accepted": True, "filter": {"enabled": False}}
+
+    def _stub_stratified_split_indices(
+        y: torch.Tensor,
+        n_train: int,
+        generator: torch.Generator,
+        device: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        _ = n_train
+        captured["split_device_arg"] = device
+        captured["split_y_device"] = y.device.type
+        captured["split_rng_device"] = str(generator.device)
+        raise _SplitSentinel
+
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset._generate_graph_dataset_torch",
+        _stub_generate_graph_dataset_torch,
+    )
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset._stratified_split_indices",
+        _stub_stratified_split_indices,
+    )
+
+    with pytest.raises(_SplitSentinel):
+        _generate_torch(
+            cfg,
+            layout={},
+            seed=111,
+            device="cuda",
+            n_train=8,
+            n_test=4,
+        )
+
+    assert captured["split_device_arg"] == "cpu"
+    assert captured["split_y_device"] == "cpu"
+    assert captured["split_rng_device"] == "cpu"
+
+
+def test_generate_torch_calls_postprocess_on_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_regression_config()
+    captured: dict[str, str] = {}
+
+    class _PostprocessSentinel(Exception):
+        pass
+
+    def _stub_generate_graph_dataset_torch(
+        _config: GeneratorConfig,
+        _layout: dict[str, object],
+        _seed: int,
+        _device: str,
+        *,
+        n_rows: int,
+        **_kwargs: object,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
+        x = torch.arange(n_rows * 4, dtype=torch.float32).reshape(n_rows, 4)
+        y = torch.linspace(0.0, 1.0, n_rows, dtype=torch.float32)
+        return x, y, {"accepted": True, "filter": {"enabled": False}}
+
+    def _stub_postprocess_dataset(
+        x_train: torch.Tensor,
+        y_train: torch.Tensor,
+        x_test: torch.Tensor,
+        y_test: torch.Tensor,
+        _feature_types: list[str],
+        _task: str,
+        generator: torch.Generator,
+        device: str,
+        *,
+        return_feature_index_map: bool = False,
+        preserve_feature_schema: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[str], list[int]]:
+        _ = return_feature_index_map
+        _ = preserve_feature_schema
+        _ = y_train
+        _ = y_test
+        captured["postprocess_device_arg"] = device
+        captured["postprocess_x_train_device"] = x_train.device.type
+        captured["postprocess_x_test_device"] = x_test.device.type
+        captured["postprocess_rng_device"] = str(generator.device)
+        raise _PostprocessSentinel
+
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset._generate_graph_dataset_torch",
+        _stub_generate_graph_dataset_torch,
+    )
+    monkeypatch.setattr(
+        "cauchy_generator.core.dataset.postprocess_dataset",
+        _stub_postprocess_dataset,
+    )
+
+    with pytest.raises(_PostprocessSentinel):
+        _generate_torch(
+            cfg,
+            layout={"feature_types": ["num", "num", "num", "num"]},
+            seed=222,
+            device="cuda",
+            n_train=8,
+            n_test=4,
+        )
+
+    assert captured["postprocess_device_arg"] == "cpu"
+    assert captured["postprocess_x_train_device"] == "cpu"
+    assert captured["postprocess_x_test_device"] == "cpu"
+    assert captured["postprocess_rng_device"] == "cpu"
 
 
 def test_generate_batch_iter_matches_batch_ordering() -> None:

@@ -395,7 +395,9 @@ for idx in "${!TRAIN_ROWS[@]}"; do
       break 2
     fi
 
-    TOTAL_GENERATED=$((TOTAL_GENERATED + chunk_n))
+    if [[ "$status" == "ok" ]]; then
+      TOTAL_GENERATED=$((TOTAL_GENERATED + chunk_n))
+    fi
     remaining=$((remaining - chunk_n))
     chunk_idx=$((chunk_idx + 1))
   done
@@ -474,11 +476,14 @@ stage_cols = [int(v) for v in stage_cols_csv.split(",") if v] if stage_cols_csv 
 stages_payload = []
 for idx, n_train in enumerate(train_rows):
     chunks = sorted(records_by_stage.get(idx, []), key=lambda x: int(x["chunk_index"]))
-    stage_status = "success"
-    if chunks and any(str(c["status"]) == "failed" for c in chunks):
+    if not chunks:
+        stage_status = "skipped"
+    elif any(str(c["status"]) == "failed" for c in chunks):
         stage_status = "failed"
-    elif chunks and all(str(c["status"]) == "dry_run" for c in chunks):
+    elif all(str(c["status"]) == "dry_run" for c in chunks):
         stage_status = "dry_run"
+    else:
+        stage_status = "success"
 
     stage_features = None
     if stage_cols is not None and idx < len(stage_cols):
@@ -495,7 +500,7 @@ for idx, n_train in enumerate(train_rows):
             "n_test": int(n_test),
             "n_features": stage_features,
             "stage_seed": int(stage_seed),
-            "generated_datasets": int(sum(int(c["num_datasets"]) for c in chunks if str(c["status"]) != "failed")),
+            "generated_datasets": int(sum(int(c["num_datasets"]) for c in chunks if str(c["status"]) == "ok")),
             "status": stage_status,
             "chunks": chunks,
         }

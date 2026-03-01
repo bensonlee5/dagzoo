@@ -252,37 +252,58 @@ def _generate_torch(
             last_reason = "filtered_out"
             continue
 
-        generator = torch.Generator(device=device)
-        generator.manual_seed(seed + SPLIT_PERMUTATION_SEED_OFFSET + attempt)
+        # Keep split/postprocess control-plane randomness on CPU to avoid tiny-op accelerator overhead.
+        split_postprocess_generator = torch.Generator(device="cpu")
+        split_postprocess_generator.manual_seed(seed + SPLIT_PERMUTATION_SEED_OFFSET + attempt)
 
         if config.dataset.task == "classification":
             try:
-                train_idx, test_idx = _stratified_split_indices(y, n_train, generator, device)
+                train_idx_cpu, test_idx_cpu = _stratified_split_indices(
+                    y.to(device="cpu"),
+                    n_train,
+                    split_postprocess_generator,
+                    "cpu",
+                )
             except ValueError as exc:
                 if str(exc).startswith("infeasible_stratified_split"):
                     last_reason = "invalid_class_split"
                     continue
                 raise
+            train_idx = train_idx_cpu.to(device=x.device)
+            test_idx = test_idx_cpu.to(device=x.device)
             x_train_t, x_test_t = x[train_idx], x[test_idx]
             y_train_t, y_test_t = y[train_idx], y[test_idx]
         else:
-            order = torch.randperm(x.shape[0], generator=generator, device=device)
+            order_cpu = torch.randperm(
+                x.shape[0],
+                generator=split_postprocess_generator,
+                device="cpu",
+            )
+            order = order_cpu.to(device=x.device)
             x, y = x[order], y[order]
             x_train_t, x_test_t = x[:n_train], x[n_train:]
             y_train_t, y_test_t = y[:n_train], y[n_train:]
 
+        x_train_cpu = x_train_t.to(device="cpu")
+        y_train_cpu = y_train_t.to(device="cpu")
+        x_test_cpu = x_test_t.to(device="cpu")
+        y_test_cpu = y_test_t.to(device="cpu")
         x_train, y_train, x_test, y_test, feature_types, feature_index_map = postprocess_dataset(
-            x_train_t,
-            y_train_t,
-            x_test_t,
-            y_test_t,
+            x_train_cpu,
+            y_train_cpu,
+            x_test_cpu,
+            y_test_cpu,
             list(layout["feature_types"]),
             config.dataset.task,
-            generator,
-            device,
+            split_postprocess_generator,
+            "cpu",
             return_feature_index_map=True,
             preserve_feature_schema=preserve_feature_schema,
         )
+        x_train = x_train.to(device=device)
+        y_train = y_train.to(device=device)
+        x_test = x_test.to(device=device)
+        y_test = y_test.to(device=device)
         x_train, x_test, missingness_summary = inject_missingness(
             x_train,
             x_test,
