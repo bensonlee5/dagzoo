@@ -2,7 +2,7 @@
 
 import torch
 
-from cauchy_generator.functions.activations import apply_random_activation
+from cauchy_generator.functions.activations import _fixed_activation, apply_random_activation
 from conftest import make_generator as _make_generator
 
 
@@ -33,3 +33,11 @@ def test_1d_promoted() -> None:
     y = apply_random_activation(x, g)
     assert y.dim() == 2
     assert y.shape[0] == 64
+
+
+def test_fixed_relu_sq_matches_relu_squared() -> None:
+    x = torch.tensor([[-2.0, -0.5, 0.0, 1.5, 3.0]], dtype=torch.float32)
+    out = _fixed_activation(x, "relu_sq")
+    expected = torch.square(torch.relu(x))
+    torch.testing.assert_close(out, expected)
+    assert torch.all(out >= 0.0)

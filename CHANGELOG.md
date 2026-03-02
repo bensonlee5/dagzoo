@@ -9,35 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Architecture documentation with mermaid diagrams (`docs/how-it-works.md`)
-- Design decisions record for foundational technical choices (`docs/design-decisions.md`)
-- Domain glossary for generator terminology (`docs/glossary.md`)
-- Formal output format specification and metadata contract (`docs/output-format.md`)
-- Torch-native steering metric extractor (`core/steering_metrics.py`) — avoids NumPy conversion during candidate scoring
-- Deterministic MCAR/MAR/MNAR missingness mask samplers with typed config validation coverage
-- End-to-end missingness injection in generation/postprocess path with compact metadata summaries for configured and realized rates
-- Missingness CLI overrides for `generate`: `--missing-rate`, `--missing-mechanism`, `--missing-mar-observed-fraction`, `--missing-mar-logit-scale`, `--missing-mnar-logit-scale`
-- Missingness presets: `configs/preset_missingness_mcar.yaml`, `configs/preset_missingness_mar.yaml`, `configs/preset_missingness_mnar.yaml`
-- Missingness wrapper script: `scripts/generate-missingness.sh`
-- Missingness benchmark guardrails (runtime vs missingness-off control + acceptance checks) surfaced in profile summaries and regression issues
-- Versioned DAG lineage schema validator for `metadata.lineage` (`schema_name=cauchy_generator.dag_lineage`, `schema_version=1.0.0`) with strict adjacency/assignment checks and backward-compatible optional metadata mode
-- Benchmark lineage-export guardrails (`lineage_guardrails`) that compare shard persistence throughput against lineage-stripped controls and surface warn/fail issues in regression summaries
-- Lineage benchmark smoke preset: `configs/preset_lineage_benchmark_smoke.yaml`
-- Curriculum metadata diagnostics payload (`metadata.curriculum.realized_complexity`, `stage_bounds`, `monotonicity_axes`) for staged complexity tracking across tasks
+- Shift profile schema, sampling integration, and metadata/diagnostics observability across generation and benchmarks
+- Configurable noise family schema/samplers (`legacy`, `gaussian`, `laplace`, `student_t`, `mixture`) with profile/preset coverage
+- Many-class generation envelope and class-aware filtering/diagnostics presets for benchmark and generate workflows
+- Fixed-layout batch generation APIs with emitted schema stability guarantees
+- Curriculum shell runner (`scripts/generate-curriculum.sh`) for staged dataset batches with manifest output
+- Additional guidance docs and feature references (`docs/how-it-works.md`, `docs/design-decisions.md`, `docs/glossary.md`, `docs/output-format.md`, `docs/usage-guide.md`)
 
 ### Changed
 
-- Eliminated NumPy bottlenecks across generation pipeline: `functions/`, `linalg/`, `converters/` now use torch-native implementations
-- Steering candidate scoring uses torch-native metric path and torch softmax selection to avoid CPU/NumPy round trips on accelerator runs
-- Diagnostics extraction now normalizes input bundles to CPU and delegates metric computation to `core/steering_metrics.py`, avoiding device-specific float64 failures on non-CPU runtimes (notably MPS)
-- Diagnostics coverage aggregation now uses deterministic reservoir sampling per metric with configurable retention cap (`diagnostics.max_values_per_metric`) to bound memory on long runs
-- Root docs and script docs now include recommended missingness generation and benchmark commands
-- Roadmap/backlog/implementation docs now track RD-010 hardware-adaptive autotuning beyond coarse FLOPs-tier profile tuning
-- Successful dataset generation now emits versioned DAG lineage payloads (`metadata.lineage`) with adjacency/assignment metadata derived from seeded layout sampling
-- Parquet shard persistence now rewrites dense DAG lineage adjacency into shard-level bit-packed artifacts (`adjacency.bitpack.bin` + `adjacency.index.json`) and stores compact lineage pointers in per-dataset `metadata.json`
-- Benchmark CLI/report outputs now include lineage guardrail status in per-profile summaries
-- README/roadmap/implementation docs now document compact lineage artifact workflows and lineage-overhead benchmark guardrails
-- Internal refactors removed dataset/benchmark compatibility shim wrappers and centralized duplicated meta-target constants/helper wiring across CLI/core modules
+- Dataset generation flow now favors fixed-layout execution paths instead of curriculum staging APIs
+- Tiny split/postprocess and DAG sampling steps run on CPU to avoid underutilized GPU kernels
+- Benchmark/docs workflows now include shift/noise/many-class/curriculum shell guidance and presets
+
+### Fixed
+
+- Noise sampling stability improvements, including Student-t support on MPS and tighter mixture reproducibility guards
+- Fixed-layout compatibility validation hardening for resolved device checks and feature/node bounds
+- Curriculum shell manifest accounting/status fixes for aborted and dry-run chunk handling
+
+### Removed
+
+- Legacy steering hard-fail path and associated deprecated hard-fail tests
+
+## [0.1.14] - 2026-02-26
+
+### Added
+
+- Curriculum stage schema/validation and stagewise runtime scaling for feature/node/depth/structure complexity
+- Curriculum benchmark presets/guardrails and curriculum metadata diagnostics (`metadata.curriculum.realized_complexity`, `stage_bounds`, `monotonicity_axes`)
+- DAG lineage artifact pipeline with compact shard outputs (`adjacency.bitpack.bin`, `adjacency.index.json`) and benchmark lineage guardrails (`lineage_guardrails`)
+- Lineage benchmark smoke preset: `configs/preset_lineage_benchmark_smoke.yaml`
+
+### Changed
+
+- Diagnostics extraction now normalizes bundles to CPU and delegates metric computation to `core/steering_metrics.py`, avoiding non-CPU float64 failures (notably MPS)
+- Internal refactors removed dataset/benchmark compatibility shims and consolidated duplicated helper/constants wiring across CLI/core modules
+- README/roadmap/implementation docs expanded lineage/curriculum workflows and benchmark guardrail guidance
+
+### Fixed
+
+- Curriculum validation hardening across stage bounds, node/depth consistency, singleton DAG handling, and stratified split retry sizing
+- Lineage artifact correctness/resilience: assignment alignment with postprocessed features, adjacency type validation, bounded blob descriptors, and robust index flushing on failures
+- Benchmark lineage guardrail robustness for non-runtime probe handling and undersized runtime gating
 
 ### Removed
 
@@ -47,6 +61,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Compatibility
 
 - Configs that still set `runtime.generation_engine` now fail fast during config load (`TypeError`).
+
+## [0.1.13] - 2026-02-24
+
+### Added
+
+- Successful dataset generation now emits versioned DAG lineage payloads (`metadata.lineage`) with adjacency/assignment metadata derived from seeded layout sampling
+
+## [0.1.12] - 2026-02-23
+
+### Added
+
+- Versioned DAG lineage schema validator for `metadata.lineage` (`schema_name=cauchy_generator.dag_lineage`, `schema_version=1.0.0`) with strict adjacency/assignment checks and backward-compatible optional metadata mode
+
+## [0.1.11] - 2026-02-23
+
+### Added
+
+- Missingness CLI overrides for `generate`: `--missing-rate`, `--missing-mechanism`, `--missing-mar-observed-fraction`, `--missing-mar-logit-scale`, `--missing-mnar-logit-scale`
+- Missingness presets: `configs/preset_missingness_mcar.yaml`, `configs/preset_missingness_mar.yaml`, `configs/preset_missingness_mnar.yaml`
+- Missingness wrapper script: `scripts/generate-missingness.sh`
+- Missingness benchmark guardrails (runtime vs missingness-off control + acceptance checks) surfaced in profile summaries and regression issues
+
+## [0.1.10] - 2026-02-23
+
+### Added
+
+- End-to-end missingness injection in generation/postprocess path with compact metadata summaries for configured and realized rates
+
+## [0.1.9] - 2026-02-23
+
+### Added
+
+- Deterministic MCAR/MAR/MNAR missingness mask samplers with typed config validation coverage
+
+## [0.1.8] - 2026-02-23
+
+### Added
+
+- Architecture documentation with mermaid diagrams (`docs/architecture.md`)
+- Torch-native steering metric extractor (`core/steering_metrics.py`) to avoid NumPy conversion during candidate scoring
+
+### Fixed
+
+- Diagnostics coverage aggregation now uses deterministic reservoir sampling per metric with configurable retention cap (`diagnostics.max_values_per_metric`) to bound memory on long runs
+
+## [0.1.7] - 2026-02-22
+
+### Changed
+
+- Eliminated NumPy bottlenecks across generation pipeline: `functions/`, `linalg/`, and converters now use torch-native implementations
+- Steering candidate scoring uses torch-native metric path and torch softmax selection to avoid CPU/NumPy round trips on accelerator runs
 
 ### Fixed
 
@@ -70,7 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Benchmark markdown reports now surface diagnostics state and artifact pointers per profile
 - Script/README benchmark workflow examples now include diagnostics and conservative steering presets
 
-## [0.1.5] - 2025-02-22
+## [0.1.5] - 2026-02-22
 
 ### Added
 
