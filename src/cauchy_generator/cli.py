@@ -44,6 +44,7 @@ from cauchy_generator.meta_targets import (
     coerce_quantiles,
     merge_target_bands,
 )
+from cauchy_generator.rng import SEED32_MAX, SEED32_MIN
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
 MISSINGNESS_MECHANISM_CLI_CHOICES = (
@@ -69,6 +70,17 @@ def _non_negative_int(value: str) -> int:
     parsed = int(value)
     if parsed < 0:
         raise argparse.ArgumentTypeError(f"Expected a non-negative integer, got {value}.")
+    return parsed
+
+
+def _seed_32bit_int(value: str) -> int:
+    """argparse type: parse an integer seed in the unsigned 32-bit range."""
+
+    parsed = int(value)
+    if parsed < SEED32_MIN or parsed > SEED32_MAX:
+        raise argparse.ArgumentTypeError(
+            f"Expected a seed in [{SEED32_MIN}, {SEED32_MAX}], got {value}."
+        )
     return parsed
 
 
@@ -201,7 +213,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=10,
         help="Number of datasets to generate.",
     )
-    g.add_argument("--seed", type=int, default=None, help="Optional override for run seed.")
+    g.add_argument(
+        "--seed",
+        type=_seed_32bit_int,
+        default=None,
+        help=f"Optional override for run seed in [{SEED32_MIN}, {SEED32_MAX}].",
+    )
     g.add_argument(
         "--device",
         default=None,

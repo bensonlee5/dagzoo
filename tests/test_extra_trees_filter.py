@@ -313,3 +313,36 @@ def test_extra_trees_filter_sparse_labels_use_realized_class_count(
     assert details["threshold_requested"] == pytest.approx(0.95)
     assert details["threshold_effective"] == pytest.approx(expected_effective)
     assert details["threshold_delta"] == pytest.approx(0.95 - expected_effective)
+
+
+@pytest.mark.parametrize("bad_seed", [-1, 4294967296])
+def test_extra_trees_filter_rejects_out_of_range_seed(bad_seed: int) -> None:
+    x, y = _make_regression_data(seed=9)
+    with pytest.raises(ValueError, match=r"seed must be an integer in \[0, 4294967295\]"):
+        apply_extra_trees_filter(
+            x,
+            y,
+            task="regression",
+            seed=bad_seed,
+            n_estimators=4,
+            max_depth=3,
+            n_bootstrap=8,
+            threshold=0.5,
+        )
+
+
+@pytest.mark.parametrize("seed", [0, 4294967295])
+def test_extra_trees_filter_accepts_32bit_seed_boundaries(seed: int) -> None:
+    x, y = _make_regression_data(seed=19)
+    accepted, details = apply_extra_trees_filter(
+        x,
+        y,
+        task="regression",
+        seed=seed,
+        n_estimators=4,
+        max_depth=3,
+        n_bootstrap=8,
+        threshold=0.5,
+    )
+    assert isinstance(accepted, bool)
+    assert details["backend"] == "extra_trees_cpu"

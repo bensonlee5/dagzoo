@@ -44,6 +44,19 @@ def test_default_config_metadata_is_compatible_with_optional_lineage() -> None:
     validate_metadata_lineage(metadata, required=False)
 
 
+def test_seed_range_accepts_32bit_boundaries() -> None:
+    cfg_min = GeneratorConfig.from_dict({"seed": 0})
+    cfg_max = GeneratorConfig.from_dict({"seed": 4294967295})
+    assert cfg_min.seed == 0
+    assert cfg_max.seed == 4294967295
+
+
+@pytest.mark.parametrize("bad_seed", [-1, 4294967296, True])
+def test_seed_range_rejects_out_of_bounds_values(bad_seed: int | bool) -> None:
+    with pytest.raises(ValueError, match=r"seed must be an integer in \[0, 4294967295\]"):
+        GeneratorConfig.from_dict({"seed": bad_seed})
+
+
 def test_class_range_accepts_many_class_envelope_limit() -> None:
     cfg = GeneratorConfig.from_dict(
         {

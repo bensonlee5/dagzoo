@@ -28,7 +28,7 @@ from cauchy_generator.core.validation import _classification_split_valid, _strat
 from cauchy_generator.filtering import apply_extra_trees_filter
 from cauchy_generator.core.node_pipeline import apply_node_pipeline
 from cauchy_generator.postprocess import inject_missingness, postprocess_dataset
-from cauchy_generator.rng import SeedManager
+from cauchy_generator.rng import SeedManager, offset_seed32, validate_seed32
 from cauchy_generator.types import DatasetBundle
 
 
@@ -68,6 +68,14 @@ def _resolve_split_sizes(config: GeneratorConfig) -> tuple[int, int]:
     """Resolve explicit train/test split sizes from config."""
 
     return int(config.dataset.n_train), int(config.dataset.n_test)
+
+
+def _resolve_run_seed(config: GeneratorConfig, seed_override: int | None) -> int:
+    """Resolve and validate the run seed used by generation entrypoints."""
+
+    if seed_override is None:
+        return validate_seed32(config.seed, field_name="seed")
+    return validate_seed32(seed_override, field_name="seed")
 
 
 def _resolve_device(config: GeneratorConfig, device_override: str | None) -> str:
@@ -164,7 +172,7 @@ def _generate_graph_dataset_torch(
 
         # Build specs using a deterministic per-node generator for layout consistency
         spec_gen = torch.Generator(device="cpu")
-        spec_gen.manual_seed(seed + node_idx + NODE_SPEC_SEED_OFFSET)
+        spec_gen.manual_seed(offset_seed32(seed, NODE_SPEC_SEED_OFFSET + node_idx))
         specs = _build_node_specs(node_idx, layout, task, spec_gen)
 
         x_node, extracted = apply_node_pipeline(
@@ -239,7 +247,7 @@ def _generate_torch(
             x, y, aux_meta = _generate_graph_dataset_torch(
                 config,
                 layout,
-                seed + attempt,
+                offset_seed32(seed, attempt),
                 device,
                 n_rows=n_rows,
                 mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
@@ -254,7 +262,9 @@ def _generate_torch(
 
         # Keep split/postprocess control-plane randomness on CPU to avoid tiny-op accelerator overhead.
         split_postprocess_generator = torch.Generator(device="cpu")
-        split_postprocess_generator.manual_seed(seed + SPLIT_PERMUTATION_SEED_OFFSET + attempt)
+        split_postprocess_generator.manual_seed(
+            offset_seed32(seed, SPLIT_PERMUTATION_SEED_OFFSET + attempt)
+        )
 
         if config.dataset.task == "classification":
             try:
@@ -561,7 +571,7 @@ def sample_fixed_layout(
 ) -> FixedLayoutPlan:
     """Sample one reusable layout plan for fixed-layout batch generation."""
 
-    run_seed = seed if seed is not None else config.seed
+    run_seed = _resolve_run_seed(config, seed)
     requested_device = (device or config.runtime.device or "auto").lower()
     resolved_device = _resolve_device(config, device)
     manager = SeedManager(run_seed)
@@ -592,7 +602,7 @@ def generate_one(
 ) -> DatasetBundle:
     """Generate one dataset bundle with deterministic per-dataset randomness."""
 
-    run_seed = seed if seed is not None else config.seed
+    run_seed = _resolve_run_seed(config, seed)
     requested_device = (device or config.runtime.device or "auto").lower()
     resolved_device = _resolve_device(config, device)
     return _generate_one_seeded(
@@ -638,7 +648,7 @@ def generate_batch_iter(
 
     requested_device = (device or config.runtime.device or "auto").lower()
     resolved_device = _resolve_device(config, device)
-    run_seed = seed if seed is not None else config.seed
+    run_seed = _resolve_run_seed(config, seed)
     manager = SeedManager(run_seed)
     for i in range(num_datasets):
         dataset_seed = manager.child("dataset", i)
@@ -778,7 +788,7 @@ def generate_batch_fixed_layout_iter(
         return
 
     validated_resolved_device = _validate_fixed_layout_plan_compatibility(config, plan=plan)
-    run_seed = seed if seed is not None else config.seed
+    run_seed = _resolve_run_seed(config, seed)
     manager = SeedManager(run_seed)
     expected_schema: tuple[int, tuple[str, ...], tuple[int, ...]] | None = None
     for i in range(num_datasets):

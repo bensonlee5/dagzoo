@@ -23,6 +23,7 @@ from cauchy_generator.config import GeneratorConfig
 from cauchy_generator.core.dataset import generate_batch_iter
 from cauchy_generator.io.parquet_writer import write_parquet_shards_stream
 from cauchy_generator.math_utils import to_numpy as _to_numpy
+from cauchy_generator.rng import offset_seed32
 from cauchy_generator.types import DatasetBundle
 
 
@@ -291,7 +292,7 @@ def _collect_lineage_guardrails(
     if sample_n <= 0:
         return {"enabled": False}
 
-    sample_seed = int(config.seed + LINEAGE_GUARDRAIL_SEED_OFFSET)
+    sample_seed = offset_seed32(config.seed, LINEAGE_GUARDRAIL_SEED_OFFSET)
     with tempfile.TemporaryDirectory(prefix="cauchy_lineage_guardrail_stage_") as tmp_dir:
         stage_root = Path(tmp_dir)
         baseline_stage_dir = stage_root / "baseline"

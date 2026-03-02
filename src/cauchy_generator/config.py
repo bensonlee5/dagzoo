@@ -10,6 +10,7 @@ from typing import Any, Literal
 import yaml
 
 from cauchy_generator.math_utils import normalize_positive_weights
+from cauchy_generator.rng import SEED32_MAX, SEED32_MIN
 
 MissingnessMechanism = Literal["none", "mcar", "mar", "mnar"]
 MISSINGNESS_MECHANISM_NONE: Literal["none"] = "none"
@@ -602,6 +603,14 @@ class GeneratorConfig:
     benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
     filter: FilterConfig = field(default_factory=FilterConfig)
 
+    def __post_init__(self) -> None:
+        self.seed = _validate_int_field(
+            field_name="seed",
+            value=self.seed,
+            minimum=SEED32_MIN,
+            maximum=SEED32_MAX,
+        )
+
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "GeneratorConfig":
         """Construct `GeneratorConfig` from a nested dictionary payload."""
@@ -621,7 +630,7 @@ class GeneratorConfig:
         diagnostics = DiagnosticsConfig(**(data.get("diagnostics") or {}))
         benchmark = BenchmarkConfig(**(data.get("benchmark") or {}))
         filter_cfg = FilterConfig(**(data.get("filter") or {}))
-        seed = int(data.get("seed", 1))
+        seed = data.get("seed", 1)
         return cls(
             seed=seed,
             dataset=dataset,

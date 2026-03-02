@@ -874,6 +874,35 @@ def test_negative_num_datasets_raises() -> None:
         list(generate_batch_iter(cfg, num_datasets=-1, seed=123, device="cpu"))
 
 
+@pytest.mark.parametrize("bad_seed", [-1, 4294967296])
+def test_generate_one_rejects_out_of_range_seed_override(bad_seed: int) -> None:
+    cfg = _tiny_config()
+    with pytest.raises(ValueError, match=r"seed must be an integer in \[0, 4294967295\]"):
+        generate_one(cfg, seed=bad_seed, device="cpu")
+
+
+@pytest.mark.parametrize("bad_seed", [-1, 4294967296])
+def test_generate_batch_iter_rejects_out_of_range_seed_override(bad_seed: int) -> None:
+    cfg = _tiny_config()
+    with pytest.raises(ValueError, match=r"seed must be an integer in \[0, 4294967295\]"):
+        list(generate_batch_iter(cfg, num_datasets=1, seed=bad_seed, device="cpu"))
+
+
+@pytest.mark.parametrize("bad_seed", [-1, 4294967296])
+def test_sample_fixed_layout_rejects_out_of_range_seed_override(bad_seed: int) -> None:
+    cfg = _tiny_config()
+    with pytest.raises(ValueError, match=r"seed must be an integer in \[0, 4294967295\]"):
+        sample_fixed_layout(cfg, seed=bad_seed, device="cpu")
+
+
+def test_sample_fixed_layout_accepts_32bit_seed_boundaries() -> None:
+    cfg = _tiny_config()
+    plan_min = sample_fixed_layout(cfg, seed=0, device="cpu")
+    plan_max = sample_fixed_layout(cfg, seed=4294967295, device="cpu")
+    assert plan_min.plan_seed == 0
+    assert plan_max.plan_seed == 4294967295
+
+
 def test_zero_num_datasets_does_not_resolve_device(monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = _tiny_config()
 

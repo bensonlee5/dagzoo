@@ -79,7 +79,7 @@ from cauchy_generator.meta_targets import (
     coerce_quantiles,
     merge_target_bands,
 )
-from cauchy_generator.rng import SeedManager
+from cauchy_generator.rng import SeedManager, offset_seed32
 
 
 DEFAULT_PROFILE_CONFIGS: dict[str, str] = {
@@ -162,7 +162,7 @@ def _collect_latency(
 ) -> dict[str, float]:
     """Collect per-dataset latency samples by repeatedly calling ``generate_one``."""
 
-    manager = SeedManager(config.seed + LATENCY_SEED_OFFSET)
+    manager = SeedManager(offset_seed32(config.seed, LATENCY_SEED_OFFSET))
     samples: list[float] = []
     for i in range(max(1, num_samples)):
         seed = manager.child("latency", i)
@@ -181,7 +181,7 @@ def _collect_reproducibility(
     """Generate two deterministic runs and compare content digests."""
 
     n = max(1, num_datasets)
-    run_seed = config.seed + REPRODUCIBILITY_SEED_OFFSET
+    run_seed = offset_seed32(config.seed, REPRODUCIBILITY_SEED_OFFSET)
     sig_a = reproducibility_signature(
         generate_batch_iter(config, num_datasets=n, seed=run_seed, device=device)
     )

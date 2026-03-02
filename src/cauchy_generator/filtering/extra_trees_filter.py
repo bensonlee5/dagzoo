@@ -10,6 +10,8 @@ import numpy as np
 from sklearn.ensemble import ExtraTreesRegressor
 import torch
 
+from cauchy_generator.rng import validate_seed32
+
 
 _CLASS_AWARE_THRESHOLD_POLICY = "class_aware_piecewise_v1"
 _CLASS_AWARE_THRESHOLD_FLOOR = 0.80
@@ -134,6 +136,7 @@ def apply_extra_trees_filter(
 ) -> tuple[bool, dict[str, Any]]:
     """Apply CPU ExtraTrees filtering with OOB bootstrap win-ratio scoring."""
 
+    seed = validate_seed32(seed, field_name="seed")
     if n_estimators < 1:
         raise ValueError(f"n_estimators must be >= 1, got {n_estimators}")
     if max_depth < 0:
@@ -197,7 +200,7 @@ def apply_extra_trees_filter(
         "max_leaf_nodes": max_leaf_nodes_model,
         "max_features": int(m_try),
         "oob_score": True,
-        "random_state": int(seed),
+        "random_state": seed,
         "n_jobs": 1,
     }
     if max_depth == 0:
@@ -238,7 +241,7 @@ def apply_extra_trees_filter(
         pred=pred,
         target=target,
         baseline=baseline,
-        seed=int(seed),
+        seed=seed,
         n_bootstrap=int(n_bootstrap),
     )
     return bool(wins_ratio >= effective_threshold), {

@@ -13,6 +13,7 @@ from cauchy_generator.bench.constants import (
 )
 from cauchy_generator.config import GeneratorConfig
 from cauchy_generator.core.dataset import generate_batch_iter
+from cauchy_generator.rng import offset_seed32
 from cauchy_generator.types import DatasetBundle
 
 
@@ -50,7 +51,7 @@ def run_throughput_benchmark(
         _consume_generation(
             config,
             num_datasets=warmup_datasets,
-            seed=config.seed + THROUGHPUT_WARMUP_SEED_OFFSET,
+            seed=offset_seed32(config.seed, THROUGHPUT_WARMUP_SEED_OFFSET),
             device=device,
         )
 
@@ -58,7 +59,7 @@ def run_throughput_benchmark(
     _consume_generation(
         config,
         num_datasets=num_datasets,
-        seed=config.seed + THROUGHPUT_MEASURE_SEED_OFFSET,
+        seed=offset_seed32(config.seed, THROUGHPUT_MEASURE_SEED_OFFSET),
         device=device,
         on_bundle=on_bundle,
     )
