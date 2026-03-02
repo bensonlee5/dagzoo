@@ -398,6 +398,7 @@ def _apply_filter(
         max_features=config.filter.max_features,
         n_bootstrap=config.filter.n_bootstrap,
         threshold=config.filter.threshold,
+        n_jobs=config.filter.n_jobs,
     )
     details.update(filter_details)
     details["accepted"] = accepted

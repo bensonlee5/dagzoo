@@ -588,6 +588,16 @@ class FilterConfig:
     n_bootstrap: int = 200
     threshold: float = 0.95
     max_attempts: int = 3
+    n_jobs: int = -1
+
+    def __post_init__(self) -> None:
+        self.n_jobs = _validate_int_field(
+            field_name="filter.n_jobs",
+            value=self.n_jobs,
+            minimum=-1,
+        )
+        if self.n_jobs == 0:
+            raise ValueError("filter.n_jobs must be -1 or an integer >= 1, got 0.")
 
 
 @dataclass(slots=True)

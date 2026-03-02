@@ -75,6 +75,7 @@ def test_extra_trees_filter_is_deterministic_for_fixed_seed() -> None:
     assert details_a["wins_ratio"] == details_b["wins_ratio"]
     assert details_a["n_valid_oob"] == details_b["n_valid_oob"]
     assert details_a["backend"] == "extra_trees_cpu"
+    assert int(details_a["n_jobs"]) == -1
 
 
 def test_extra_trees_filter_handles_non_divisible_bootstrap_chunks() -> None:
@@ -132,6 +133,7 @@ def test_extra_trees_filter_can_report_insufficient_oob_predictions() -> None:
     assert details["reason"] == "insufficient_oob_predictions"
     assert 0 <= int(details["n_valid_oob"]) < 16
     assert details["backend"] == "extra_trees_cpu"
+    assert int(details["n_jobs"]) == -1
     assert details["threshold_requested"] == pytest.approx(0.5)
     assert details["threshold_effective"] == pytest.approx(0.5)
     assert details["threshold_policy"] == "class_aware_piecewise_v1"
@@ -367,3 +369,38 @@ def test_extra_trees_filter_accepts_32bit_seed_boundaries(seed: int) -> None:
     )
     assert isinstance(accepted, bool)
     assert details["backend"] == "extra_trees_cpu"
+
+
+def test_extra_trees_filter_honors_explicit_n_jobs() -> None:
+    x, y = _make_regression_data(seed=1234)
+    accepted, details = apply_extra_trees_filter(
+        x,
+        y,
+        task="regression",
+        seed=99,
+        n_estimators=4,
+        max_depth=3,
+        n_bootstrap=8,
+        threshold=0.5,
+        n_jobs=1,
+    )
+
+    assert isinstance(accepted, bool)
+    assert int(details["n_jobs"]) == 1
+
+
+@pytest.mark.parametrize("bad_n_jobs", [0, -2, True])
+def test_extra_trees_filter_rejects_invalid_n_jobs(bad_n_jobs: int | bool) -> None:
+    x, y = _make_regression_data(seed=123)
+    with pytest.raises(ValueError, match=r"n_jobs must be -1 or an integer >= 1"):
+        apply_extra_trees_filter(
+            x,
+            y,
+            task="regression",
+            seed=42,
+            n_estimators=4,
+            max_depth=3,
+            n_bootstrap=8,
+            threshold=0.5,
+            n_jobs=bad_n_jobs,
+        )

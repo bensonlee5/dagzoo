@@ -149,6 +149,7 @@ def apply_extra_trees_filter(
     max_features: str | int | float = "auto",
     n_bootstrap: int = 200,
     threshold: float = 0.95,
+    n_jobs: int = -1,
 ) -> tuple[bool, dict[str, Any]]:
     """Apply CPU ExtraTrees filtering with OOB bootstrap win-ratio scoring."""
 
@@ -163,6 +164,10 @@ def apply_extra_trees_filter(
         raise ValueError(f"max_leaf_nodes must be >= 1 when set, got {max_leaf_nodes}")
     if n_bootstrap < 1:
         raise ValueError(f"n_bootstrap must be >= 1, got {n_bootstrap}")
+    if isinstance(n_jobs, bool) or not isinstance(n_jobs, int):
+        raise ValueError(f"n_jobs must be -1 or an integer >= 1, got {n_jobs!r}")
+    if n_jobs == 0 or n_jobs < -1:
+        raise ValueError(f"n_jobs must be -1 or an integer >= 1, got {n_jobs}")
 
     x_cpu = x.detach().to(device="cpu", dtype=torch.float32)
     if x_cpu.ndim != 2:
@@ -217,7 +222,7 @@ def apply_extra_trees_filter(
         "max_features": int(m_try),
         "oob_score": True,
         "random_state": seed,
-        "n_jobs": 1,
+        "n_jobs": int(n_jobs),
     }
     if max_depth == 0:
         # Preserve prior semantics where depth=0 forbids splits.
@@ -251,6 +256,7 @@ def apply_extra_trees_filter(
             "reason": "insufficient_oob_predictions",
             "n_valid_oob": n_valid,
             "backend": "extra_trees_cpu",
+            "n_jobs": int(n_jobs),
             **threshold_details,
         }
 
@@ -268,5 +274,6 @@ def apply_extra_trees_filter(
         "wins_ratio": float(wins_ratio),
         "n_valid_oob": n_valid,
         "backend": "extra_trees_cpu",
+        "n_jobs": int(n_jobs),
         **threshold_details,
     }

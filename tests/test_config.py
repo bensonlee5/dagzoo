@@ -28,6 +28,7 @@ def test_load_default_config() -> None:
     assert cfg.filter.n_estimators > 0
     assert cfg.filter.max_depth >= 0
     assert cfg.filter.max_features == "auto"
+    assert cfg.filter.n_jobs == -1
     assert cfg.dataset.missing_rate == 0.0
     assert cfg.dataset.missing_mechanism == MISSINGNESS_MECHANISM_NONE
     assert cfg.dataset.missing_mar_observed_fraction == 0.5
@@ -219,6 +220,22 @@ def test_legacy_filter_keys_are_rejected() -> None:
                 }
             }
         )
+
+
+def test_filter_n_jobs_accepts_minus_one_and_positive_values() -> None:
+    cfg_auto = GeneratorConfig.from_dict({"filter": {"n_jobs": -1}})
+    cfg_single = GeneratorConfig.from_dict({"filter": {"n_jobs": 1}})
+    cfg_multi = GeneratorConfig.from_dict({"filter": {"n_jobs": 8}})
+
+    assert cfg_auto.filter.n_jobs == -1
+    assert cfg_single.filter.n_jobs == 1
+    assert cfg_multi.filter.n_jobs == 8
+
+
+@pytest.mark.parametrize("value", [0, -2, True])
+def test_filter_n_jobs_rejects_invalid_values(value: int | bool) -> None:
+    with pytest.raises(ValueError, match=r"filter\.n_jobs must"):
+        GeneratorConfig.from_dict({"filter": {"n_jobs": value}})
 
 
 def test_missingness_mechanism_normalization_is_case_insensitive() -> None:

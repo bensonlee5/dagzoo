@@ -764,10 +764,11 @@ def test_generate_one_returns_torch_tensors_on_cpu() -> None:
 
 
 def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    called: dict[str, int] = {"count": 0}
+    called: dict[str, int] = {"count": 0, "n_jobs": 0}
 
     def _stub_filter(*_args, **_kwargs):
         called["count"] += 1
+        called["n_jobs"] = int(_kwargs["n_jobs"])
         return True, {
             "wins_ratio": 1.0,
             "n_valid_oob": 128,
@@ -791,6 +792,7 @@ def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch)
     assert bundle.metadata["filter"]["threshold_policy"] == "class_aware_piecewise_v1"
     assert bundle.metadata["filter"]["class_bucket"] == "25-32"
     assert float(bundle.metadata["filter"]["threshold_effective"]) == pytest.approx(0.80)
+    assert called["n_jobs"] == int(cfg.filter.n_jobs)
     assert "reason" not in bundle.metadata["filter"]
 
 
