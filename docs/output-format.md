@@ -111,6 +111,7 @@ Each line contains:
 | `attempt_used`           | int         | Generation attempt index (0-based)                             |
 | `lineage`                | object      | DAG lineage record (see Lineage below)                         |
 | `shift`                  | object      | Resolved shift settings and realized observability signals     |
+| `noise`                  | object      | Resolved noise-family selection and effective sampling params  |
 | `config`                 | object      | Full serialized generator configuration                        |
 | `filter`                 | object      | Filter results (see below)                                     |
 | `class_structure`        | object      | Present only for classification (see below)                    |
@@ -137,6 +138,19 @@ multipliers are `1.0`.
 | `edge_odds_multiplier`      | float | Edge-odds multiplier (`exp(edge_logit_bias_shift)`)         |
 | `noise_variance_multiplier` | float | Noise-variance multiplier (`noise_sigma_multiplier^2`)      |
 | `mechanism_nonlinear_mass`  | float | Probability mass on nonlinear mechanism families (`[0, 1]`) |
+
+### Noise sub-object
+
+Present for all generated bundles.
+
+| Key                 | Type           | Description                                                          |
+| ------------------- | -------------- | -------------------------------------------------------------------- |
+| `family_requested`  | str            | Configured noise family (`legacy`, `gaussian`, `laplace`, etc.)      |
+| `family_sampled`    | str            | Effective family used by the dataset generation runtime              |
+| `sampling_strategy` | str            | Runtime selection strategy (`dataset_level`)                         |
+| `scale`             | float          | Base noise scale from config                                         |
+| `student_t_df`      | float          | Student-t degrees of freedom parameter used by the runtime           |
+| `mixture_weights`   | object or null | Effective normalized mixture weights when `family_requested=mixture` |
 
 ### Filter sub-object
 

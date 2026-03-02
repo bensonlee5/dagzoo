@@ -11,7 +11,9 @@ from typing import Any
 import torch
 
 from cauchy_generator.config import (
+    NOISE_FAMILY_MIXTURE,
     GeneratorConfig,
+    NoiseFamily,
     validate_class_split_feasibility,
 )
 from cauchy_generator.core.constants import (
@@ -29,6 +31,12 @@ from cauchy_generator.filtering import apply_extra_trees_filter
 from cauchy_generator.core.node_pipeline import apply_node_pipeline
 from cauchy_generator.postprocess import inject_missingness, postprocess_dataset
 from cauchy_generator.rng import SeedManager, offset_seed32, validate_seed32
+from cauchy_generator.sampling.noise import (
+    NoiseSamplingSpec,
+    normalize_mixture_weights,
+    sample_mixture_component_family,
+    sample_noise_from_spec,
+)
 from cauchy_generator.types import DatasetBundle
 
 
@@ -44,6 +52,18 @@ class FixedLayoutPlan:
     n_test: int
     layout_signature: str
     compatibility_snapshot: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class NoiseRuntimeSelection:
+    """Resolved per-dataset noise-family runtime selection."""
+
+    family_requested: NoiseFamily
+    family_sampled: NoiseFamily
+    sampling_strategy: str
+    scale: float
+    student_t_df: float
+    mixture_weights: dict[str, float] | None = None
 
 
 _FIXED_LAYOUT_COMPAT_KEYS: tuple[str, ...] = (
@@ -76,6 +96,75 @@ def _resolve_run_seed(config: GeneratorConfig, seed_override: int | None) -> int
     if seed_override is None:
         return validate_seed32(config.seed, field_name="seed")
     return validate_seed32(seed_override, field_name="seed")
+
+
+def _resolve_noise_runtime_selection(
+    config: GeneratorConfig,
+    *,
+    run_seed: int,
+) -> NoiseRuntimeSelection:
+    """Resolve deterministic per-dataset noise-family selection."""
+
+    family_requested = config.noise.family
+    scale = float(config.noise.scale)
+    student_t_df = float(config.noise.student_t_df)
+    if family_requested != NOISE_FAMILY_MIXTURE:
+        return NoiseRuntimeSelection(
+            family_requested=family_requested,
+            family_sampled=family_requested,
+            sampling_strategy="dataset_level",
+            scale=scale,
+            student_t_df=student_t_df,
+            mixture_weights=None,
+        )
+
+    mixture_weights_raw = (
+        {str(key): float(value) for key, value in config.noise.mixture_weights.items()}
+        if config.noise.mixture_weights is not None
+        else None
+    )
+    normalized_weights = normalize_mixture_weights(mixture_weights_raw)
+    selector = SeedManager(run_seed).torch_rng("noise_family", device="cpu")
+    sampled_family = sample_mixture_component_family(
+        generator=selector,
+        device="cpu",
+        mixture_weights=normalized_weights,
+    )
+    return NoiseRuntimeSelection(
+        family_requested=family_requested,
+        family_sampled=sampled_family,
+        sampling_strategy="dataset_level",
+        scale=scale,
+        student_t_df=student_t_df,
+        mixture_weights={key: float(value) for key, value in normalized_weights.items()},
+    )
+
+
+def _noise_sampling_spec(selection: NoiseRuntimeSelection) -> NoiseSamplingSpec:
+    """Build a concrete noise sampling spec from runtime selection."""
+
+    return NoiseSamplingSpec(
+        family=selection.family_sampled,
+        scale=float(selection.scale),
+        student_t_df=float(selection.student_t_df),
+    )
+
+
+def _build_noise_metadata(selection: NoiseRuntimeSelection) -> dict[str, Any]:
+    """Build per-dataset noise metadata payload."""
+
+    return {
+        "family_requested": str(selection.family_requested),
+        "family_sampled": str(selection.family_sampled),
+        "sampling_strategy": str(selection.sampling_strategy),
+        "scale": float(selection.scale),
+        "student_t_df": float(selection.student_t_df),
+        "mixture_weights": (
+            {key: float(value) for key, value in selection.mixture_weights.items()}
+            if selection.mixture_weights is not None
+            else None
+        ),
+    }
 
 
 def _resolve_device(config: GeneratorConfig, device_override: str | None) -> str:
@@ -149,6 +238,7 @@ def _generate_graph_dataset_torch(
     n_rows: int,
     mechanism_logit_tilt: float = 0.0,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
     """Generate raw X/y tensors via the Torch graph pipeline."""
     generator = torch.Generator(device=device)
@@ -183,6 +273,7 @@ def _generate_graph_dataset_torch(
             device,
             mechanism_logit_tilt=mechanism_logit_tilt,
             noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
         )
         node_outputs[node_idx] = x_node
 
@@ -205,14 +296,24 @@ def _generate_graph_dataset_torch(
                 card = int(card_by_feature[i])
                 v = torch.randint(0, card, (n_rows,), generator=generator, device=device)
             else:
-                v = torch.randn(n_rows, generator=generator, device=device)
+                v = sample_noise_from_spec(
+                    (n_rows,),
+                    generator=generator,
+                    device=device,
+                    noise_spec=noise_spec,
+                )
         x[:, i] = v.to(dtype)
 
     if target_values is None:
         if task == "classification":
             y = torch.randint(0, n_classes, (n_rows,), generator=generator, device=device)
         else:
-            y = torch.randn(n_rows, generator=generator, device=device).to(dtype)
+            y = sample_noise_from_spec(
+                (n_rows,),
+                generator=generator,
+                device=device,
+                noise_spec=noise_spec,
+            ).to(dtype)
     else:
         if task == "classification":
             y = target_values.to(torch.long) % n_classes
@@ -232,6 +333,7 @@ def _generate_torch(
     n_train: int,
     n_test: int,
     shift_params: ShiftRuntimeParams | None = None,
+    noise_runtime_selection: NoiseRuntimeSelection | None = None,
     preserve_feature_schema: bool = False,
 ) -> DatasetBundle:
     """Generate one dataset in Torch while preserving postprocess/filter contracts."""
@@ -241,6 +343,11 @@ def _generate_torch(
     last_reason = "unknown"
     dtype = _torch_dtype(config)
     n_rows = n_train + n_test
+    noise_runtime_selection = noise_runtime_selection or _resolve_noise_runtime_selection(
+        config,
+        run_seed=seed,
+    )
+    noise_spec = _noise_sampling_spec(noise_runtime_selection)
 
     for attempt in range(attempts):
         try:
@@ -252,6 +359,7 @@ def _generate_torch(
                 n_rows=n_rows,
                 mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
                 noise_sigma_multiplier=float(shift_params.noise_sigma_multiplier),
+                noise_spec=noise_spec,
             )
         except Exception as exc:
             last_reason = f"generation_exception:{exc.__class__.__name__}"
@@ -353,6 +461,7 @@ def _generate_torch(
             "attempt_used": attempt,
             "filter": aux_meta.get("filter", {}),
             "shift": shift_metadata,
+            "noise": _build_noise_metadata(noise_runtime_selection),
             "config": asdict(config),
         }
         if missingness_summary is not None:
@@ -468,6 +577,7 @@ def _generate_one_with_resolved_layout(
     manager = SeedManager(seed)
     data_seed = manager.child("data")
     shift_params = resolve_shift_runtime_params(config)
+    noise_runtime_selection = _resolve_noise_runtime_selection(config, run_seed=data_seed)
 
     if requested_device == "auto" and resolved_device == "mps":
         try:
@@ -479,6 +589,7 @@ def _generate_one_with_resolved_layout(
                 n_train=n_train,
                 n_test=n_test,
                 shift_params=shift_params,
+                noise_runtime_selection=noise_runtime_selection,
                 preserve_feature_schema=preserve_feature_schema,
             )
         except Exception:
@@ -491,6 +602,7 @@ def _generate_one_with_resolved_layout(
                 n_train=n_train,
                 n_test=n_test,
                 shift_params=shift_params,
+                noise_runtime_selection=noise_runtime_selection,
                 preserve_feature_schema=preserve_feature_schema,
             )
 
@@ -502,6 +614,7 @@ def _generate_one_with_resolved_layout(
         n_train=n_train,
         n_test=n_test,
         shift_params=shift_params,
+        noise_runtime_selection=noise_runtime_selection,
         preserve_feature_schema=preserve_feature_schema,
     )
 

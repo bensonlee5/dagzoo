@@ -5,6 +5,7 @@ import math
 import torch
 
 from cauchy_generator.math_utils import log_uniform as _log_uniform
+from cauchy_generator.sampling.noise import NoiseSamplingSpec, sample_noise_from_spec
 
 
 def sample_random_weights(
@@ -19,6 +20,7 @@ def sample_random_weights(
     q: float | None = None,
     sigma: float | None = None,
     sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Sample positive normalized weights using torch."""
     if dim <= 0:
@@ -34,7 +36,13 @@ def sample_random_weights(
         sigma = _log_uniform(generator, sigma_min, sigma_max, device)
     effective_sigma = float(sigma) * float(sigma_multiplier)
 
-    noise = torch.randn(dim, generator=generator, device=device) * effective_sigma
+    noise = sample_noise_from_spec(
+        (dim,),
+        generator=generator,
+        device=device,
+        noise_spec=noise_spec,
+        scale_multiplier=effective_sigma,
+    )
     w = torch.pow(m, -q) * torch.exp(noise)
     w = torch.clamp(w, min=1e-12)
     w /= torch.sum(w)

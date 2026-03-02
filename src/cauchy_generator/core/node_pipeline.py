@@ -13,6 +13,7 @@ from cauchy_generator.math_utils import (
     log_uniform as _log_uniform,
     standardize as _standardize,
 )
+from cauchy_generator.sampling.noise import NoiseSamplingSpec, sample_noise_from_spec
 from cauchy_generator.sampling.random_points import sample_random_points
 from cauchy_generator.sampling.random_weights import sample_random_weights
 
@@ -34,6 +35,7 @@ def apply_node_pipeline(
     *,
     mechanism_logit_tilt: float = 0.0,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Apply node transform in torch."""
     required_dim = int(sum(max(1, s.dim) for s in converter_specs))
@@ -47,6 +49,7 @@ def apply_node_pipeline(
             out_dim=total_dim,
             mechanism_logit_tilt=mechanism_logit_tilt,
             noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
         )
     else:
         x = sample_random_points(
@@ -56,6 +59,7 @@ def apply_node_pipeline(
             device,
             mechanism_logit_tilt=mechanism_logit_tilt,
             noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
         )
 
     x = torch.nan_to_num(x.to(torch.float32), nan=0.0, posinf=1e6, neginf=-1e6)
@@ -67,6 +71,7 @@ def apply_node_pipeline(
         generator,
         device,
         sigma_multiplier=noise_sigma_multiplier,
+        noise_spec=noise_spec,
     )
     x = x * w.unsqueeze(0)
 
@@ -78,8 +83,11 @@ def apply_node_pipeline(
     for spec in converter_specs:
         d = max(1, int(spec.dim))
         if cursor + d > x.shape[1]:
-            pad = torch.randn(
-                x.shape[0], cursor + d - x.shape[1], generator=generator, device=device
+            pad = sample_noise_from_spec(
+                (x.shape[0], cursor + d - x.shape[1]),
+                generator=generator,
+                device=device,
+                noise_spec=noise_spec,
             )
             x = torch.cat([x, pad], dim=1)
 

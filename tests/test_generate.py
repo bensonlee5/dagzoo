@@ -3,7 +3,11 @@ import pytest
 import torch
 import math
 
-from cauchy_generator.config import GeneratorConfig
+from cauchy_generator.config import (
+    GeneratorConfig,
+    NOISE_FAMILY_LAPLACE,
+    NOISE_FAMILY_STUDENT_T,
+)
 from cauchy_generator.core.dataset import (
     FixedLayoutPlan,
     _generate_torch,
@@ -222,6 +226,58 @@ def test_generate_one_shift_metadata_matches_resolved_runtime_params() -> None:
     assert shift_metadata["mechanism_nonlinear_mass"] == pytest.approx(
         mechanism_nonlinear_mass(mechanism_logit_tilt=runtime.mechanism_logit_tilt)
     )
+
+
+def test_generate_one_noise_metadata_emits_legacy_defaults() -> None:
+    cfg = _tiny_regression_config()
+    cfg.noise.family = "legacy"
+    cfg.noise.scale = 1.0
+    cfg.noise.student_t_df = 5.0
+
+    bundle = generate_one(cfg, seed=1884, device="cpu")
+    noise_metadata = bundle.metadata["noise"]
+    assert noise_metadata["family_requested"] == "legacy"
+    assert noise_metadata["family_sampled"] == "legacy"
+    assert noise_metadata["sampling_strategy"] == "dataset_level"
+    assert noise_metadata["scale"] == pytest.approx(1.0)
+    assert noise_metadata["student_t_df"] == pytest.approx(5.0)
+    assert noise_metadata["mixture_weights"] is None
+
+
+@pytest.mark.parametrize("family", [NOISE_FAMILY_LAPLACE, NOISE_FAMILY_STUDENT_T])
+def test_generate_one_nonlegacy_noise_family_changes_outputs_for_same_seed(family: str) -> None:
+    baseline = _tiny_regression_config()
+    baseline.noise.family = "legacy"
+
+    drifted = _tiny_regression_config()
+    drifted.noise.family = family
+    drifted.noise.scale = 1.0
+    if family == NOISE_FAMILY_STUDENT_T:
+        drifted.noise.student_t_df = 6.0
+
+    bundle_base = generate_one(baseline, seed=1885, device="cpu")
+    bundle_drifted = generate_one(drifted, seed=1885, device="cpu")
+    assert not torch.allclose(bundle_base.X_train, bundle_drifted.X_train)
+    assert bundle_drifted.metadata["noise"]["family_requested"] == family
+    assert bundle_drifted.metadata["noise"]["family_sampled"] == family
+
+
+def test_generate_one_mixture_noise_is_dataset_level_and_reproducible() -> None:
+    cfg = _tiny_regression_config()
+    cfg.noise.family = "mixture"
+    cfg.noise.mixture_weights = {"gaussian": 0.7, "laplace": 0.2, "student_t": 0.1}
+
+    bundle_a = generate_one(cfg, seed=1886, device="cpu")
+    bundle_b = generate_one(cfg, seed=1886, device="cpu")
+    noise_a = bundle_a.metadata["noise"]
+    noise_b = bundle_b.metadata["noise"]
+
+    assert noise_a == noise_b
+    assert noise_a["family_requested"] == "mixture"
+    assert noise_a["family_sampled"] in {"gaussian", "laplace", "student_t"}
+    assert noise_a["sampling_strategy"] == "dataset_level"
+    assert noise_a["mixture_weights"] is not None
+    assert sum(noise_a["mixture_weights"].values()) == pytest.approx(1.0)
 
 
 def test_generate_one_graph_drift_increases_edge_density_for_same_seed() -> None:

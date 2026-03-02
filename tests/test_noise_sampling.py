@@ -1,7 +1,12 @@
 import pytest
 import torch
 
-from cauchy_generator.sampling.noise import sample_noise
+from cauchy_generator.sampling.noise import (
+    NoiseSamplingSpec,
+    sample_mixture_component_family,
+    sample_noise,
+    sample_noise_from_spec,
+)
 from conftest import make_generator as _make_generator
 import cauchy_generator.sampling.noise as noise_mod
 
@@ -84,6 +89,40 @@ def test_sample_noise_scale_multiplier_is_applied() -> None:
         (64,), generator=_make_generator(314), device="cpu", family="gaussian", scale=2.5
     )
     torch.testing.assert_close(scaled, base * 2.5)
+
+
+def test_sample_noise_from_spec_applies_scale_multiplier() -> None:
+    spec = NoiseSamplingSpec(family="gaussian", scale=1.5)
+    base = sample_noise_from_spec(
+        (64,),
+        generator=_make_generator(314),
+        device="cpu",
+        noise_spec=spec,
+        scale_multiplier=1.0,
+    )
+    scaled = sample_noise_from_spec(
+        (64,),
+        generator=_make_generator(314),
+        device="cpu",
+        noise_spec=spec,
+        scale_multiplier=2.0,
+    )
+    torch.testing.assert_close(scaled, base * 2.0)
+
+
+def test_sample_mixture_component_family_is_seed_deterministic() -> None:
+    a = sample_mixture_component_family(
+        generator=_make_generator(777),
+        device="cpu",
+        mixture_weights={"gaussian": 0.7, "laplace": 0.2, "student_t": 0.1},
+    )
+    b = sample_mixture_component_family(
+        generator=_make_generator(777),
+        device="cpu",
+        mixture_weights={"gaussian": 0.7, "laplace": 0.2, "student_t": 0.1},
+    )
+    assert a == b
+    assert a in {"gaussian", "laplace", "student_t"}
 
 
 def test_sample_noise_rejects_nonpositive_shape_dims() -> None:

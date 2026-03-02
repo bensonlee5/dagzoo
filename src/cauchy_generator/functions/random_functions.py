@@ -14,6 +14,7 @@ from cauchy_generator.math_utils import (
     log_uniform as _log_uniform,
     standardize as _standardize_base,
 )
+from cauchy_generator.sampling.noise import NoiseSamplingSpec, sample_noise_from_spec
 from cauchy_generator.sampling.random_weights import sample_random_weights
 
 
@@ -30,6 +31,7 @@ def _apply_linear(
     generator: torch.Generator,
     *,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply a sampled random linear map in torch."""
     m = sample_random_matrix(
@@ -38,6 +40,7 @@ def _apply_linear(
         generator,
         str(x.device),
         noise_sigma_multiplier=noise_sigma_multiplier,
+        noise_spec=noise_spec,
     )
     return x @ m.t()
 
@@ -48,6 +51,7 @@ def _apply_quadratic(
     generator: torch.Generator,
     *,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply quadratic forms in torch."""
     d_cap = min(x.shape[1], 20)
@@ -66,6 +70,7 @@ def _apply_quadratic(
             generator,
             str(x.device),
             noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
         )
         y[:, i] = torch.sum((x_aug @ m) * x_aug, dim=1)
     return y
@@ -77,6 +82,7 @@ def _apply_nn(
     generator: torch.Generator,
     *,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply a shallow random NN in torch."""
     n_layers = torch.randint(1, 4, (1,), generator=generator).item()
@@ -97,6 +103,7 @@ def _apply_nn(
             generator,
             str(x.device),
             noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
         )
         y = y @ m.t()
         if dout != out_dim:
@@ -107,7 +114,13 @@ def _apply_nn(
     return y
 
 
-def _apply_tree(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> torch.Tensor:
+def _apply_tree(
+    x: torch.Tensor,
+    out_dim: int,
+    generator: torch.Generator,
+    *,
+    noise_spec: NoiseSamplingSpec | None = None,
+) -> torch.Tensor:
     """Apply an ensemble of random trees in torch."""
     n_trees = int(_log_uniform(generator, 1.0, 32.0, str(x.device)))
     y = torch.zeros(x.shape[0], out_dim, device=x.device)
@@ -128,7 +141,12 @@ def _apply_tree(x: torch.Tensor, out_dim: int, generator: torch.Generator) -> to
         leaf_idx = compute_odt_leaf_indices(x, split_dims, thresholds)
 
         n_leaves = 2**depth
-        leaf_vals = torch.randn(n_leaves, out_dim, generator=generator, device=x.device)
+        leaf_vals = sample_noise_from_spec(
+            (n_leaves, out_dim),
+            generator=generator,
+            device=str(x.device),
+            noise_spec=noise_spec,
+        )
         y += leaf_vals[leaf_idx]
 
     y /= float(max(1, n_trees))
@@ -141,6 +159,7 @@ def _apply_discretization(
     generator: torch.Generator,
     *,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply discretization function in torch."""
     n_centers = int(_log_uniform(generator, 2.0, 128.0, str(x.device)))
@@ -152,7 +171,13 @@ def _apply_discretization(
     dist = torch.pow(torch.abs(x.unsqueeze(1) - centers.unsqueeze(0)), p).sum(dim=2)
     nearest = torch.argmin(dist, dim=1)
     y = centers[nearest]
-    return _apply_linear(y, out_dim, generator, noise_sigma_multiplier=noise_sigma_multiplier)
+    return _apply_linear(
+        y,
+        out_dim,
+        generator,
+        noise_sigma_multiplier=noise_sigma_multiplier,
+        noise_spec=noise_spec,
+    )
 
 
 def _sample_radial_ha(
@@ -173,6 +198,7 @@ def _apply_gp(
     generator: torch.Generator,
     *,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply GP approximation in torch."""
     din = x.shape[1]
@@ -190,20 +216,41 @@ def _apply_gp(
         omega = r * s
         x_proj = x
     else:
-        z = torch.randn(p, din, generator=generator, device=device)
+        z = sample_noise_from_spec(
+            (p, din),
+            generator=generator,
+            device=device,
+            noise_spec=noise_spec,
+        )
         z /= torch.clamp(torch.norm(z, dim=1, keepdim=True), min=1e-6)
         r = _sample_radial_ha(p, generator, device, a=a)
         omega = z * r.unsqueeze(1)
 
-        w = sample_random_weights(din, generator, device, sigma_multiplier=noise_sigma_multiplier)
+        w = sample_random_weights(
+            din,
+            generator,
+            device,
+            sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+        )
         alpha = _log_uniform(generator, 0.5, 10.0, device)
-        a_mat = torch.randn(din, din, generator=generator, device=device)
+        a_mat = sample_noise_from_spec(
+            (din, din),
+            generator=generator,
+            device=device,
+            noise_spec=noise_spec,
+        )
         m = alpha * (w.unsqueeze(1) * a_mat)
         x_proj = x @ m.t()
 
     b = torch.empty(p, device=device).uniform_(0.0, 2.0 * math.pi, generator=generator)
     phi = torch.cos(x_proj @ omega.t() + b)
-    z_out = torch.randn(out_dim, p, generator=generator, device=device)
+    z_out = sample_noise_from_spec(
+        (out_dim, p),
+        generator=generator,
+        device=device,
+        noise_spec=noise_spec,
+    )
     return (phi @ z_out.t()) / math.sqrt(float(p))
 
 
@@ -213,14 +260,28 @@ def _apply_em(
     generator: torch.Generator,
     *,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply EM assignment function in torch."""
     m_val = int(_log_uniform(generator, 2.0, float(max(16, 2 * out_dim)), str(x.device)))
     m_val = max(2, m_val)
 
     base_idx = torch.randint(0, x.shape[0], (m_val,), generator=generator, device=x.device)
-    centers = x[base_idx] + torch.randn(m_val, x.shape[1], generator=generator, device=x.device)
-    sigma = torch.exp(0.1 * torch.randn(m_val, generator=generator, device=x.device))
+    centers = x[base_idx] + sample_noise_from_spec(
+        (m_val, x.shape[1]),
+        generator=generator,
+        device=str(x.device),
+        noise_spec=noise_spec,
+    )
+    sigma = torch.exp(
+        sample_noise_from_spec(
+            (m_val,),
+            generator=generator,
+            device=str(x.device),
+            noise_spec=noise_spec,
+            scale_multiplier=0.1,
+        )
+    )
     p_val = _log_uniform(generator, 1.0, 4.0, str(x.device))
     q_val = _log_uniform(generator, 1.0, 2.0, str(x.device))
 
@@ -231,7 +292,13 @@ def _apply_em(
         dist_p / torch.clamp(sigma, min=1e-6), q_val
     )
     probs = torch.softmax(logits, dim=1)
-    return _apply_linear(probs, out_dim, generator, noise_sigma_multiplier=noise_sigma_multiplier)
+    return _apply_linear(
+        probs,
+        out_dim,
+        generator,
+        noise_sigma_multiplier=noise_sigma_multiplier,
+        noise_spec=noise_spec,
+    )
 
 
 def _apply_product(
@@ -241,6 +308,7 @@ def _apply_product(
     *,
     mechanism_logit_tilt: float = 0.0,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply product function in torch."""
     allowed = ["tree", "discretization", "gp", "linear", "quadratic"]
@@ -254,6 +322,7 @@ def _apply_product(
         function_type=allowed[int(idx_f)],
         mechanism_logit_tilt=mechanism_logit_tilt,
         noise_sigma_multiplier=noise_sigma_multiplier,
+        noise_spec=noise_spec,
     )
     gx = apply_random_function(
         x,
@@ -262,6 +331,7 @@ def _apply_product(
         function_type=allowed[int(idx_g)],
         mechanism_logit_tilt=mechanism_logit_tilt,
         noise_sigma_multiplier=noise_sigma_multiplier,
+        noise_spec=noise_spec,
     )
     return fx * gx
 
@@ -294,6 +364,7 @@ def apply_random_function(
     function_type: str | None = None,
     mechanism_logit_tilt: float = 0.0,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply one sampled random function family to `x` in torch."""
     y = x.to(torch.float32)
@@ -310,21 +381,55 @@ def apply_random_function(
         )
 
     if function_type == "nn":
-        return _apply_nn(y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier)
+        return _apply_nn(
+            y,
+            dout,
+            generator,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+        )
     if function_type == "tree":
-        return _apply_tree(y, dout, generator)
+        return _apply_tree(y, dout, generator, noise_spec=noise_spec)
     if function_type == "discretization":
         return _apply_discretization(
-            y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier
+            y,
+            dout,
+            generator,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
         )
     if function_type == "gp":
-        return _apply_gp(y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier)
+        return _apply_gp(
+            y,
+            dout,
+            generator,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+        )
     if function_type == "linear":
-        return _apply_linear(y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier)
+        return _apply_linear(
+            y,
+            dout,
+            generator,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+        )
     if function_type == "quadratic":
-        return _apply_quadratic(y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier)
+        return _apply_quadratic(
+            y,
+            dout,
+            generator,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+        )
     if function_type == "em":
-        return _apply_em(y, dout, generator, noise_sigma_multiplier=noise_sigma_multiplier)
+        return _apply_em(
+            y,
+            dout,
+            generator,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+        )
     if function_type == "product":
         return _apply_product(
             y,
@@ -332,6 +437,7 @@ def apply_random_function(
             generator,
             mechanism_logit_tilt=mechanism_logit_tilt,
             noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
         )
 
     raise ValueError(f"Unknown random function family: {function_type}")

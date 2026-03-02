@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 import math
 import operator
 
@@ -25,6 +26,16 @@ _MIXTURE_COMPONENTS = (
     NOISE_FAMILY_STUDENT_T,
 )
 _MAX_TORCH_SEED = (1 << 31) - 1
+
+
+@dataclass(slots=True, frozen=True)
+class NoiseSamplingSpec:
+    """Runtime noise selection parameters used by generation paths."""
+
+    family: NoiseFamily = NOISE_FAMILY_LEGACY
+    scale: float = 1.0
+    student_t_df: float = 5.0
+    mixture_weights: Mapping[str, float] | None = None
 
 
 def _coerce_shape(shape: Sequence[int] | torch.Size) -> tuple[int, ...]:
@@ -101,6 +112,14 @@ def _normalize_mixture_weights(
         parsed[key] = float(weight)
 
     return normalize_positive_weights(parsed, field_name="mixture_weights")
+
+
+def normalize_mixture_weights(
+    mixture_weights: Mapping[str, float] | None,
+) -> dict[str, float]:
+    """Normalize optional mixture component weights for runtime use."""
+
+    return _normalize_mixture_weights(mixture_weights)
 
 
 def _laplace(shape: tuple[int, ...], *, generator: torch.Generator, device: str) -> torch.Tensor:
@@ -227,6 +246,23 @@ def _sample_mixture(
     return flat.reshape(shape)
 
 
+def sample_mixture_component_family(
+    *,
+    generator: torch.Generator,
+    device: str,
+    mixture_weights: Mapping[str, float] | None = None,
+) -> NoiseFamily:
+    """Sample one mixture component family according to normalized weights."""
+
+    normalized = _normalize_mixture_weights(mixture_weights)
+    components = [name for name in _MIXTURE_COMPONENTS if name in normalized]
+    probs = torch.tensor(
+        [normalized[name] for name in components], device=device, dtype=torch.float32
+    )
+    idx = int(torch.multinomial(probs, num_samples=1, replacement=True, generator=generator).item())
+    return components[idx]  # type: ignore[return-value]
+
+
 def sample_noise(
     shape: Sequence[int] | torch.Size,
     *,
@@ -263,3 +299,45 @@ def sample_noise(
         )
 
     return base * float(parsed_scale)
+
+
+def sample_noise_from_spec(
+    shape: Sequence[int] | torch.Size,
+    *,
+    generator: torch.Generator,
+    device: str,
+    noise_spec: NoiseSamplingSpec | None = None,
+    scale_multiplier: float = 1.0,
+) -> torch.Tensor:
+    """Sample noise using an optional runtime selection spec."""
+
+    parsed_multiplier = _validate_positive_finite(
+        "scale_multiplier", scale_multiplier, lower_bound=0.0
+    )
+    if noise_spec is None:
+        return sample_noise(
+            shape,
+            generator=generator,
+            device=device,
+            family=NOISE_FAMILY_LEGACY,
+            scale=parsed_multiplier,
+        )
+
+    return sample_noise(
+        shape,
+        generator=generator,
+        device=device,
+        family=noise_spec.family,
+        scale=float(noise_spec.scale) * float(parsed_multiplier),
+        student_t_df=float(noise_spec.student_t_df),
+        mixture_weights=noise_spec.mixture_weights,
+    )
+
+
+__all__ = [
+    "NoiseSamplingSpec",
+    "normalize_mixture_weights",
+    "sample_mixture_component_family",
+    "sample_noise",
+    "sample_noise_from_spec",
+]

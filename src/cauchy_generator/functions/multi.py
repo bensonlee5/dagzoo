@@ -5,6 +5,7 @@ from __future__ import annotations
 import torch
 
 from cauchy_generator.functions.random_functions import apply_random_function
+from cauchy_generator.sampling.noise import NoiseSamplingSpec
 
 
 def apply_multi_function(
@@ -14,6 +15,7 @@ def apply_multi_function(
     out_dim: int,
     mechanism_logit_tilt: float = 0.0,
     noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply composition across parent node tensors in torch."""
     if not inputs:
@@ -25,6 +27,7 @@ def apply_multi_function(
             out_dim=out_dim,
             mechanism_logit_tilt=mechanism_logit_tilt,
             noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
         )
 
     if torch.rand(1, generator=generator).item() < 0.5:
@@ -35,6 +38,7 @@ def apply_multi_function(
             out_dim=out_dim,
             mechanism_logit_tilt=mechanism_logit_tilt,
             noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
         )
 
     transformed = [
@@ -44,6 +48,7 @@ def apply_multi_function(
             out_dim=out_dim,
             mechanism_logit_tilt=mechanism_logit_tilt,
             noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
         )
         for inp in inputs
     ]
