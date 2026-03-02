@@ -24,6 +24,8 @@ def _fixed_activation(x: torch.Tensor, name: str) -> torch.Tensor:
         return torch.nn.functional.silu(x)
     if name == "relu":
         return torch.relu(x)
+    if name == "relu_sq":
+        return torch.square(torch.relu(x))
     if name == "softplus":
         return torch.nn.functional.softplus(x)
     if name == "sign":
@@ -121,6 +123,7 @@ def apply_random_activation(
             "identity",
             "silu",
             "relu",
+            "relu_sq",
             "softplus",
             "sign",
             "gauss",
