@@ -32,16 +32,24 @@ def _clip_and_standardize(x: torch.Tensor, feature_types: list[str]) -> torch.Te
     """Clip numeric outliers and standardize numeric columns."""
 
     out = x.clone()
-    for i, t in enumerate(feature_types):
-        if t == "cat":
-            continue
-        col = out[:, i]
-        q = torch.quantile(col.float(), torch.tensor([0.01, 0.99], device=col.device))
-        lo, hi = q[0], q[1]
-        col = torch.clamp(col, lo, hi)
-        mu = torch.mean(col)
-        sd = torch.std(col, correction=0).clamp_min(1e-6)
-        out[:, i] = (col - mu) / sd
+    numeric_indices = [i for i, t in enumerate(feature_types) if t != "cat"]
+    if not numeric_indices:
+        return out
+
+    # Standardize all numeric columns in one batched pass.
+    numeric_index = torch.tensor(numeric_indices, device=out.device, dtype=torch.long)
+    numeric = out.index_select(dim=1, index=numeric_index)
+    quantiles = torch.quantile(
+        numeric.float(),
+        torch.tensor([0.01, 0.99], device=numeric.device),
+        dim=0,
+    )
+    lo = quantiles[0].unsqueeze(0)
+    hi = quantiles[1].unsqueeze(0)
+    numeric = torch.clamp(numeric, lo, hi)
+    mu = torch.mean(numeric, dim=0, keepdim=True)
+    sd = torch.std(numeric, dim=0, correction=0, keepdim=True).clamp_min(1e-6)
+    out[:, numeric_index] = (numeric - mu) / sd
     return out
 
 

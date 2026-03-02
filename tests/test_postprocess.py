@@ -3,7 +3,11 @@
 import torch
 
 from cauchy_generator.config import DatasetConfig
-from cauchy_generator.postprocess.postprocess import inject_missingness, postprocess_dataset
+from cauchy_generator.postprocess.postprocess import (
+    _clip_and_standardize,
+    inject_missingness,
+    postprocess_dataset,
+)
 from conftest import make_generator as _make_generator
 
 
@@ -32,6 +36,21 @@ def _make_data(
     return x_train, y_train, x_test, y_test, ftypes, task
 
 
+def _clip_and_standardize_reference_loop(x: torch.Tensor, feature_types: list[str]) -> torch.Tensor:
+    out = x.clone()
+    for i, t in enumerate(feature_types):
+        if t == "cat":
+            continue
+        col = out[:, i]
+        q = torch.quantile(col.float(), torch.tensor([0.01, 0.99], device=col.device))
+        lo, hi = q[0], q[1]
+        col = torch.clamp(col, lo, hi)
+        mu = torch.mean(col)
+        sd = torch.std(col, correction=0).clamp_min(1e-6)
+        out[:, i] = (col - mu) / sd
+    return out
+
+
 def test_removes_constant_columns() -> None:
     g = _make_generator(0)
     xt, yt, xte, yte, ft, task = _make_data(g, n_feat=4, add_constant_col=True)
@@ -49,6 +68,38 @@ def test_standardizes_numeric() -> None:
         col = combined[:, i]
         assert abs(float(torch.mean(col))) < 0.15
         assert float(torch.std(col)) < 1.5
+
+
+def test_clip_and_standardize_all_categorical_is_noop() -> None:
+    g = _make_generator(16)
+    x = torch.randn(48, 6, generator=g)
+    feature_types = ["cat"] * x.shape[1]
+
+    out = _clip_and_standardize(x, feature_types)
+
+    torch.testing.assert_close(out, x)
+
+
+def test_clip_and_standardize_preserves_categorical_columns() -> None:
+    g = _make_generator(17)
+    x = torch.randn(64, 5, generator=g)
+    feature_types = ["cat", "num", "cat", "num", "num"]
+
+    out = _clip_and_standardize(x, feature_types)
+
+    torch.testing.assert_close(out[:, 0], x[:, 0])
+    torch.testing.assert_close(out[:, 2], x[:, 2])
+
+
+def test_clip_and_standardize_matches_loop_reference_for_mixed_types() -> None:
+    g = _make_generator(18)
+    x = torch.randn(192, 7, generator=g)
+    feature_types = ["num", "cat", "num", "num", "cat", "num", "cat"]
+
+    out = _clip_and_standardize(x, feature_types)
+    ref = _clip_and_standardize_reference_loop(x, feature_types)
+
+    torch.testing.assert_close(out, ref)
 
 
 def test_preserves_class_counts() -> None:
