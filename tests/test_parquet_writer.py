@@ -152,6 +152,28 @@ def test_write_packed_parquet_shards_stream_writes_real_parquet_tables(tmp_path)
     assert train_x[0] == [1.0, 1.0]
 
 
+def test_write_packed_parquet_shards_stream_rejects_incompatible_split_schema(tmp_path) -> None:
+    pytest.importorskip("pyarrow.parquet")
+
+    int_bundle = _bundle(1)
+    float_bundle = DatasetBundle(
+        X_train=np.full((2, 2), 2.0, dtype=np.float32),
+        y_train=np.array([0.5, 1.5], dtype=np.float32),
+        X_test=np.full((1, 2), 2.0, dtype=np.float32),
+        y_test=np.array([1.5], dtype=np.float32),
+        feature_types=["num", "num"],
+        metadata={"seed": 2},
+    )
+
+    with pytest.raises(ValueError, match="Incompatible packed train schema"):
+        write_packed_parquet_shards_stream(
+            [int_bundle, float_bundle],
+            tmp_path,
+            shard_size=8,
+            compression="zstd",
+        )
+
+
 def test_write_packed_parquet_shards_stream_rejects_stale_output(tmp_path) -> None:
     stale_dir = tmp_path / "shard_00000"
     stale_dir.mkdir(parents=True, exist_ok=True)

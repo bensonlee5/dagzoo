@@ -419,8 +419,15 @@ def _write_packed_split(
         schema=table.schema,
         compression=compression,
     )
-    if table.schema != writer.schema:
-        table = table.cast(writer.schema, safe=False)
+    if not table.schema.equals(writer.schema, check_metadata=False):
+        split_path = state.train_path if split == "train" else state.test_path
+        raise ValueError(
+            "Incompatible packed "
+            f"{split} schema in shard output '{split_path}': "
+            f"expected {writer.schema}, got {table.schema} "
+            f"(dataset_index={dataset_index}). "
+            "Mixed feature/target dtypes within one shard are not supported."
+        )
     writer.write_table(table)
 
 
