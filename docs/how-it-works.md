@@ -206,7 +206,7 @@ sections such as `missingness_guardrails`, `lineage_guardrails`, and
 
 - **stage bounds**: effective min/max constraints for sampled features, nodes,
   and depth in one layout draw.
-- **learnability filter**: random-forest-based gate for signal quality.
+- **learnability filter**: CPU ExtraTrees-based gate for signal quality.
 - **wins ratio**: bootstrap fraction where model beats baseline.
 - **shift profile**: opt-in distribution-drift control over graph, mechanism,
   and noise sampling axes.

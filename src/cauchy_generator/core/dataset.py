@@ -25,7 +25,7 @@ from cauchy_generator.core.metadata import (
 )
 from cauchy_generator.core.shift import ShiftRuntimeParams, resolve_shift_runtime_params
 from cauchy_generator.core.validation import _classification_split_valid, _stratified_split_indices
-from cauchy_generator.filtering import apply_torch_rf_filter
+from cauchy_generator.filtering import apply_extra_trees_filter
 from cauchy_generator.core.node_pipeline import apply_node_pipeline
 from cauchy_generator.postprocess import inject_missingness, postprocess_dataset
 from cauchy_generator.rng import SeedManager
@@ -211,7 +211,7 @@ def _generate_graph_dataset_torch(
         else:
             y = target_values.to(dtype)
 
-    accepted, filter_details = _apply_filter_torch(config, x, y, seed=seed)
+    accepted, filter_details = _apply_filter(config, x, y, seed=seed)
     return x, y, {"accepted": accepted, "filter": filter_details}
 
 
@@ -367,30 +367,29 @@ def _generate_torch(
     )
 
 
-def _apply_filter_torch(
+def _apply_filter(
     config: GeneratorConfig,
     x: torch.Tensor,
     y: torch.Tensor,
     *,
     seed: int,
 ) -> tuple[bool, dict[str, Any]]:
-    """Run filtering natively in Torch using random forests."""
+    """Run filtering via CPU ExtraTrees."""
 
     details: dict[str, Any] = {"enabled": config.filter.enabled}
     if not config.filter.enabled:
         return True, details
 
-    accepted, filter_details = apply_torch_rf_filter(
+    accepted, filter_details = apply_extra_trees_filter(
         x,
         y,
         task=config.dataset.task,
         seed=seed,
-        n_trees=config.filter.n_trees,
-        depth=config.filter.depth,
+        n_estimators=config.filter.n_estimators,
+        max_depth=config.filter.max_depth,
         min_samples_leaf=config.filter.min_samples_leaf,
         max_leaf_nodes=config.filter.max_leaf_nodes,
         max_features=config.filter.max_features,
-        n_split_candidates=config.filter.n_split_candidates,
         n_bootstrap=config.filter.n_bootstrap,
         threshold=config.filter.threshold,
     )

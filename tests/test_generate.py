@@ -779,7 +779,7 @@ def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch)
             "threshold_delta": 0.15,
         }
 
-    monkeypatch.setattr("cauchy_generator.core.dataset.apply_torch_rf_filter", _stub_filter)
+    monkeypatch.setattr("cauchy_generator.core.dataset.apply_extra_trees_filter", _stub_filter)
     cfg = _tiny_config()
     cfg.filter.enabled = True
 

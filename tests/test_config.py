@@ -25,10 +25,9 @@ def test_load_default_config() -> None:
     )
     assert cfg.diagnostics.meta_feature_targets == {}
     assert cfg.diagnostics.out_dir is None
-    assert cfg.filter.n_trees > 0
-    assert cfg.filter.depth >= 0
+    assert cfg.filter.n_estimators > 0
+    assert cfg.filter.max_depth >= 0
     assert cfg.filter.max_features == "auto"
-    assert cfg.filter.n_split_candidates > 0
     assert cfg.dataset.missing_rate == 0.0
     assert cfg.dataset.missing_mechanism == MISSINGNESS_MECHANISM_NONE
     assert cfg.dataset.missing_mar_observed_fraction == 0.5
@@ -196,13 +195,14 @@ def test_runtime_config_rejects_generation_engine_key() -> None:
 
 
 def test_legacy_filter_keys_are_rejected() -> None:
-    with pytest.raises(TypeError, match="n_estimators"):
+    with pytest.raises(TypeError, match="n_trees"):
         GeneratorConfig.from_dict(
             {
                 "filter": {
                     "enabled": True,
-                    "n_estimators": 25,
-                    "max_depth": 6,
+                    "n_trees": 25,
+                    "depth": 6,
+                    "n_split_candidates": 8,
                 }
             }
         )

@@ -18,7 +18,7 @@ from cauchy_generator.core.metric_constants import (
     validate_metric_shapes,
 )
 from cauchy_generator.core.shift import mechanism_nonlinear_mass
-from cauchy_generator.filtering import apply_torch_rf_filter
+from cauchy_generator.filtering import apply_extra_trees_filter
 from cauchy_generator.types import DatasetBundle
 
 
@@ -415,7 +415,7 @@ def _compute_wins_ratio_proxy(*, x: torch.Tensor, y: torch.Tensor, task: str) ->
                 y_tensor = y_matrix
         else:
             raise ValueError(f"Unsupported task '{task}'.")
-        _, details = apply_torch_rf_filter(
+        _, details = apply_extra_trees_filter(
             x_tensor,
             y_tensor,
             task=task,
