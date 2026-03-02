@@ -22,6 +22,7 @@ def _tiny_config(task: str) -> GeneratorConfig:
     cfg.graph.n_nodes_min = 2
     cfg.graph.n_nodes_max = 6
     cfg.filter.enabled = False
+    cfg.filter.max_attempts = 8
     return cfg
 
 

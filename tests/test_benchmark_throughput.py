@@ -2,6 +2,7 @@ import typing
 
 from cauchy_generator.bench.throughput import run_throughput_benchmark
 from cauchy_generator.config import GeneratorConfig
+from cauchy_generator.rng import offset_seed32
 
 
 def test_run_throughput_benchmark_uses_streaming_generation(
@@ -34,8 +35,8 @@ def test_run_throughput_benchmark_uses_streaming_generation(
     )
 
     assert calls == [
-        (2, cfg.seed + 1, "cpu"),
-        (3, cfg.seed + 2, "cpu"),
+        (2, offset_seed32(cfg.seed, 1), "cpu"),
+        (3, offset_seed32(cfg.seed, 2), "cpu"),
     ]
     assert result["num_datasets"] == 3
     assert result["warmup_datasets"] == 2

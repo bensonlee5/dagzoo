@@ -25,10 +25,9 @@ def test_load_default_config() -> None:
     )
     assert cfg.diagnostics.meta_feature_targets == {}
     assert cfg.diagnostics.out_dir is None
-    assert cfg.filter.n_trees > 0
-    assert cfg.filter.depth >= 0
+    assert cfg.filter.n_estimators > 0
+    assert cfg.filter.max_depth >= 0
     assert cfg.filter.max_features == "auto"
-    assert cfg.filter.n_split_candidates > 0
     assert cfg.dataset.missing_rate == 0.0
     assert cfg.dataset.missing_mechanism == MISSINGNESS_MECHANISM_NONE
     assert cfg.dataset.missing_mar_observed_fraction == 0.5
@@ -43,6 +42,19 @@ def test_default_config_metadata_is_compatible_with_optional_lineage() -> None:
         "config": cfg.to_dict(),
     }
     validate_metadata_lineage(metadata, required=False)
+
+
+def test_seed_range_accepts_32bit_boundaries() -> None:
+    cfg_min = GeneratorConfig.from_dict({"seed": 0})
+    cfg_max = GeneratorConfig.from_dict({"seed": 4294967295})
+    assert cfg_min.seed == 0
+    assert cfg_max.seed == 4294967295
+
+
+@pytest.mark.parametrize("bad_seed", [-1, 4294967296, True])
+def test_seed_range_rejects_out_of_bounds_values(bad_seed: int | bool) -> None:
+    with pytest.raises(ValueError, match=r"seed must be an integer in \[0, 4294967295\]"):
+        GeneratorConfig.from_dict({"seed": bad_seed})
 
 
 def test_class_range_accepts_many_class_envelope_limit() -> None:
@@ -196,13 +208,14 @@ def test_runtime_config_rejects_generation_engine_key() -> None:
 
 
 def test_legacy_filter_keys_are_rejected() -> None:
-    with pytest.raises(TypeError, match="n_estimators"):
+    with pytest.raises(TypeError, match="n_trees"):
         GeneratorConfig.from_dict(
             {
                 "filter": {
                     "enabled": True,
-                    "n_estimators": 25,
-                    "max_depth": 6,
+                    "n_trees": 25,
+                    "depth": 6,
+                    "n_split_candidates": 8,
                 }
             }
         )

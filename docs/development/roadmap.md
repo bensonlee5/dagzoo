@@ -146,7 +146,7 @@ metadata JSON contract, and DAG lineage schema.
   (`E.12`)
 - `postprocess/postprocess.py`: cleanup, scaling, class/index permutation
   (`E.13`)
-- `filtering/torch_rf_filter.py`: Torch-native RF OOB filter (`E.14`)
+- `filtering/extra_trees_filter.py`: CPU ExtraTrees OOB filter (`E.14`)
 
 ### Performance Strategy
 
@@ -307,7 +307,7 @@ metadata JSON contract, and DAG lineage schema.
 - Current rollout envelope (`#20`): enforce `dataset.n_classes_max <= 32` as the narrow-go safety cap until follow-on hardening (`#21`-`#23`) lands.
 - `#22` scope: class-aware RF filter thresholding plus metadata diagnostics so many-class accept/reject behavior remains interpretable.
 - GitHub tracking: epic `#19`; research gate `#43`; conditional chain `#20 -> #21 -> #22 -> #23`
-- Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/converters/categorical.py`, `src/cauchy_generator/filtering/torch_rf_filter.py`
+- Repo touchpoints: `src/cauchy_generator/config.py`, `src/cauchy_generator/converters/categorical.py`, `src/cauchy_generator/filtering/extra_trees_filter.py`
 - Exit criteria:
   - Feasibility report produces explicit `go` / `narrow-go` / `no-go` decision under predefined thresholds.
   - If `go` or `narrow-go`: implementation chain (`#20`-`#23`) lands with backward-compatible defaults.

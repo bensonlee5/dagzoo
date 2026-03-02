@@ -10,6 +10,7 @@ from typing import Any, Literal
 import yaml
 
 from cauchy_generator.math_utils import normalize_positive_weights
+from cauchy_generator.rng import SEED32_MAX, SEED32_MIN
 
 MissingnessMechanism = Literal["none", "mcar", "mar", "mnar"]
 MISSINGNESS_MECHANISM_NONE: Literal["none"] = "none"
@@ -579,12 +580,11 @@ class BenchmarkConfig:
 @dataclass(slots=True)
 class FilterConfig:
     enabled: bool = False
-    n_trees: int = 25
-    depth: int = 6
+    n_estimators: int = 25
+    max_depth: int = 6
     min_samples_leaf: int = 1
     max_leaf_nodes: int | None = None
     max_features: str | int | float = "auto"
-    n_split_candidates: int = 8
     n_bootstrap: int = 200
     threshold: float = 0.95
     max_attempts: int = 3
@@ -602,6 +602,14 @@ class GeneratorConfig:
     diagnostics: DiagnosticsConfig = field(default_factory=DiagnosticsConfig)
     benchmark: BenchmarkConfig = field(default_factory=BenchmarkConfig)
     filter: FilterConfig = field(default_factory=FilterConfig)
+
+    def __post_init__(self) -> None:
+        self.seed = _validate_int_field(
+            field_name="seed",
+            value=self.seed,
+            minimum=SEED32_MIN,
+            maximum=SEED32_MAX,
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "GeneratorConfig":
@@ -622,7 +630,7 @@ class GeneratorConfig:
         diagnostics = DiagnosticsConfig(**(data.get("diagnostics") or {}))
         benchmark = BenchmarkConfig(**(data.get("benchmark") or {}))
         filter_cfg = FilterConfig(**(data.get("filter") or {}))
-        seed = int(data.get("seed", 1))
+        seed = data.get("seed", 1)
         return cls(
             seed=seed,
             dataset=dataset,

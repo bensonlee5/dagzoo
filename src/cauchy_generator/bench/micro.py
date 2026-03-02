@@ -26,6 +26,7 @@ from cauchy_generator.config import GeneratorConfig
 from cauchy_generator.core.dataset import generate_one
 from cauchy_generator.core.node_pipeline import ConverterSpec, apply_node_pipeline
 from cauchy_generator.functions.random_functions import apply_random_function
+from cauchy_generator.rng import offset_seed32
 
 
 def _time_ms(func: Callable[[], None], repeats: int) -> float:
@@ -60,7 +61,7 @@ def run_microbenchmarks(
     """Run targeted microbenchmarks for core generation components."""
 
     g_rng = torch.Generator(device="cpu")
-    g_rng.manual_seed(config.seed + MICROBENCH_BASE_SEED_OFFSET)
+    g_rng.manual_seed(offset_seed32(config.seed, MICROBENCH_BASE_SEED_OFFSET))
     x = torch.randn(MICROBENCH_SYNTH_ROWS, MICROBENCH_SYNTH_FEATURES, generator=g_rng)
 
     def run_linear() -> None:
@@ -93,7 +94,7 @@ def run_microbenchmarks(
     def run_generate_one() -> None:
         _ = generate_one(
             micro_cfg,
-            seed=micro_cfg.seed + MICROBENCH_GENERATE_ONE_SEED_OFFSET,
+            seed=offset_seed32(micro_cfg.seed, MICROBENCH_GENERATE_ONE_SEED_OFFSET),
             device=device,
         )
 

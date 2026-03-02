@@ -190,9 +190,11 @@ def test_generate_no_write_with_coverage_enabled_emits_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _stub_filter(*_args, **_kwargs):
-        return True, {"wins_ratio": 0.8, "n_valid_oob": 64, "backend": "torch_rf"}
+        return True, {"wins_ratio": 0.8, "n_valid_oob": 64, "backend": "extra_trees_cpu"}
 
-    monkeypatch.setattr("cauchy_generator.core.metrics_torch.apply_torch_rf_filter", _stub_filter)
+    monkeypatch.setattr(
+        "cauchy_generator.core.metrics_torch.apply_extra_trees_filter", _stub_filter
+    )
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     cfg.runtime.device = "cpu"
     cfg.dataset.task = "regression"

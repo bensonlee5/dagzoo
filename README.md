@@ -85,7 +85,7 @@ Follow this sequence to understand how a latent causal structure becomes a reali
 Infrastructure that ensures reproducibility, deterministic behavior, and data quality.
 
 - [`src/cauchy_generator/rng.py`](src/cauchy_generator/rng.py): The `SeedManager` ensures strictly isolated, deterministic child seeds for every component.
-- [`src/cauchy_generator/filtering/`](src/cauchy_generator/filtering/): Implements the "learnability gate" (via Torch-native Random Forests) to reject invalid or trivial datasets.
+- [`src/cauchy_generator/filtering/`](src/cauchy_generator/filtering/): Implements the "learnability gate" (via CPU ExtraTrees) to reject invalid or trivial datasets.
 - [`src/cauchy_generator/core/metrics_torch.py`](src/cauchy_generator/core/metrics_torch.py): Unified torch-native metric extraction used by diagnostics and generation telemetry.
 - [`src/cauchy_generator/postprocess/`](src/cauchy_generator/postprocess/): Handles final-stage transformations, including deterministic missingness (MCAR/MAR/MNAR) injection.
 
