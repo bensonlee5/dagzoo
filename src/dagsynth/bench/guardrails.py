@@ -255,14 +255,14 @@ def _issue_sort_key(issue: dict[str, Any]) -> tuple[int, float]:
 
 
 def _collect_guardrail_regression_issues(
-    profile_results: list[dict[str, Any]],
+    preset_results: list[dict[str, Any]],
     *,
     guardrail_key: str,
 ) -> list[dict[str, Any]]:
     """Flatten one guardrail type into regression issue payloads."""
 
     issues: list[dict[str, Any]] = []
-    for result in profile_results:
+    for result in preset_results:
         guardrails = result.get(guardrail_key)
         if not isinstance(guardrails, dict) or not bool(guardrails.get("enabled")):
             continue
@@ -273,7 +273,7 @@ def _collect_guardrail_regression_issues(
             if not isinstance(issue, dict):
                 continue
             merged = dict(issue)
-            merged["profile"] = str(result.get("profile_key"))
+            merged["preset"] = str(result.get("preset_key"))
             issues.append(merged)
     return issues
 

@@ -232,7 +232,7 @@ class _NoiseGuardrailCollector:
         """Collect noise metadata validity counters for one generated bundle."""
 
         self.bundles_seen += 1
-        payload = bundle.metadata.get("noise")
+        payload = bundle.metadata.get("noise_distribution")
         if not isinstance(payload, dict):
             return
 
@@ -255,7 +255,7 @@ class _NoiseGuardrailCollector:
         family_requested_raw = payload.get("family_requested")
         family_sampled_raw = payload.get("family_sampled")
         sampling_strategy_raw = payload.get("sampling_strategy")
-        scale_raw = payload.get("scale")
+        scale_raw = payload.get("base_scale")
         student_t_df_raw = payload.get("student_t_df")
         mixture_weights_raw = payload.get("mixture_weights")
 
@@ -277,7 +277,7 @@ class _NoiseGuardrailCollector:
         scale = _coerce_optional_finite_float(scale_raw)
         student_t_df = _coerce_optional_finite_float(student_t_df_raw)
         if scale is None or scale <= 0.0:
-            return False, "", "scale_value"
+            return False, "", "base_scale_value"
         if student_t_df is None or student_t_df <= 2.0:
             return False, "", "student_t_df_value"
 

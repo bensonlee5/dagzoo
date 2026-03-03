@@ -7,7 +7,7 @@ import dagsynth.bench.guardrails as guardrails_mod
 import dagsynth.bench.suite as suite_mod
 from dagsynth.bench.micro import run_microbenchmarks
 from dagsynth.bench.report import write_suite_markdown
-from dagsynth.bench.suite import ProfileRunSpec, run_benchmark_suite
+from dagsynth.bench.suite import PresetRunSpec, run_benchmark_suite
 from dagsynth.config import GeneratorConfig
 from dagsynth.types import DatasetBundle
 
@@ -26,8 +26,8 @@ def _tiny_cpu_config() -> GeneratorConfig:
     cfg.benchmark.warmup_datasets = 0
     cfg.benchmark.latency_num_samples = 2
     cfg.benchmark.reproducibility_num_datasets = 1
-    cfg.benchmark.profile_name = "cpu_test"
-    cfg.benchmark.profiles["cpu_test"] = {
+    cfg.benchmark.preset_name = "cpu_test"
+    cfg.benchmark.presets["cpu_test"] = {
         "device": "cpu",
         "num_datasets": 2,
         "warmup_datasets": 0,
@@ -45,7 +45,7 @@ def _tiny_missingness_cpu_config() -> GeneratorConfig:
 def _tiny_shift_cpu_config() -> GeneratorConfig:
     cfg = _tiny_cpu_config()
     cfg.shift.enabled = True
-    cfg.shift.profile = "mixed"
+    cfg.shift.mode = "mixed"
     cfg.graph.n_nodes_min = 8
     cfg.graph.n_nodes_max = 12
     return cfg
@@ -54,7 +54,7 @@ def _tiny_shift_cpu_config() -> GeneratorConfig:
 def _tiny_noise_cpu_config() -> GeneratorConfig:
     cfg = _tiny_cpu_config()
     cfg.noise.family = "laplace"
-    cfg.noise.scale = 1.0
+    cfg.noise.base_scale = 1.0
     cfg.noise.student_t_df = 6.0
     cfg.noise.mixture_weights = None
     return cfg
@@ -62,7 +62,7 @@ def _tiny_noise_cpu_config() -> GeneratorConfig:
 
 def test_run_benchmark_suite_smoke_single_profile() -> None:
     cfg = _tiny_cpu_config()
-    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     summary = run_benchmark_suite(
         [spec],
@@ -87,10 +87,10 @@ def test_run_benchmark_suite_smoke_single_profile() -> None:
             issue["metric"] == "lineage_export_runtime_degradation_pct"
             for issue in summary["regression"]["issues"]
         )
-    assert len(summary["profile_results"]) == 1
+    assert len(summary["preset_results"]) == 1
 
-    result = summary["profile_results"][0]
-    assert result["profile_key"] == "cpu_test"
+    result = summary["preset_results"][0]
+    assert result["preset_key"] == "cpu_test"
     assert result["datasets_per_minute"] > 0
     assert result["latency_p95_ms"] >= 0
     lineage_guardrails = result["lineage_guardrails"]
@@ -100,7 +100,7 @@ def test_run_benchmark_suite_smoke_single_profile() -> None:
 
 def test_run_benchmark_suite_missingness_guardrails_emit_metrics() -> None:
     cfg = _tiny_missingness_cpu_config()
-    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     summary = run_benchmark_suite(
         [spec],
@@ -118,7 +118,7 @@ def test_run_benchmark_suite_missingness_guardrails_emit_metrics() -> None:
         hardware_policy="none",
     )
 
-    result = summary["profile_results"][0]
+    result = summary["preset_results"][0]
     guardrails = result["missingness_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["status"] == "pass"
@@ -134,7 +134,7 @@ def test_run_benchmark_suite_missingness_runtime_guardrail_updates_regression_st
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_missingness_cpu_config()
-    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
     calls: list[dict[str, bool]] = []
 
     def _stub_throughput(
@@ -174,7 +174,7 @@ def test_run_benchmark_suite_missingness_runtime_guardrail_updates_regression_st
                     )
                 )
         return {
-            "profile": config.benchmark.profile_name,
+            "preset": config.benchmark.preset_name,
             "num_datasets": num_datasets,
             "warmup_datasets": warmup_datasets,
             "elapsed_seconds": elapsed,
@@ -211,7 +211,7 @@ def test_run_benchmark_suite_missingness_runtime_guardrail_updates_regression_st
         hardware_policy="none",
     )
 
-    result = summary["profile_results"][0]
+    result = summary["preset_results"][0]
     guardrails = result["missingness_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["status"] == "fail"
@@ -231,7 +231,7 @@ def test_run_benchmark_suite_missingness_runtime_guardrail_updates_regression_st
 
 def test_run_benchmark_suite_shift_guardrails_emit_metrics() -> None:
     cfg = _tiny_shift_cpu_config()
-    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     summary = run_benchmark_suite(
         [spec],
@@ -249,10 +249,10 @@ def test_run_benchmark_suite_shift_guardrails_emit_metrics() -> None:
         hardware_policy="none",
     )
 
-    result = summary["profile_results"][0]
+    result = summary["preset_results"][0]
     guardrails = result["shift_guardrails"]
     assert guardrails["enabled"] is True
-    assert guardrails["profile"] == "mixed"
+    assert guardrails["mode"] == "mixed"
     assert guardrails["status"] in {"pass", "warn", "fail"}
     assert guardrails["runtime_gating_enabled"] is False
     assert guardrails["directional_gating_enabled"] is False
@@ -263,7 +263,7 @@ def test_run_benchmark_suite_shift_runtime_guardrail_updates_regression_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_shift_cpu_config()
-    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
     calls: list[dict[str, bool]] = []
 
     def _stub_throughput(
@@ -310,7 +310,7 @@ def test_run_benchmark_suite_shift_runtime_guardrail_updates_regression_status(
                     )
                 )
         return {
-            "profile": config.benchmark.profile_name,
+            "preset": config.benchmark.preset_name,
             "num_datasets": num_datasets,
             "warmup_datasets": warmup_datasets,
             "elapsed_seconds": elapsed,
@@ -351,7 +351,7 @@ def test_run_benchmark_suite_shift_runtime_guardrail_updates_regression_status(
         hardware_policy="none",
     )
 
-    result = summary["profile_results"][0]
+    result = summary["preset_results"][0]
     guardrails = result["shift_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["runtime_gating_enabled"] is True
@@ -375,7 +375,7 @@ def test_run_benchmark_suite_shift_directional_guardrail_failure_updates_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_shift_cpu_config()
-    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     def _stub_throughput(
         config,
@@ -415,7 +415,7 @@ def test_run_benchmark_suite_shift_directional_guardrail_failure_updates_status(
                     )
                 )
         return {
-            "profile": config.benchmark.profile_name,
+            "preset": config.benchmark.preset_name,
             "num_datasets": num_datasets,
             "warmup_datasets": warmup_datasets,
             "elapsed_seconds": elapsed,
@@ -456,7 +456,7 @@ def test_run_benchmark_suite_shift_directional_guardrail_failure_updates_status(
         hardware_policy="none",
     )
 
-    guardrails = summary["profile_results"][0]["shift_guardrails"]
+    guardrails = summary["preset_results"][0]["shift_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["status"] == "fail"
     mechanism_issue = next(
@@ -477,7 +477,7 @@ def test_run_benchmark_suite_shift_directional_guardrail_failure_updates_status(
 
 def test_run_benchmark_suite_noise_guardrails_emit_metrics() -> None:
     cfg = _tiny_noise_cpu_config()
-    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     summary = run_benchmark_suite(
         [spec],
@@ -495,7 +495,7 @@ def test_run_benchmark_suite_noise_guardrails_emit_metrics() -> None:
         hardware_policy="none",
     )
 
-    result = summary["profile_results"][0]
+    result = summary["preset_results"][0]
     guardrails = result["noise_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["status"] in {"pass", "warn", "fail"}
@@ -508,7 +508,7 @@ def test_run_benchmark_suite_noise_runtime_guardrail_updates_regression_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_noise_cpu_config()
-    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     def _stub_throughput(
         config,
@@ -529,11 +529,11 @@ def test_run_benchmark_suite_noise_runtime_guardrail_updates_regression_status(
                 metadata = {
                     "seed": i,
                     "attempt_used": 0,
-                    "noise": {
+                    "noise_distribution": {
                         "family_requested": str(config.noise.family),
                         "family_sampled": str(config.noise.family),
                         "sampling_strategy": "dataset_level",
-                        "scale": float(config.noise.scale),
+                        "base_scale": float(config.noise.base_scale),
                         "student_t_df": float(config.noise.student_t_df),
                         "mixture_weights": None,
                     },
@@ -549,7 +549,7 @@ def test_run_benchmark_suite_noise_runtime_guardrail_updates_regression_status(
                     )
                 )
         return {
-            "profile": config.benchmark.profile_name,
+            "preset": config.benchmark.preset_name,
             "num_datasets": num_datasets,
             "warmup_datasets": warmup_datasets,
             "elapsed_seconds": elapsed,
@@ -590,7 +590,7 @@ def test_run_benchmark_suite_noise_runtime_guardrail_updates_regression_status(
         hardware_policy="none",
     )
 
-    result = summary["profile_results"][0]
+    result = summary["preset_results"][0]
     guardrails = result["noise_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["runtime_gating_enabled"] is True
@@ -610,7 +610,7 @@ def test_run_benchmark_suite_noise_metadata_coverage_failure_updates_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_noise_cpu_config()
-    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     def _stub_throughput(
         config,
@@ -629,11 +629,11 @@ def test_run_benchmark_suite_noise_metadata_coverage_failure_updates_status(
             for i in range(num_datasets):
                 metadata = {"seed": i, "attempt_used": 0}
                 if str(config.noise.family) == "gaussian":
-                    metadata["noise"] = {
+                    metadata["noise_distribution"] = {
                         "family_requested": "gaussian",
                         "family_sampled": "gaussian",
                         "sampling_strategy": "dataset_level",
-                        "scale": 1.0,
+                        "base_scale": 1.0,
                         "student_t_df": 5.0,
                         "mixture_weights": None,
                     }
@@ -648,7 +648,7 @@ def test_run_benchmark_suite_noise_metadata_coverage_failure_updates_status(
                     )
                 )
         return {
-            "profile": config.benchmark.profile_name,
+            "preset": config.benchmark.preset_name,
             "num_datasets": num_datasets,
             "warmup_datasets": warmup_datasets,
             "elapsed_seconds": elapsed,
@@ -689,7 +689,7 @@ def test_run_benchmark_suite_noise_metadata_coverage_failure_updates_status(
         hardware_policy="none",
     )
 
-    result = summary["profile_results"][0]
+    result = summary["preset_results"][0]
     guardrails = result["noise_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["status"] == "fail"
@@ -723,7 +723,7 @@ def test_run_benchmark_suite_lineage_runtime_guardrail_updates_regression_status
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_cpu_config()
-    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     monkeypatch.setattr(
         "dagsynth.bench.suite._collect_lineage_guardrails",
@@ -766,7 +766,7 @@ def test_run_benchmark_suite_lineage_runtime_guardrail_updates_regression_status
         hardware_policy="none",
     )
 
-    result = summary["profile_results"][0]
+    result = summary["preset_results"][0]
     guardrails = result["lineage_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["status"] == "fail"
@@ -783,9 +783,9 @@ def test_write_suite_markdown_profile_table_includes_shift_and_noise_columns(
     summary = {
         "suite": "smoke",
         "generated_at": "2026-01-01T00:00:00+00:00",
-        "profile_results": [
+        "preset_results": [
             {
-                "profile_key": "shift_smoke",
+                "preset_key": "shift_smoke",
                 "device": "cpu",
                 "hardware_backend": "cpu",
                 "datasets_per_minute": 120.0,
@@ -1125,9 +1125,9 @@ def test_collect_reproducibility_uses_streaming_generation(
     assert calls[0] == calls[1]
 
 
-def test_run_benchmark_suite_sanitizes_profile_key_for_diagnostics_paths(tmp_path) -> None:
+def test_run_benchmark_suite_sanitizes_preset_key_for_diagnostics_paths(tmp_path) -> None:
     cfg = _tiny_cpu_config()
-    spec = ProfileRunSpec(key="../../escape", config=cfg, device="cpu")
+    spec = PresetRunSpec(key="../../escape", config=cfg, device="cpu")
     diagnostics_root = tmp_path / "diag_root"
 
     summary = run_benchmark_suite(
@@ -1146,7 +1146,7 @@ def test_run_benchmark_suite_sanitizes_profile_key_for_diagnostics_paths(tmp_pat
         hardware_policy="none",
     )
 
-    result = summary["profile_results"][0]
+    result = summary["preset_results"][0]
     artifacts = result["diagnostics_artifacts"]
     assert isinstance(artifacts, dict)
 
@@ -1159,14 +1159,14 @@ def test_run_benchmark_suite_sanitizes_profile_key_for_diagnostics_paths(tmp_pat
     assert not (tmp_path / "escape" / "coverage_summary.json").exists()
 
 
-def test_run_benchmark_suite_uses_unique_diagnostics_dirs_for_duplicate_profile_keys(
+def test_run_benchmark_suite_uses_unique_diagnostics_dirs_for_duplicate_preset_keys(
     tmp_path,
 ) -> None:
     cfg_a = _tiny_cpu_config()
     cfg_b = _tiny_cpu_config()
     specs = [
-        ProfileRunSpec(key="cpu_test", config=cfg_a, device="cpu"),
-        ProfileRunSpec(key="cpu_test", config=cfg_b, device="cpu"),
+        PresetRunSpec(key="cpu_test", config=cfg_a, device="cpu"),
+        PresetRunSpec(key="cpu_test", config=cfg_b, device="cpu"),
     ]
     diagnostics_root = tmp_path / "diag_root"
 
@@ -1186,7 +1186,7 @@ def test_run_benchmark_suite_uses_unique_diagnostics_dirs_for_duplicate_profile_
         hardware_policy="none",
     )
 
-    results = summary["profile_results"]
+    results = summary["preset_results"]
     assert len(results) == 2
     art_0 = results[0]["diagnostics_artifacts"]
     art_1 = results[1]["diagnostics_artifacts"]

@@ -19,7 +19,7 @@ from dagsynth.bench.baseline import (
     write_baseline,
 )
 from dagsynth.bench.report import write_suite_json, write_suite_markdown
-from dagsynth.bench.suite import resolve_profile_run_specs, run_benchmark_suite
+from dagsynth.bench.suite import resolve_preset_run_specs, run_benchmark_suite
 from dagsynth.config import (
     GeneratorConfig,
     MISSINGNESS_MECHANISM_MAR,
@@ -41,8 +41,8 @@ from dagsynth.diagnostics import (
 from dagsynth.hardware import detect_hardware
 from dagsynth.hardware_policy import list_hardware_policies
 from dagsynth.io.parquet_writer import write_packed_parquet_shards_stream
-from dagsynth.meta_targets import (
-    build_coverage_aggregation_config,
+from dagsynth.diagnostics_targets import (
+    build_diagnostics_aggregation_config,
 )
 from dagsynth.rng import SEED32_MAX, SEED32_MIN
 
@@ -227,7 +227,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Explicit hardware policy to apply to config (default: none).",
     )
     g.add_argument(
-        "--no-write",
+        "--no-dataset-write",
         action="store_true",
         help="Generate in memory only and do not write parquet files.",
     )
@@ -282,13 +282,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print field-level override trace for resolved config before generation.",
     )
-    b = sub.add_parser("benchmark", help="Run benchmark suite across one or more profiles.")
-    b.add_argument("--config", default=None, help="Optional YAML config for profile 'custom'.")
+    b = sub.add_parser("benchmark", help="Run benchmark suite across one or more presets.")
+    b.add_argument("--config", default=None, help="Optional YAML config for preset 'custom'.")
     b.add_argument(
         "--device",
         default=None,
         choices=DEVICE_CHOICES,
-        help="Device override for custom profile.",
+        help="Device override for custom preset.",
     )
     b.add_argument(
         "--num-datasets",
@@ -316,11 +316,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Benchmark suite level. Defaults to config benchmark.suite.",
     )
     b.add_argument(
-        "--profile",
+        "--preset",
         action="append",
         default=None,
         choices=["all", "cpu", "cuda_desktop", "cuda_h100", "custom"],
-        help="Benchmark profile key. Repeat to run multiple profiles.",
+        help="Benchmark preset key. Repeat to run multiple presets.",
     )
     b.add_argument(
         "--baseline",
@@ -348,7 +348,7 @@ def _build_parser() -> argparse.ArgumentParser:
     b.add_argument(
         "--no-memory",
         action="store_true",
-        help="Disable memory collection for benchmark profiles.",
+        help="Disable memory collection for benchmark presets.",
     )
     b.add_argument(
         "--collect-reproducibility",
@@ -363,7 +363,7 @@ def _build_parser() -> argparse.ArgumentParser:
     b.add_argument(
         "--diagnostics",
         action="store_true",
-        help="Enable diagnostics coverage aggregation artifacts for each benchmark profile run.",
+        help="Enable diagnostics coverage aggregation artifacts for each benchmark preset run.",
     )
     b.add_argument(
         "--diagnostics-out-dir",
@@ -373,15 +373,15 @@ def _build_parser() -> argparse.ArgumentParser:
     b.add_argument(
         "--print-effective-config",
         action="store_true",
-        help="Print each profile's resolved effective config YAML before execution.",
+        help="Print each preset's resolved effective config YAML before execution.",
     )
     b.add_argument(
         "--print-resolution-trace",
         action="store_true",
-        help="Print each profile's field-level override trace before execution.",
+        help="Print each preset's field-level override trace before execution.",
     )
 
-    h = sub.add_parser("hardware", help="Inspect detected hardware and profile mapping.")
+    h = sub.add_parser("hardware", help="Inspect detected hardware and tier mapping.")
     h.add_argument(
         "--device",
         default=None,
@@ -509,11 +509,11 @@ def _run_generate(args: argparse.Namespace) -> int:
             diagnostics_root = "diagnostics_artifacts"
         diagnostics_out_dir = Path(diagnostics_root)
         diagnostics_aggregator = CoverageAggregator(
-            build_coverage_aggregation_config(config.diagnostics)
+            build_diagnostics_aggregation_config(config.diagnostics)
         )
     print(
         f"Hardware backend={hw.backend} device='{hw.device_name}' "
-        f"memory_gb={hw.total_memory_gb} peak_flops={hw.peak_flops:.3e} profile={hw.profile} "
+        f"memory_gb={hw.total_memory_gb} peak_flops={hw.peak_flops:.3e} tier={hw.tier} "
         f"hardware_policy={args.hardware_policy}"
     )
 
@@ -533,14 +533,14 @@ def _run_generate(args: argparse.Namespace) -> int:
 
         stream = _stream_with_diagnostics()
 
-    if args.no_write:
+    if args.no_dataset_write:
         generated = sum(1 for _ in stream)
         if diagnostics_aggregator is not None:
             assert diagnostics_out_dir is not None
             _write_generate_diagnostics_artifacts(
                 diagnostics_aggregator, diagnostics_out_dir=diagnostics_out_dir
             )
-        print(f"Generated {generated} datasets (no-write mode).")
+        print(f"Generated {generated} datasets (no-dataset-write mode).")
         return 0
 
     written = write_packed_parquet_shards_stream(
@@ -591,7 +591,7 @@ def _benchmark_diagnostics_root_dir(
     *,
     artifact_dir: Path | None,
 ) -> Path | None:
-    """Resolve diagnostics artifact root for benchmark profile coverage summaries."""
+    """Resolve diagnostics artifact root for benchmark preset coverage summaries."""
 
     if not bool(args.diagnostics):
         return None
@@ -602,20 +602,20 @@ def _benchmark_diagnostics_root_dir(
     return _default_benchmark_artifact_dir()
 
 
-def _sanitize_profile_segment(profile_key: str) -> str:
-    """Normalize profile key into a filesystem-safe segment."""
+def _sanitize_preset_segment(preset_key: str) -> str:
+    """Normalize preset key into a filesystem-safe segment."""
 
-    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(profile_key)).strip("._-")
-    return normalized or "profile"
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(preset_key)).strip("._-")
+    return normalized or "preset"
 
 
 def _write_benchmark_effective_configs(
     summary: dict[str, Any], artifact_dir: Path
 ) -> tuple[list[Path], list[Path]]:
-    """Persist per-profile effective config payloads and resolution traces."""
+    """Persist per-preset effective config payloads and resolution traces."""
 
-    profile_results = summary.get("profile_results", [])
-    if not isinstance(profile_results, list):
+    preset_results = summary.get("preset_results", [])
+    if not isinstance(preset_results, list):
         return [], []
 
     config_paths: list[Path] = []
@@ -624,13 +624,13 @@ def _write_benchmark_effective_configs(
     out_root = artifact_dir / "effective_configs"
     out_root.mkdir(parents=True, exist_ok=True)
 
-    for idx, result in enumerate(profile_results):
+    for idx, result in enumerate(preset_results):
         if not isinstance(result, dict):
             continue
         payload = result.get("effective_config")
         if not isinstance(payload, dict):
             continue
-        key = _sanitize_profile_segment(str(result.get("profile_key", f"profile_{idx}")))
+        key = _sanitize_preset_segment(str(result.get("preset_key", f"preset_{idx}")))
         key_counts[key] = key_counts.get(key, 0) + 1
         count = key_counts[key]
         suffix = f"_run{count}" if count > 1 else ""
@@ -652,8 +652,8 @@ def _write_benchmark_effective_configs(
     return config_paths, trace_paths
 
 
-def _print_profile_result_line(result: dict[str, Any]) -> None:
-    """Print one compact profile benchmark summary line."""
+def _print_preset_result_line(result: dict[str, Any]) -> None:
+    """Print one compact preset benchmark summary line."""
 
     diagnostics_hint = ""
     artifacts = result.get("diagnostics_artifacts")
@@ -683,7 +683,7 @@ def _print_profile_result_line(result: dict[str, Any]) -> None:
         noise_hint = f" noise={noise_guardrails.get('status', 'pass')}"
 
     print(
-        f"[{result.get('profile_key')}] device={result.get('device')} "
+        f"[{result.get('preset_key')}] device={result.get('device')} "
         f"backend={result.get('hardware_backend')} "
         f"datasets/min={float(result.get('datasets_per_minute', 0.0)):.2f} "
         f"latency_p95_ms={float(result.get('latency_p95_ms', 0.0)):.2f}"
@@ -710,17 +710,17 @@ def _run_benchmark(args: argparse.Namespace) -> int:
         else float(default_cfg.benchmark.fail_threshold_pct)
     )
 
-    profile_specs = resolve_profile_run_specs(
-        profile_keys=args.profile,
+    preset_specs = resolve_preset_run_specs(
+        preset_keys=args.preset,
         config_path=args.config,
     )
-    if args.device and len(profile_specs) == 1:
-        profile_specs[0].device = args.device
+    if args.device and len(preset_specs) == 1:
+        preset_specs[0].device = args.device
 
     baseline_payload = load_baseline(args.baseline) if args.baseline else None
 
     summary = run_benchmark_suite(
-        profile_specs,
+        preset_specs,
         suite=suite,
         warn_threshold_pct=warn_pct,
         fail_threshold_pct=fail_pct,
@@ -739,27 +739,27 @@ def _run_benchmark(args: argparse.Namespace) -> int:
     )
 
     if args.print_effective_config:
-        for result in summary.get("profile_results", []):
+        for result in summary.get("preset_results", []):
             if not isinstance(result, dict):
                 continue
             payload = result.get("effective_config")
             if not isinstance(payload, dict):
                 continue
-            profile_key = str(result.get("profile_key", "unknown"))
-            print(f"Effective config [{profile_key}]:")
+            preset_key = str(result.get("preset_key", "unknown"))
+            print(f"Effective config [{preset_key}]:")
             print(yaml.safe_dump(payload, sort_keys=False, default_flow_style=False).rstrip())
     if args.print_resolution_trace:
-        for result in summary.get("profile_results", []):
+        for result in summary.get("preset_results", []):
             if not isinstance(result, dict):
                 continue
             trace_payload = result.get("effective_config_trace")
             if not isinstance(trace_payload, list):
                 continue
-            profile_key = str(result.get("profile_key", "unknown"))
-            _print_resolution_trace(trace_payload, header=f"Resolution trace [{profile_key}]:")
+            preset_key = str(result.get("preset_key", "unknown"))
+            _print_resolution_trace(trace_payload, header=f"Resolution trace [{preset_key}]:")
 
-    for result in summary.get("profile_results", []):
-        _print_profile_result_line(result)
+    for result in summary.get("preset_results", []):
+        _print_preset_result_line(result)
 
     regression = summary.get("regression", {})
     print(
@@ -795,7 +795,7 @@ def _run_hardware(args: argparse.Namespace) -> int:
 
     hw = detect_hardware(args.device)
     print(
-        f"backend={hw.backend} device='{hw.device_name}' profile={hw.profile} "
+        f"backend={hw.backend} device='{hw.device_name}' tier={hw.tier} "
         f"memory_gb={hw.total_memory_gb} peak_flops={hw.peak_flops:.3e}"
     )
     return 0

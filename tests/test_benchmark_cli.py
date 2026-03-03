@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from dagsynth.cli import _print_profile_result_line, main
+from dagsynth.cli import _print_preset_result_line, main
 
 
 def test_benchmark_cli_writes_json(tmp_path) -> None:
@@ -13,7 +13,7 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
             "benchmark",
             "--config",
             "configs/default.yaml",
-            "--profile",
+            "--preset",
             "custom",
             "--suite",
             "smoke",
@@ -32,8 +32,8 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
     assert out.exists()
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["suite"] == "smoke"
-    assert len(payload["profile_results"]) == 1
-    lineage_guardrails = payload["profile_results"][0]["lineage_guardrails"]
+    assert len(payload["preset_results"]) == 1
+    lineage_guardrails = payload["preset_results"][0]["lineage_guardrails"]
     assert isinstance(lineage_guardrails, dict)
     assert isinstance(lineage_guardrails["enabled"], bool)
     if lineage_guardrails["enabled"]:
@@ -45,7 +45,7 @@ def test_benchmark_cli_writes_effective_config_trace_artifacts(tmp_path) -> None
     code = main(
         [
             "benchmark",
-            "--profile",
+            "--preset",
             "cpu",
             "--suite",
             "smoke",
@@ -77,7 +77,7 @@ def test_benchmark_cli_fail_on_regression(tmp_path) -> None:
         "version": 1,
         "suite": "standard",
         "metrics": ["datasets_per_minute"],
-        "profiles": {
+        "presets": {
             "medium_cuda": {"datasets_per_minute": 1.0e9},
         },
     }
@@ -88,7 +88,7 @@ def test_benchmark_cli_fail_on_regression(tmp_path) -> None:
             "benchmark",
             "--config",
             "configs/default.yaml",
-            "--profile",
+            "--preset",
             "custom",
             "--suite",
             "smoke",
@@ -118,7 +118,7 @@ def test_benchmark_cli_diagnostics_emits_artifacts(tmp_path) -> None:
             "benchmark",
             "--config",
             "configs/default.yaml",
-            "--profile",
+            "--preset",
             "custom",
             "--suite",
             "smoke",
@@ -139,7 +139,7 @@ def test_benchmark_cli_diagnostics_emits_artifacts(tmp_path) -> None:
     summary_path = out_dir / "summary.json"
     assert summary_path.exists()
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
-    profile = payload["profile_results"][0]
+    profile = payload["preset_results"][0]
     assert profile["diagnostics_enabled"] is True
 
     artifacts = profile["diagnostics_artifacts"]
@@ -164,7 +164,7 @@ def test_benchmark_cli_json_out_diagnostics_does_not_emit_default_summary_artifa
             "benchmark",
             "--config",
             str(config_path),
-            "--profile",
+            "--preset",
             "custom",
             "--suite",
             "smoke",
@@ -195,7 +195,7 @@ def test_benchmark_cli_diagnostics_pointers_resolve_when_roots_differ(tmp_path) 
             "benchmark",
             "--config",
             "configs/default.yaml",
-            "--profile",
+            "--preset",
             "custom",
             "--suite",
             "smoke",
@@ -218,7 +218,7 @@ def test_benchmark_cli_diagnostics_pointers_resolve_when_roots_differ(tmp_path) 
     summary_path = out_dir / "summary.json"
     assert summary_path.exists()
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
-    profile = payload["profile_results"][0]
+    profile = payload["preset_results"][0]
     artifacts = profile["diagnostics_artifacts"]
     assert isinstance(artifacts, dict)
     json_path = Path(artifacts["json"])
@@ -238,7 +238,7 @@ def test_benchmark_cli_missingness_guardrails_are_emitted(tmp_path) -> None:
             "benchmark",
             "--config",
             "configs/preset_missingness_mcar.yaml",
-            "--profile",
+            "--preset",
             "custom",
             "--suite",
             "smoke",
@@ -255,7 +255,7 @@ def test_benchmark_cli_missingness_guardrails_are_emitted(tmp_path) -> None:
     )
     assert code == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
-    profile = payload["profile_results"][0]
+    profile = payload["preset_results"][0]
     guardrails = profile["missingness_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["status"] in {"pass", "warn", "fail"}
@@ -273,7 +273,7 @@ def test_benchmark_cli_shift_guardrails_are_emitted(tmp_path) -> None:
             "benchmark",
             "--config",
             "configs/preset_shift_benchmark_smoke.yaml",
-            "--profile",
+            "--preset",
             "custom",
             "--suite",
             "smoke",
@@ -290,7 +290,7 @@ def test_benchmark_cli_shift_guardrails_are_emitted(tmp_path) -> None:
     )
     assert code == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
-    profile = payload["profile_results"][0]
+    profile = payload["preset_results"][0]
     guardrails = profile["shift_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["status"] in {"pass", "warn", "fail"}
@@ -305,7 +305,7 @@ def test_benchmark_cli_noise_guardrails_are_emitted(tmp_path) -> None:
             "benchmark",
             "--config",
             "configs/preset_noise_benchmark_smoke.yaml",
-            "--profile",
+            "--preset",
             "custom",
             "--suite",
             "smoke",
@@ -322,7 +322,7 @@ def test_benchmark_cli_noise_guardrails_are_emitted(tmp_path) -> None:
     )
     assert code == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
-    profile = payload["profile_results"][0]
+    profile = payload["preset_results"][0]
     guardrails = profile["noise_guardrails"]
     assert guardrails["enabled"] is True
     assert guardrails["status"] in {"pass", "warn", "fail"}
@@ -337,7 +337,7 @@ def test_benchmark_cli_many_class_smoke_preset_emits_runtime_metrics(tmp_path) -
             "benchmark",
             "--config",
             "configs/preset_many_class_benchmark_smoke.yaml",
-            "--profile",
+            "--preset",
             "custom",
             "--suite",
             "smoke",
@@ -354,7 +354,7 @@ def test_benchmark_cli_many_class_smoke_preset_emits_runtime_metrics(tmp_path) -
     )
     assert code == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
-    profile = payload["profile_results"][0]
+    profile = payload["preset_results"][0]
     assert float(profile["datasets_per_minute"]) > 0.0
     assert float(profile["latency_p95_ms"]) >= 0.0
     regression = payload["regression"]
@@ -364,10 +364,10 @@ def test_benchmark_cli_many_class_smoke_preset_emits_runtime_metrics(tmp_path) -
     assert isinstance(guardrails["enabled"], bool)
 
 
-def test_print_profile_result_line_includes_shift_status(capsys) -> None:
-    _print_profile_result_line(
+def test_print_preset_result_line_includes_shift_status(capsys) -> None:
+    _print_preset_result_line(
         {
-            "profile_key": "shift_smoke",
+            "preset_key": "shift_smoke",
             "device": "cpu",
             "hardware_backend": "cpu",
             "datasets_per_minute": 123.0,
@@ -379,10 +379,10 @@ def test_print_profile_result_line_includes_shift_status(capsys) -> None:
     assert "shift=pass" in output
 
 
-def test_print_profile_result_line_includes_noise_status(capsys) -> None:
-    _print_profile_result_line(
+def test_print_preset_result_line_includes_noise_status(capsys) -> None:
+    _print_preset_result_line(
         {
-            "profile_key": "noise_smoke",
+            "preset_key": "noise_smoke",
             "device": "cpu",
             "hardware_backend": "cpu",
             "datasets_per_minute": 123.0,

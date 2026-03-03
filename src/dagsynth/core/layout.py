@@ -7,7 +7,7 @@ import math
 import torch
 
 from dagsynth.config import GeneratorConfig
-from dagsynth.core.layout_types import FeatureType, LayoutPayload
+from dagsynth.core.layout_types import FeatureType, LayoutPlan
 from dagsynth.core.node_pipeline import ConverterSpec
 from dagsynth.graph import dag_edge_density, dag_longest_path_nodes, sample_dag
 from dagsynth.core.shift import resolve_shift_runtime_params
@@ -56,7 +56,7 @@ def _sample_layout(
     config: GeneratorConfig,
     generator: torch.Generator,
     device: str,
-) -> LayoutPayload:
+) -> LayoutPlan:
     """Sample dataset layout, graph, and node assignments for one dataset instance."""
 
     shift_params = resolve_shift_runtime_params(config)
@@ -138,22 +138,22 @@ def _sample_layout(
     for i in cat_idx:
         feature_types[int(i)] = "cat"
 
-    return {
-        "n_features": num_features,
-        "n_cat": num_categorical_features,
-        "cat_idx": cat_idx,
-        "cardinalities": cardinalities,
-        "card_by_feature": card_by_feature,
-        "n_classes": n_classes,
-        "feature_types": feature_types,
-        "graph_nodes": num_nodes,
-        "graph_edges": int(adjacency.sum().item()),
-        "graph_depth_nodes": int(graph_depth_nodes),
-        "graph_edge_density": float(graph_edge_density),
-        "adjacency": adjacency,
-        "feature_node_assignment": feature_to_node,
-        "target_node_assignment": target_to_node,
-    }
+    return LayoutPlan(
+        n_features=num_features,
+        n_cat=num_categorical_features,
+        cat_idx=cat_idx,
+        cardinalities=cardinalities,
+        card_by_feature=card_by_feature,
+        n_classes=n_classes,
+        feature_types=feature_types,
+        graph_nodes=num_nodes,
+        graph_edges=int(adjacency.sum().item()),
+        graph_depth_nodes=int(graph_depth_nodes),
+        graph_edge_density=float(graph_edge_density),
+        adjacency=adjacency,
+        feature_node_assignment=feature_to_node,
+        target_node_assignment=target_to_node,
+    )
 
 
 def _feature_key(feature_index: int) -> str:
@@ -164,16 +164,16 @@ def _feature_key(feature_index: int) -> str:
 
 def _build_node_specs(
     node_index: int,
-    layout: LayoutPayload,
+    layout: LayoutPlan,
     task: str,
     generator: torch.Generator,
 ) -> list[ConverterSpec]:
     """Build converter specs for one node in the graph execution order."""
 
     specs: list[ConverterSpec] = []
-    feature_to_node = layout["feature_node_assignment"]
-    feature_types = list(layout["feature_types"])
-    card_by_feature: dict[int, int] = layout["card_by_feature"]
+    feature_to_node = layout.feature_node_assignment
+    feature_types = list(layout.feature_types)
+    card_by_feature: dict[int, int] = layout.card_by_feature
 
     feature_indices = [
         index for index, assignment in enumerate(feature_to_node) if assignment == node_index
@@ -196,9 +196,9 @@ def _build_node_specs(
         else:
             specs.append(ConverterSpec(key=_feature_key(feature_index), kind="num", dim=1))
 
-    if int(layout["target_node_assignment"]) == node_index:
+    if int(layout.target_node_assignment) == node_index:
         if task == "classification":
-            n_classes = int(layout["n_classes"])
+            n_classes = int(layout.n_classes)
             specs.append(
                 ConverterSpec(
                     key="target",

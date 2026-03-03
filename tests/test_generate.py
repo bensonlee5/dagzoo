@@ -25,6 +25,7 @@ from dagsynth.core.dataset import (
     generate_one,
     sample_fixed_layout,
 )
+from dagsynth.core.layout_types import LayoutPlan
 from dagsynth.core.shift import mechanism_nonlinear_mass, resolve_shift_runtime_params
 from dagsynth.io.lineage_schema import (
     LINEAGE_SCHEMA_NAME,
@@ -61,18 +62,29 @@ def _layout_stub(
     adjacency: torch.Tensor,
     feature_node_assignment: list[int],
     target_node_assignment: int,
-) -> dict[str, object]:
+) -> LayoutPlan:
     graph_edges = int(adjacency.to(dtype=torch.int64).sum().item())
-    return {
-        "feature_types": list(feature_types),
-        "graph_nodes": int(graph_nodes),
-        "graph_edges": graph_edges,
-        "graph_depth_nodes": int(graph_nodes),
-        "graph_edge_density": 0.0,
-        "adjacency": adjacency,
-        "feature_node_assignment": list(feature_node_assignment),
-        "target_node_assignment": int(target_node_assignment),
-    }
+    n_features = len(feature_types)
+    cat_idx = [idx for idx, kind in enumerate(feature_types) if kind == "cat"]
+    card_by_feature = {idx: 4 for idx in cat_idx}
+    density_denominator = graph_nodes * max(graph_nodes - 1, 1)
+    graph_edge_density = float(graph_edges) / float(density_denominator) if graph_nodes > 1 else 0.0
+    return LayoutPlan(
+        n_features=n_features,
+        n_cat=len(cat_idx),
+        cat_idx=cat_idx,
+        cardinalities=[4 for _ in cat_idx],
+        card_by_feature=card_by_feature,
+        n_classes=3,
+        feature_types=list(feature_types),
+        graph_nodes=int(graph_nodes),
+        graph_edges=graph_edges,
+        graph_depth_nodes=int(graph_nodes),
+        graph_edge_density=graph_edge_density,
+        adjacency=adjacency,
+        feature_node_assignment=list(feature_node_assignment),
+        target_node_assignment=int(target_node_assignment),
+    )
 
 
 def test_parent_node_indices_reads_parents_from_adjacency_columns() -> None:
@@ -197,7 +209,7 @@ def test_generate_one_shift_disabled_preserves_baseline_outputs() -> None:
     baseline = _tiny_regression_config()
     disabled = _tiny_regression_config()
     disabled.shift.enabled = False
-    disabled.shift.profile = "off"
+    disabled.shift.mode = "off"
 
     bundle_base = generate_one(baseline, seed=1881, device="cpu")
     bundle_disabled = generate_one(disabled, seed=1881, device="cpu")
@@ -215,18 +227,18 @@ def test_generate_one_shift_disabled_preserves_baseline_outputs() -> None:
 def test_generate_one_shift_metadata_emits_disabled_defaults() -> None:
     cfg = _tiny_regression_config()
     cfg.shift.enabled = False
-    cfg.shift.profile = "off"
+    cfg.shift.mode = "off"
 
     bundle = generate_one(cfg, seed=1882, device="cpu")
     shift_metadata = bundle.metadata["shift"]
     assert shift_metadata["enabled"] is False
-    assert shift_metadata["profile"] == "off"
+    assert shift_metadata["mode"] == "off"
     assert shift_metadata["graph_scale"] == pytest.approx(0.0)
     assert shift_metadata["mechanism_scale"] == pytest.approx(0.0)
-    assert shift_metadata["noise_scale"] == pytest.approx(0.0)
+    assert shift_metadata["variance_scale"] == pytest.approx(0.0)
     assert shift_metadata["edge_logit_bias_shift"] == pytest.approx(0.0)
     assert shift_metadata["mechanism_logit_tilt"] == pytest.approx(0.0)
-    assert shift_metadata["noise_sigma_multiplier"] == pytest.approx(1.0)
+    assert shift_metadata["variance_sigma_multiplier"] == pytest.approx(1.0)
     assert shift_metadata["edge_odds_multiplier"] == pytest.approx(1.0)
     assert shift_metadata["noise_variance_multiplier"] == pytest.approx(1.0)
     assert shift_metadata["mechanism_nonlinear_mass"] == pytest.approx(
@@ -237,27 +249,29 @@ def test_generate_one_shift_metadata_emits_disabled_defaults() -> None:
 def test_generate_one_shift_metadata_matches_resolved_runtime_params() -> None:
     cfg = _tiny_regression_config()
     cfg.shift.enabled = True
-    cfg.shift.profile = "custom"
+    cfg.shift.mode = "custom"
     cfg.shift.graph_scale = 0.6
     cfg.shift.mechanism_scale = 0.3
-    cfg.shift.noise_scale = 0.4
+    cfg.shift.variance_scale = 0.4
     runtime = resolve_shift_runtime_params(cfg)
 
     bundle = generate_one(cfg, seed=1883, device="cpu")
     shift_metadata = bundle.metadata["shift"]
     assert shift_metadata["enabled"] is True
-    assert shift_metadata["profile"] == "custom"
+    assert shift_metadata["mode"] == "custom"
     assert shift_metadata["graph_scale"] == pytest.approx(runtime.graph_scale)
     assert shift_metadata["mechanism_scale"] == pytest.approx(runtime.mechanism_scale)
-    assert shift_metadata["noise_scale"] == pytest.approx(runtime.noise_scale)
+    assert shift_metadata["variance_scale"] == pytest.approx(runtime.variance_scale)
     assert shift_metadata["edge_logit_bias_shift"] == pytest.approx(runtime.edge_logit_bias_shift)
     assert shift_metadata["mechanism_logit_tilt"] == pytest.approx(runtime.mechanism_logit_tilt)
-    assert shift_metadata["noise_sigma_multiplier"] == pytest.approx(runtime.noise_sigma_multiplier)
+    assert shift_metadata["variance_sigma_multiplier"] == pytest.approx(
+        runtime.variance_sigma_multiplier
+    )
     assert shift_metadata["edge_odds_multiplier"] == pytest.approx(
         math.exp(runtime.edge_logit_bias_shift)
     )
     assert shift_metadata["noise_variance_multiplier"] == pytest.approx(
-        runtime.noise_sigma_multiplier**2
+        runtime.variance_sigma_multiplier**2
     )
     assert shift_metadata["mechanism_nonlinear_mass"] == pytest.approx(
         mechanism_nonlinear_mass(mechanism_logit_tilt=runtime.mechanism_logit_tilt)
@@ -267,15 +281,15 @@ def test_generate_one_shift_metadata_matches_resolved_runtime_params() -> None:
 def test_generate_one_noise_metadata_emits_gaussian_defaults() -> None:
     cfg = _tiny_regression_config()
     cfg.noise.family = "gaussian"
-    cfg.noise.scale = 1.0
+    cfg.noise.base_scale = 1.0
     cfg.noise.student_t_df = 5.0
 
     bundle = generate_one(cfg, seed=1884, device="cpu")
-    noise_metadata = bundle.metadata["noise"]
+    noise_metadata = bundle.metadata["noise_distribution"]
     assert noise_metadata["family_requested"] == "gaussian"
     assert noise_metadata["family_sampled"] == "gaussian"
     assert noise_metadata["sampling_strategy"] == "dataset_level"
-    assert noise_metadata["scale"] == pytest.approx(1.0)
+    assert noise_metadata["base_scale"] == pytest.approx(1.0)
     assert noise_metadata["student_t_df"] == pytest.approx(5.0)
     assert noise_metadata["mixture_weights"] is None
 
@@ -287,15 +301,15 @@ def test_generate_one_nongaussian_noise_family_changes_outputs_for_same_seed(fam
 
     drifted = _tiny_regression_config()
     drifted.noise.family = family
-    drifted.noise.scale = 1.0
+    drifted.noise.base_scale = 1.0
     if family == NOISE_FAMILY_STUDENT_T:
         drifted.noise.student_t_df = 6.0
 
     bundle_base = generate_one(baseline, seed=1885, device="cpu")
     bundle_drifted = generate_one(drifted, seed=1885, device="cpu")
     assert not torch.allclose(bundle_base.X_train, bundle_drifted.X_train)
-    assert bundle_drifted.metadata["noise"]["family_requested"] == family
-    assert bundle_drifted.metadata["noise"]["family_sampled"] == family
+    assert bundle_drifted.metadata["noise_distribution"]["family_requested"] == family
+    assert bundle_drifted.metadata["noise_distribution"]["family_sampled"] == family
 
 
 def test_generate_one_mixture_noise_is_dataset_level_and_reproducible() -> None:
@@ -305,8 +319,8 @@ def test_generate_one_mixture_noise_is_dataset_level_and_reproducible() -> None:
 
     bundle_a = generate_one(cfg, seed=1886, device="cpu")
     bundle_b = generate_one(cfg, seed=1886, device="cpu")
-    noise_a = bundle_a.metadata["noise"]
-    noise_b = bundle_b.metadata["noise"]
+    noise_a = bundle_a.metadata["noise_distribution"]
+    noise_b = bundle_b.metadata["noise_distribution"]
 
     assert noise_a == noise_b
     assert noise_a["family_requested"] == "mixture"
@@ -325,7 +339,7 @@ def test_generate_one_graph_drift_increases_edge_density_for_same_seed() -> None
     shifted.graph.n_nodes_min = 20
     shifted.graph.n_nodes_max = 20
     shifted.shift.enabled = True
-    shifted.shift.profile = "graph_drift"
+    shifted.shift.mode = "graph_drift"
 
     bundle_base = generate_one(baseline, seed=2203, device="cpu")
     bundle_shifted = generate_one(shifted, seed=2203, device="cpu")
@@ -340,7 +354,7 @@ def test_generate_one_graph_drift_increases_edge_density_for_same_seed() -> None
     ("profile", "override_field", "override_value"),
     [
         ("mechanism_drift", "mechanism_scale", 1.0),
-        ("noise_drift", "noise_scale", 1.0),
+        ("noise_drift", "variance_scale", 1.0),
     ],
 )
 def test_generate_one_shift_profiles_change_outputs_for_same_seed(
@@ -354,7 +368,7 @@ def test_generate_one_shift_profiles_change_outputs_for_same_seed(
     shifted.graph.n_nodes_min = 10
     shifted.graph.n_nodes_max = 10
     shifted.shift.enabled = True
-    shifted.shift.profile = profile
+    shifted.shift.mode = profile
     setattr(shifted.shift, override_field, override_value)
 
     bundle_base = generate_one(baseline, seed=2204, device="cpu")
@@ -368,7 +382,7 @@ def test_generate_one_shift_profiles_change_outputs_for_same_seed(
     [
         ("graph_drift", {"graph_scale": 1.0}),
         ("mechanism_drift", {"mechanism_scale": 1.0}),
-        ("noise_drift", {"noise_scale": 1.0}),
+        ("noise_drift", {"variance_scale": 1.0}),
         ("mixed", {}),
     ],
 )
@@ -379,7 +393,7 @@ def test_generate_one_shift_profiles_are_seed_reproducible(
     cfg.graph.n_nodes_min = 10
     cfg.graph.n_nodes_max = 10
     cfg.shift.enabled = True
-    cfg.shift.profile = profile
+    cfg.shift.mode = profile
     for key, value in overrides.items():
         setattr(cfg.shift, key, value)
 
@@ -517,11 +531,19 @@ def test_generate_torch_forces_cpu_for_stratified_split(
     with pytest.raises(_SplitSentinel):
         _generate_torch(
             cfg,
-            layout={},
+            layout=_layout_stub(
+                feature_types=["num", "num", "num", "num"],
+                graph_nodes=4,
+                adjacency=torch.zeros((4, 4), dtype=torch.bool),
+                feature_node_assignment=[0, 1, 2, 3],
+                target_node_assignment=3,
+            ),
             seed=111,
             device="cuda",
             n_train=8,
             n_test=4,
+            requested_device="cuda",
+            resolved_device="cuda",
         )
 
     assert captured["split_device_arg"] == "cpu"
@@ -586,11 +608,19 @@ def test_generate_torch_routes_postprocess_to_runtime_device(
     with pytest.raises(_PostprocessSentinel):
         _generate_torch(
             cfg,
-            layout={"feature_types": ["num", "num", "num", "num"]},
+            layout=_layout_stub(
+                feature_types=["num", "num", "num", "num"],
+                graph_nodes=4,
+                adjacency=torch.zeros((4, 4), dtype=torch.bool),
+                feature_node_assignment=[0, 1, 2, 3],
+                target_node_assignment=3,
+            ),
             seed=222,
             device="cuda",
             n_train=8,
             n_test=4,
+            requested_device="cuda",
+            resolved_device="cuda",
         )
 
     assert captured["postprocess_device_arg"] == "cuda"
@@ -672,11 +702,19 @@ def test_generate_torch_routes_missingness_to_runtime_device(
     with pytest.raises(_MissingnessSentinel):
         _generate_torch(
             cfg,
-            layout={"feature_types": ["num", "num", "num", "num"]},
+            layout=_layout_stub(
+                feature_types=["num", "num", "num", "num"],
+                graph_nodes=4,
+                adjacency=torch.zeros((4, 4), dtype=torch.bool),
+                feature_node_assignment=[0, 1, 2, 3],
+                target_node_assignment=3,
+            ),
             seed=333,
             device="cuda",
             n_train=8,
             n_test=4,
+            requested_device="cuda",
+            resolved_device="cuda",
         )
 
     assert captured["missingness_device_arg"] == "cuda"
@@ -702,8 +740,8 @@ def test_sample_fixed_layout_is_deterministic_for_seed() -> None:
 
     assert plan_a.layout_signature == plan_b.layout_signature
     assert plan_a.plan_seed == plan_b.plan_seed
-    assert int(plan_a.layout["n_features"]) == int(plan_b.layout["n_features"])
-    assert list(plan_a.layout["feature_types"]) == list(plan_b.layout["feature_types"])
+    assert int(plan_a.layout.n_features) == int(plan_b.layout.n_features)
+    assert list(plan_a.layout.feature_types) == list(plan_b.layout.feature_types)
 
 
 def test_generate_batch_fixed_layout_iter_matches_materialized_ordering() -> None:
@@ -783,7 +821,7 @@ def test_generate_batch_fixed_layout_allows_non_contract_config_drift() -> None:
     drifted = _tiny_regression_config()
     drifted.filter.max_attempts = cfg.filter.max_attempts + 1
     drifted.shift.enabled = True
-    drifted.shift.profile = "noise_drift"
+    drifted.shift.mode = "noise_drift"
 
     batch = list(generate_batch_fixed_layout_iter(drifted, plan=plan, num_datasets=2, seed=224))
     assert len(batch) == 2
@@ -794,7 +832,7 @@ def test_generate_batch_fixed_layout_allows_non_contract_config_drift() -> None:
 def test_generate_batch_fixed_layout_rejects_tampered_plan_layout_signature() -> None:
     cfg = _tiny_regression_config()
     plan = sample_fixed_layout(cfg, seed=114, device="cpu")
-    plan.layout["graph_edges"] = int(plan.layout["graph_edges"]) + 1
+    plan.layout.graph_edges = int(plan.layout.graph_edges) + 1
 
     with pytest.raises(ValueError, match=r"plan integrity mismatch"):
         list(generate_batch_fixed_layout_iter(cfg, plan=plan, num_datasets=1, seed=225))

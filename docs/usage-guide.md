@@ -99,7 +99,7 @@ dagsynth generate --config configs/preset_many_class_generate_smoke.yaml --num-d
 
 dagsynth benchmark \
   --config configs/preset_many_class_benchmark_smoke.yaml \
-  --profile custom \
+  --preset custom \
   --suite smoke \
   --no-memory \
   --out-dir benchmarks/results/smoke_many_class
@@ -139,7 +139,7 @@ Use benchmark workflows for smoke checks, feature guardrails, and regression
 gating.
 
 ```bash
-dagsynth benchmark --suite smoke --profile cpu --out-dir benchmarks/results/smoke_cpu
+dagsynth benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
 ```
 
 Detailed guide: [Benchmark Workflows and Guardrails](features/benchmark-guardrails.md)

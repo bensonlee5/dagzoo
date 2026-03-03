@@ -21,7 +21,7 @@ output:
   shard_size: 256
   compression: zstd
 benchmark:
-  profile_name: medium_cuda
+  preset_name: medium_cuda
   suite: standard
   num_datasets: 2000
   warmup_datasets: 25
@@ -31,7 +31,7 @@ benchmark:
   collect_reproducibility: false
   reproducibility_num_datasets: 2
   latency_num_samples: 20
-  profiles:
+  presets:
     cpu:
       device: cpu
       num_datasets: 200

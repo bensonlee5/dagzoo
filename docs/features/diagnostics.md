@@ -47,7 +47,7 @@ Diagnostics also work with `benchmark`:
 ```bash
 dagsynth benchmark \
   --suite smoke \
-  --profile cpu \
+  --preset cpu \
   --diagnostics \
   --out-dir benchmarks/results/smoke_cpu_diag
 ```

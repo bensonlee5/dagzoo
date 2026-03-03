@@ -20,13 +20,13 @@ def test_shift_generate_presets_load_with_expected_profile(
 ) -> None:
     cfg = GeneratorConfig.from_yaml(config_path)
     assert cfg.shift.enabled is True
-    assert cfg.shift.profile == expected_profile
+    assert cfg.shift.mode == expected_profile
     assert cfg.filter.enabled is False
 
 
 def test_shift_benchmark_preset_loads_with_expected_profile() -> None:
     cfg = GeneratorConfig.from_yaml("configs/preset_shift_benchmark_smoke.yaml")
     assert cfg.shift.enabled is True
-    assert cfg.shift.profile == "mixed"
-    assert cfg.benchmark.profile_name == "shift_smoke"
-    assert "shift_smoke" in cfg.benchmark.profiles
+    assert cfg.shift.mode == "mixed"
+    assert cfg.benchmark.preset_name == "shift_smoke"
+    assert "shift_smoke" in cfg.benchmark.presets

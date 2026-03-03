@@ -192,14 +192,14 @@ def test_load_benchmark_profiles() -> None:
     assert cfg_cpu.runtime.device == "cpu"
     assert cfg_desktop.runtime.device == "cuda"
     assert cfg_h100.runtime.device == "cuda"
-    assert "cpu" in cfg_h100.benchmark.profiles
+    assert "cpu" in cfg_h100.benchmark.presets
 
 
 def test_load_lineage_benchmark_smoke_preset() -> None:
     cfg = GeneratorConfig.from_yaml("configs/preset_lineage_benchmark_smoke.yaml")
     assert cfg.benchmark.suite == "smoke"
-    assert cfg.benchmark.profile_name == "lineage_smoke"
-    assert "lineage_smoke" in cfg.benchmark.profiles
+    assert cfg.benchmark.preset_name == "lineage_smoke"
+    assert "lineage_smoke" in cfg.benchmark.presets
     assert cfg.benchmark.latency_num_samples >= 5
 
 
@@ -371,17 +371,17 @@ def test_unused_missingness_parameters_are_allowed_with_disabled_mechanism() -> 
 def test_shift_defaults_are_backward_compatible_when_shift_block_is_absent() -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     assert cfg.shift.enabled is False
-    assert cfg.shift.profile == "off"
+    assert cfg.shift.mode == "off"
     assert cfg.shift.graph_scale is None
     assert cfg.shift.mechanism_scale is None
-    assert cfg.shift.noise_scale is None
+    assert cfg.shift.variance_scale is None
 
 
 @pytest.mark.parametrize("config_path", ("configs/default.yaml", "configs/benchmark_cpu.yaml"))
 def test_existing_config_files_parse_with_shift_schema(config_path: str) -> None:
     cfg = GeneratorConfig.from_yaml(config_path)
     assert cfg.shift.enabled is False
-    assert cfg.shift.profile == "off"
+    assert cfg.shift.mode == "off"
 
 
 def test_shift_schema_accepts_profile_with_optional_override() -> None:
@@ -389,16 +389,16 @@ def test_shift_schema_accepts_profile_with_optional_override() -> None:
         {
             "shift": {
                 "enabled": True,
-                "profile": "Graph_Drift",
+                "mode": "Graph_Drift",
                 "graph_scale": "0.75",
             }
         }
     )
     assert cfg.shift.enabled is True
-    assert cfg.shift.profile == "graph_drift"
+    assert cfg.shift.mode == "graph_drift"
     assert cfg.shift.graph_scale == 0.75
     assert cfg.shift.mechanism_scale is None
-    assert cfg.shift.noise_scale is None
+    assert cfg.shift.variance_scale is None
 
 
 def test_shift_schema_accepts_mixed_profile_with_multiple_overrides() -> None:
@@ -406,17 +406,17 @@ def test_shift_schema_accepts_mixed_profile_with_multiple_overrides() -> None:
         {
             "shift": {
                 "enabled": True,
-                "profile": "mixed",
+                "mode": "mixed",
                 "graph_scale": 0.2,
                 "mechanism_scale": 0.4,
-                "noise_scale": 0.6,
+                "variance_scale": 0.6,
             }
         }
     )
-    assert cfg.shift.profile == "mixed"
+    assert cfg.shift.mode == "mixed"
     assert cfg.shift.graph_scale == 0.2
     assert cfg.shift.mechanism_scale == 0.4
-    assert cfg.shift.noise_scale == 0.6
+    assert cfg.shift.variance_scale == 0.6
 
 
 def test_shift_schema_accepts_custom_profile_with_at_least_one_override() -> None:
@@ -424,54 +424,54 @@ def test_shift_schema_accepts_custom_profile_with_at_least_one_override() -> Non
         {
             "shift": {
                 "enabled": True,
-                "profile": "custom",
+                "mode": "custom",
                 "mechanism_scale": 0.35,
             }
         }
     )
-    assert cfg.shift.profile == "custom"
+    assert cfg.shift.mode == "custom"
     assert cfg.shift.mechanism_scale == 0.35
 
 
 def test_shift_schema_rejects_invalid_profile_value() -> None:
-    with pytest.raises(ValueError, match="Unsupported shift.profile"):
-        GeneratorConfig.from_dict({"shift": {"enabled": True, "profile": "unknown_mode"}})
+    with pytest.raises(ValueError, match="Unsupported shift.mode"):
+        GeneratorConfig.from_dict({"shift": {"enabled": True, "mode": "unknown_mode"}})
 
 
 def test_shift_schema_rejects_boolean_false_profile_alias() -> None:
-    with pytest.raises(ValueError, match="Unsupported shift.profile"):
-        GeneratorConfig.from_dict({"shift": {"enabled": False, "profile": False}})
+    with pytest.raises(ValueError, match="Unsupported shift.mode"):
+        GeneratorConfig.from_dict({"shift": {"enabled": False, "mode": False}})
 
 
 def test_shift_schema_rejects_boolean_true_profile_alias() -> None:
-    with pytest.raises(ValueError, match="Unsupported shift.profile"):
-        GeneratorConfig.from_dict({"shift": {"enabled": False, "profile": True}})
+    with pytest.raises(ValueError, match="Unsupported shift.mode"):
+        GeneratorConfig.from_dict({"shift": {"enabled": False, "mode": True}})
 
 
 def test_shift_schema_from_yaml_rejects_unquoted_off_profile(tmp_path) -> None:
     cfg_path = tmp_path / "shift_off.yaml"
     cfg_path.write_text(
-        "shift:\n  enabled: false\n  profile: off\n",
+        "shift:\n  enabled: false\n  mode: off\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="Unsupported shift.profile"):
+    with pytest.raises(ValueError, match="Unsupported shift.mode"):
         GeneratorConfig.from_yaml(cfg_path)
 
 
 def test_shift_schema_from_yaml_accepts_quoted_off_profile(tmp_path) -> None:
     cfg_path = tmp_path / "shift_off_quoted.yaml"
     cfg_path.write_text(
-        "shift:\n  enabled: false\n  profile: 'off'\n",
+        "shift:\n  enabled: false\n  mode: 'off'\n",
         encoding="utf-8",
     )
     cfg = GeneratorConfig.from_yaml(cfg_path)
     assert cfg.shift.enabled is False
-    assert cfg.shift.profile == "off"
+    assert cfg.shift.mode == "off"
 
 
 def test_shift_schema_rejects_non_boolean_enabled_value() -> None:
     with pytest.raises(ValueError, match="shift.enabled must be a boolean"):
-        GeneratorConfig.from_dict({"shift": {"enabled": "true", "profile": "off"}})
+        GeneratorConfig.from_dict({"shift": {"enabled": "true", "mode": "off"}})
 
 
 @pytest.mark.parametrize(
@@ -487,11 +487,11 @@ def test_shift_schema_rejects_non_boolean_enabled_value() -> None:
         ("mechanism_scale", float("inf")),
         ("mechanism_scale", float("nan")),
         ("mechanism_scale", True),
-        ("noise_scale", -0.1),
-        ("noise_scale", 1.1),
-        ("noise_scale", float("inf")),
-        ("noise_scale", float("nan")),
-        ("noise_scale", True),
+        ("variance_scale", -0.1),
+        ("variance_scale", 1.1),
+        ("variance_scale", float("inf")),
+        ("variance_scale", float("nan")),
+        ("variance_scale", True),
     ],
 )
 def test_shift_override_scales_enforce_finite_unit_interval_bounds(
@@ -504,7 +504,7 @@ def test_shift_override_scales_enforce_finite_unit_interval_bounds(
             {
                 "shift": {
                     "enabled": True,
-                    "profile": "mixed",
+                    "mode": "mixed",
                     field_name: bad_value,
                 }
             }
@@ -512,10 +512,8 @@ def test_shift_override_scales_enforce_finite_unit_interval_bounds(
 
 
 def test_shift_schema_rejects_non_off_profile_when_disabled() -> None:
-    with pytest.raises(
-        ValueError, match=r"shift\.profile must be 'off' when shift\.enabled is false"
-    ):
-        GeneratorConfig.from_dict({"shift": {"enabled": False, "profile": "mixed"}})
+    with pytest.raises(ValueError, match=r"shift\.mode must be 'off' when shift\.enabled is false"):
+        GeneratorConfig.from_dict({"shift": {"enabled": False, "mode": "mixed"}})
 
 
 def test_shift_schema_rejects_overrides_when_disabled() -> None:
@@ -526,7 +524,7 @@ def test_shift_schema_rejects_overrides_when_disabled() -> None:
             {
                 "shift": {
                     "enabled": False,
-                    "profile": "off",
+                    "mode": "off",
                     "graph_scale": 0.2,
                 }
             }
@@ -535,16 +533,16 @@ def test_shift_schema_rejects_overrides_when_disabled() -> None:
 
 def test_shift_schema_rejects_off_profile_when_enabled() -> None:
     with pytest.raises(
-        ValueError, match=r"shift\.profile must not be 'off' when shift\.enabled is true"
+        ValueError, match=r"shift\.mode must not be 'off' when shift\.enabled is true"
     ):
-        GeneratorConfig.from_dict({"shift": {"enabled": True, "profile": "off"}})
+        GeneratorConfig.from_dict({"shift": {"enabled": True, "mode": "off"}})
 
 
 def test_shift_schema_requires_custom_profile_to_set_at_least_one_override() -> None:
     with pytest.raises(
-        ValueError, match=r"shift\.profile 'custom' requires at least one override scale"
+        ValueError, match=r"shift\.mode 'custom' requires at least one override scale"
     ):
-        GeneratorConfig.from_dict({"shift": {"enabled": True, "profile": "custom"}})
+        GeneratorConfig.from_dict({"shift": {"enabled": True, "mode": "custom"}})
 
 
 @pytest.mark.parametrize(
@@ -552,18 +550,18 @@ def test_shift_schema_requires_custom_profile_to_set_at_least_one_override() -> 
     [
         (
             "graph_drift",
-            {"noise_scale": 0.25},
-            r"shift\.profile 'graph_drift' only allows shift\.graph_scale override",
+            {"variance_scale": 0.25},
+            r"shift\.mode 'graph_drift' only allows shift\.graph_scale override",
         ),
         (
             "mechanism_drift",
             {"graph_scale": 0.25},
-            r"shift\.profile 'mechanism_drift' only allows shift\.mechanism_scale override",
+            r"shift\.mode 'mechanism_drift' only allows shift\.mechanism_scale override",
         ),
         (
             "noise_drift",
             {"mechanism_scale": 0.25},
-            r"shift\.profile 'noise_drift' only allows shift\.noise_scale override",
+            r"shift\.mode 'noise_drift' only allows shift\.variance_scale override",
         ),
     ],
 )
@@ -577,7 +575,7 @@ def test_shift_schema_rejects_incompatible_profile_override_combinations(
             {
                 "shift": {
                     "enabled": True,
-                    "profile": profile,
+                    "mode": profile,
                     **payload,
                 }
             }

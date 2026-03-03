@@ -31,6 +31,6 @@ def test_noise_generate_presets_load_with_expected_family(
 def test_noise_benchmark_preset_loads_with_expected_profile() -> None:
     cfg = GeneratorConfig.from_yaml("configs/preset_noise_benchmark_smoke.yaml")
     assert cfg.noise.family == "mixture"
-    assert cfg.benchmark.profile_name == "noise_smoke"
-    assert "noise_smoke" in cfg.benchmark.profiles
+    assert cfg.benchmark.preset_name == "noise_smoke"
+    assert "noise_smoke" in cfg.benchmark.presets
     assert cfg.filter.enabled is False

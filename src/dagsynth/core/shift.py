@@ -7,12 +7,12 @@ import math
 
 from dagsynth.config import (
     GeneratorConfig,
-    SHIFT_PROFILE_CUSTOM,
-    SHIFT_PROFILE_GRAPH_DRIFT,
-    SHIFT_PROFILE_MECHANISM_DRIFT,
-    SHIFT_PROFILE_MIXED,
-    SHIFT_PROFILE_NOISE_DRIFT,
-    SHIFT_PROFILE_OFF,
+    SHIFT_MODE_CUSTOM,
+    SHIFT_MODE_GRAPH_DRIFT,
+    SHIFT_MODE_MECHANISM_DRIFT,
+    SHIFT_MODE_MIXED,
+    SHIFT_MODE_NOISE_DRIFT,
+    SHIFT_MODE_OFF,
 )
 from dagsynth.core.layout_types import MechanismFamily
 
@@ -48,13 +48,13 @@ NONLINEAR_MECHANISM_FAMILIES: tuple[MechanismFamily, ...] = (
     "product",
 )
 
-_PROFILE_DEFAULT_SCALES: dict[str, tuple[float, float, float]] = {
-    SHIFT_PROFILE_OFF: (0.0, 0.0, 0.0),
-    SHIFT_PROFILE_GRAPH_DRIFT: (0.5, 0.0, 0.0),
-    SHIFT_PROFILE_MECHANISM_DRIFT: (0.0, 0.5, 0.0),
-    SHIFT_PROFILE_NOISE_DRIFT: (0.0, 0.0, 0.5),
-    SHIFT_PROFILE_MIXED: (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0),
-    SHIFT_PROFILE_CUSTOM: (0.0, 0.0, 0.0),
+_MODE_DEFAULT_SCALES: dict[str, tuple[float, float, float]] = {
+    SHIFT_MODE_OFF: (0.0, 0.0, 0.0),
+    SHIFT_MODE_GRAPH_DRIFT: (0.5, 0.0, 0.0),
+    SHIFT_MODE_MECHANISM_DRIFT: (0.0, 0.5, 0.0),
+    SHIFT_MODE_NOISE_DRIFT: (0.0, 0.0, 0.5),
+    SHIFT_MODE_MIXED: (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0),
+    SHIFT_MODE_CUSTOM: (0.0, 0.0, 0.0),
 }
 
 
@@ -63,13 +63,13 @@ class ShiftRuntimeParams:
     """Resolved shift runtime parameters for one generation run."""
 
     enabled: bool
-    profile: str
+    mode: str
     graph_scale: float
     mechanism_scale: float
-    noise_scale: float
+    variance_scale: float
     edge_logit_bias_shift: float
     mechanism_logit_tilt: float
-    noise_sigma_multiplier: float
+    variance_sigma_multiplier: float
 
 
 def centered_mechanism_family_logits(
@@ -127,25 +127,23 @@ def mechanism_nonlinear_mass(
 
 
 def resolve_shift_runtime_params(config: GeneratorConfig) -> ShiftRuntimeParams:
-    """Resolve shift profile/defaults/overrides into runtime coefficients."""
+    """Resolve shift mode/defaults/overrides into runtime coefficients."""
 
     shift = config.shift
     if not shift.enabled:
         return ShiftRuntimeParams(
             enabled=False,
-            profile=SHIFT_PROFILE_OFF,
+            mode=SHIFT_MODE_OFF,
             graph_scale=0.0,
             mechanism_scale=0.0,
-            noise_scale=0.0,
+            variance_scale=0.0,
             edge_logit_bias_shift=0.0,
             mechanism_logit_tilt=0.0,
-            noise_sigma_multiplier=1.0,
+            variance_sigma_multiplier=1.0,
         )
 
-    profile = str(shift.profile)
-    default_graph_scale, default_mechanism_scale, default_noise_scale = _PROFILE_DEFAULT_SCALES[
-        profile
-    ]
+    mode = str(shift.mode)
+    default_graph_scale, default_mechanism_scale, default_noise_scale = _MODE_DEFAULT_SCALES[mode]
 
     graph_scale = (
         float(shift.graph_scale) if shift.graph_scale is not None else float(default_graph_scale)
@@ -155,19 +153,21 @@ def resolve_shift_runtime_params(config: GeneratorConfig) -> ShiftRuntimeParams:
         if shift.mechanism_scale is not None
         else float(default_mechanism_scale)
     )
-    noise_scale = (
-        float(shift.noise_scale) if shift.noise_scale is not None else float(default_noise_scale)
+    variance_scale = (
+        float(shift.variance_scale)
+        if shift.variance_scale is not None
+        else float(default_noise_scale)
     )
 
     return ShiftRuntimeParams(
         enabled=True,
-        profile=profile,
+        mode=mode,
         graph_scale=graph_scale,
         mechanism_scale=mechanism_scale,
-        noise_scale=noise_scale,
+        variance_scale=variance_scale,
         edge_logit_bias_shift=float(_LOG_TWO * graph_scale),
         mechanism_logit_tilt=mechanism_scale,
-        noise_sigma_multiplier=float(math.exp(_NOISE_VARIANCE_DB_SPAN * noise_scale)),
+        variance_sigma_multiplier=float(math.exp(_NOISE_VARIANCE_DB_SPAN * variance_scale)),
     )
 
 

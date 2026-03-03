@@ -29,7 +29,7 @@ ______________________________________________________________________
 ```bash
 dagsynth benchmark \
   --config configs/preset_many_class_benchmark_smoke.yaml \
-  --profile custom \
+  --preset custom \
   --suite smoke \
   --no-memory \
   --out-dir benchmarks/results/smoke_many_class

@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-03-03
+
+### Changed
+
+- Renamed shift terminology in config/runtime/metadata:
+  - `shift.mode` (was `shift.profile`)
+  - `shift.variance_scale` (was `shift.noise_scale`)
+  - `variance_sigma_multiplier` (was `noise_sigma_multiplier`) in emitted shift metadata
+- Renamed noise amplitude key to `noise.base_scale` (was `noise.scale`) and standardized emitted dataset metadata under `noise_distribution` (was `noise`).
+- Renamed benchmark preset terminology across config/CLI/summary payloads:
+  - `benchmark.preset_name` (was `benchmark.profile_name`)
+  - `benchmark.presets` (was `benchmark.profiles`)
+  - summary keys `preset_results` / `preset_key` (was `profile_results` / `profile_key`)
+- Renamed benchmark script/docs terminology from profile-centric wording to preset/tier wording.
+- Replaced internal layout dict contracts with `LayoutPlan` dataclass wiring in generation/layout/metadata paths.
+- Added explicit device-resolution metadata fields on generated bundles:
+  - `requested_device`
+  - `resolved_device`
+  - `device_fallback_reason`
+- Renamed diagnostics target bridge module:
+  - `meta_targets.py` -> `diagnostics_targets.py`
+  - `build_coverage_aggregation_config` -> `build_diagnostics_aggregation_config`
+
+### Breaking
+
+- `dagsynth benchmark --profile ...` was removed; use `--preset ...`.
+- `dagsynth generate --no-write` was removed; use `--no-dataset-write`.
+- Config files using `shift.profile`, `shift.noise_scale`, `noise.scale`, `benchmark.profile_name`, or `benchmark.profiles` must be migrated to the new keys above.
+- Dataset metadata consumers must read `metadata.noise_distribution` (not `metadata.noise`) and `metadata.shift.mode` (not `metadata.shift.profile`).
+
 ## [0.3.3] - 2026-03-03
 
 ### Changed
@@ -67,7 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Benchmark profile summaries now surface noise guardrail status in CLI and Markdown reports
 - **Breaking:** removed `noise.family=legacy`; default noise family is now explicit `gaussian`.
 - **Breaking:** removed config/runtime compatibility knobs `runtime.hardware_aware`, CLI `--no-hardware-aware`, and graph aliases `graph.n_nodes_log2_min/max`.
-- **Breaking:** `shift.profile` no longer accepts boolean aliases; only explicit string values are allowed.
+- **Breaking:** `shift.mode` no longer accepts boolean aliases; only explicit string values are allowed.
 - Hardware detection and policy are now separated: `hardware.py` handles detection and `hardware_policy.py` handles explicit scaling policy.
 - Added hardware policy registry APIs (`apply_hardware_policy`, `register_hardware_policy`, `list_hardware_policies`) with immutable policy application semantics.
 - Added CLI `--hardware-policy` and `--print-effective-config` options; generate/benchmark runs now persist resolved effective config artifacts.
@@ -193,7 +223,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New generation CLI controls: `--diagnostics`, `--steer-meta`, and repeatable `--meta-target key=min:max[:weight]`
 - Steering metadata payload propagation on generated bundles when steering is enabled
 - Benchmark diagnostics collection controls: `dagsynth benchmark --diagnostics [--diagnostics-out-dir ...]`
-- Per-profile benchmark diagnostics artifacts and summary pointers under `diagnostics/<sanitized_profile_key>_<hash>/`
+- Per-profile benchmark diagnostics artifacts and summary pointers under `diagnostics/<sanitized_preset_key>_<hash>/`
 - New presets: `configs/preset_diagnostics_on.yaml` and `configs/preset_steering_conservative.yaml`
 
 ### Changed

@@ -5,10 +5,10 @@ import math
 import pytest
 
 from dagsynth.config import (
-    SHIFT_PROFILE_GRAPH_DRIFT,
-    SHIFT_PROFILE_MECHANISM_DRIFT,
-    SHIFT_PROFILE_MIXED,
-    SHIFT_PROFILE_NOISE_DRIFT,
+    SHIFT_MODE_GRAPH_DRIFT,
+    SHIFT_MODE_MECHANISM_DRIFT,
+    SHIFT_MODE_MIXED,
+    SHIFT_MODE_NOISE_DRIFT,
     GeneratorConfig,
 )
 from dagsynth.core.shift import (
@@ -35,25 +35,25 @@ def _nonlinear_mass(probs: dict[str, float]) -> float:
 def test_resolve_shift_runtime_params_disabled_returns_identity() -> None:
     cfg = _cfg()
     cfg.shift.enabled = False
-    cfg.shift.profile = "off"
+    cfg.shift.mode = "off"
     params = resolve_shift_runtime_params(cfg)
     assert params.enabled is False
-    assert params.profile == "off"
+    assert params.mode == "off"
     assert params.graph_scale == 0.0
     assert params.mechanism_scale == 0.0
-    assert params.noise_scale == 0.0
+    assert params.variance_scale == 0.0
     assert params.edge_logit_bias_shift == 0.0
     assert params.mechanism_logit_tilt == 0.0
-    assert params.noise_sigma_multiplier == pytest.approx(1.0)
+    assert params.variance_sigma_multiplier == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize(
     ("profile", "expected_scales"),
     [
-        (SHIFT_PROFILE_GRAPH_DRIFT, (0.5, 0.0, 0.0)),
-        (SHIFT_PROFILE_MECHANISM_DRIFT, (0.0, 0.5, 0.0)),
-        (SHIFT_PROFILE_NOISE_DRIFT, (0.0, 0.0, 0.5)),
-        (SHIFT_PROFILE_MIXED, (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)),
+        (SHIFT_MODE_GRAPH_DRIFT, (0.5, 0.0, 0.0)),
+        (SHIFT_MODE_MECHANISM_DRIFT, (0.0, 0.5, 0.0)),
+        (SHIFT_MODE_NOISE_DRIFT, (0.0, 0.0, 0.5)),
+        (SHIFT_MODE_MIXED, (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)),
     ],
 )
 def test_resolve_shift_runtime_params_uses_profile_defaults(
@@ -61,39 +61,39 @@ def test_resolve_shift_runtime_params_uses_profile_defaults(
 ) -> None:
     cfg = _cfg()
     cfg.shift.enabled = True
-    cfg.shift.profile = profile
+    cfg.shift.mode = profile
     params = resolve_shift_runtime_params(cfg)
     assert params.enabled is True
-    assert params.profile == profile
+    assert params.mode == profile
     assert params.graph_scale == pytest.approx(expected_scales[0])
     assert params.mechanism_scale == pytest.approx(expected_scales[1])
-    assert params.noise_scale == pytest.approx(expected_scales[2])
+    assert params.variance_scale == pytest.approx(expected_scales[2])
 
 
 def test_resolve_shift_runtime_params_prioritizes_explicit_overrides() -> None:
     cfg = _cfg()
     cfg.shift.enabled = True
-    cfg.shift.profile = SHIFT_PROFILE_MIXED
+    cfg.shift.mode = SHIFT_MODE_MIXED
     cfg.shift.graph_scale = 0.9
     cfg.shift.mechanism_scale = 0.1
-    cfg.shift.noise_scale = 0.4
+    cfg.shift.variance_scale = 0.4
     params = resolve_shift_runtime_params(cfg)
     assert params.graph_scale == pytest.approx(0.9)
     assert params.mechanism_scale == pytest.approx(0.1)
-    assert params.noise_scale == pytest.approx(0.4)
+    assert params.variance_scale == pytest.approx(0.4)
 
 
 def test_resolve_shift_runtime_params_matches_formula_mappings() -> None:
     cfg = _cfg()
     cfg.shift.enabled = True
-    cfg.shift.profile = SHIFT_PROFILE_GRAPH_DRIFT
+    cfg.shift.mode = SHIFT_MODE_GRAPH_DRIFT
     cfg.shift.graph_scale = 0.75
     cfg.shift.mechanism_scale = 0.25
-    cfg.shift.noise_scale = 0.5
+    cfg.shift.variance_scale = 0.5
     params = resolve_shift_runtime_params(cfg)
     assert params.edge_logit_bias_shift == pytest.approx(math.log(2.0) * 0.75)
     assert params.mechanism_logit_tilt == pytest.approx(0.25)
-    assert params.noise_sigma_multiplier == pytest.approx(math.exp((math.log(2.0) / 2.0) * 0.5))
+    assert params.variance_sigma_multiplier == pytest.approx(math.exp((math.log(2.0) / 2.0) * 0.5))
 
 
 def test_mechanism_family_probabilities_are_uniform_when_tilt_is_zero() -> None:

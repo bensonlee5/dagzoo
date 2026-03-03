@@ -60,7 +60,7 @@ def coerce_quantiles(raw: object) -> tuple[float, ...]:
     return tuple(normalized)
 
 
-def build_coverage_aggregation_config(
+def build_diagnostics_aggregation_config(
     diagnostics_config: DiagnosticsConfig,
 ) -> CoverageAggregationConfig:
     """Build diagnostics coverage aggregation config from diagnostics settings."""

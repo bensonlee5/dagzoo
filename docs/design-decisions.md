@@ -260,7 +260,7 @@ ______________________________________________________________________
 
 Current generation uses implicit Gaussian-driven stochasticity throughout
 matrix, weight, and point sampling, with optional global variance scaling via
-`noise_sigma_multiplier` from shift controls. Epic `#24` and issue `#25`
+`variance_sigma_multiplier` from shift controls. Epic `#24` and issue `#25`
 introduce explicit user-facing noise-family configuration.
 
 ### Decision

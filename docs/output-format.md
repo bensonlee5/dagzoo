@@ -99,6 +99,9 @@ Each line contains:
 | ------------------------ | ----------- | -------------------------------------------------------------- |
 | `backend`                | str         | Always `"torch"`                                               |
 | `device`                 | str         | Compute device (e.g., `"cpu"`, `"cuda"`)                       |
+| `requested_device`       | str         | Requested runtime device after CLI/config normalization        |
+| `resolved_device`        | str         | Actual runtime backend used for dataset generation             |
+| `device_fallback_reason` | str or null | Reason for fallback when requested and resolved device differ  |
 | `compute_backend`        | str         | Implementation variant identifier                              |
 | `n_features`             | int         | Number of features                                             |
 | `n_categorical_features` | int         | Number of categorical features                                 |
@@ -111,7 +114,7 @@ Each line contains:
 | `attempt_used`           | int         | Generation attempt index (0-based)                             |
 | `lineage`                | object      | DAG lineage record (see Lineage below)                         |
 | `shift`                  | object      | Resolved shift settings and realized observability signals     |
-| `noise`                  | object      | Resolved noise-family selection and effective sampling params  |
+| `noise_distribution`     | object      | Resolved noise-family selection and effective sampling params  |
 | `config`                 | object      | Full serialized generator configuration                        |
 | `filter`                 | object      | Filter results (see below)                                     |
 | `class_structure`        | object      | Present only for classification (see below)                    |
@@ -128,18 +131,18 @@ multipliers are `1.0`.
 | Key                         | Type  | Description                                                 |
 | --------------------------- | ----- | ----------------------------------------------------------- |
 | `enabled`                   | bool  | Whether shift controls were enabled                         |
-| `profile`                   | str   | Resolved shift profile (`off`, `graph_drift`, etc.)         |
+| `mode`                      | str   | Resolved shift mode (`off`, `graph_drift`, etc.)            |
 | `graph_scale`               | float | Resolved graph drift scale                                  |
 | `mechanism_scale`           | float | Resolved mechanism drift scale                              |
-| `noise_scale`               | float | Resolved noise drift scale                                  |
+| `variance_scale`            | float | Resolved noise drift scale                                  |
 | `edge_logit_bias_shift`     | float | Additive shift applied to edge logits                       |
 | `mechanism_logit_tilt`      | float | Mechanism-family tilt applied at sampling                   |
-| `noise_sigma_multiplier`    | float | Sigma multiplier applied to stochastic noise                |
+| `variance_sigma_multiplier` | float | Sigma multiplier applied to stochastic noise                |
 | `edge_odds_multiplier`      | float | Edge-odds multiplier (`exp(edge_logit_bias_shift)`)         |
-| `noise_variance_multiplier` | float | Noise-variance multiplier (`noise_sigma_multiplier^2`)      |
+| `noise_variance_multiplier` | float | Noise-variance multiplier (`variance_sigma_multiplier^2`)   |
 | `mechanism_nonlinear_mass`  | float | Probability mass on nonlinear mechanism families (`[0, 1]`) |
 
-### Noise sub-object
+### Noise Distribution sub-object
 
 Present for all generated bundles.
 
@@ -148,7 +151,7 @@ Present for all generated bundles.
 | `family_requested`  | str            | Configured noise family (`gaussian`, `laplace`, `student_t`, `mixture`) |
 | `family_sampled`    | str            | Effective family used by the dataset generation runtime                 |
 | `sampling_strategy` | str            | Runtime selection strategy (`dataset_level`)                            |
-| `scale`             | float          | Base noise scale from config                                            |
+| `base_scale`        | float          | Base noise scale from config                                            |
 | `student_t_df`      | float          | Student-t degrees of freedom parameter used by the runtime              |
 | `mixture_weights`   | object or null | Effective normalized mixture weights when `family_requested=mixture`    |
 

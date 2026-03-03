@@ -13,7 +13,7 @@ graph:
 
 shift:
   enabled: true
-  profile: mechanism_drift
+  mode: mechanism_drift
 
 runtime:
   device: cpu

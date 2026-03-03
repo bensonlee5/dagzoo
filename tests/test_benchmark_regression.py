@@ -14,13 +14,13 @@ def test_percent_change_and_degradation_direction() -> None:
 def test_compare_summary_warn_and_fail() -> None:
     baseline_summary = {
         "suite": "standard",
-        "profile_results": [{"profile_key": "cpu", "datasets_per_minute": 100.0}],
+        "preset_results": [{"preset_key": "cpu", "datasets_per_minute": 100.0}],
     }
     baseline = build_baseline_payload(baseline_summary)
 
     warn_summary = {
         "suite": "standard",
-        "profile_results": [{"profile_key": "cpu", "datasets_per_minute": 85.0}],
+        "preset_results": [{"preset_key": "cpu", "datasets_per_minute": 85.0}],
     }
     warn_result = compare_summary_to_baseline(
         warn_summary,
@@ -33,7 +33,7 @@ def test_compare_summary_warn_and_fail() -> None:
 
     fail_summary = {
         "suite": "standard",
-        "profile_results": [{"profile_key": "cpu", "datasets_per_minute": 70.0}],
+        "preset_results": [{"preset_key": "cpu", "datasets_per_minute": 70.0}],
     }
     fail_result = compare_summary_to_baseline(
         fail_summary,
