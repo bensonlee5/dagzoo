@@ -30,8 +30,9 @@ Each entry in `feature_types` is one of:
 
 - `"num"` — continuous feature. After postprocessing, values are clipped and
   standardized to approximately zero mean and unit variance.
-- `"cat"` — categorical feature. Integer indices in the range
-  `0 .. cardinality - 1`.
+- `"cat"` — categorical feature. Observed values are integer indices in the
+  range `0 .. cardinality - 1`. When missingness is enabled, missing values are
+  encoded as `NaN`.
 
 `feature_types[i]` describes column index `i` in X_train and X_test.
 
@@ -95,33 +96,33 @@ Each line contains:
 
 ### Top-level keys
 
-| Key                      | Type        | Description                                                    |
-| ------------------------ | ----------- | -------------------------------------------------------------- |
-| `backend`                | str         | Always `"torch"`                                               |
-| `device`                 | str         | Compute device (e.g., `"cpu"`, `"cuda"`)                       |
-| `requested_device`       | str         | Requested runtime device after CLI/config normalization        |
-| `resolved_device`        | str         | Actual runtime backend used for dataset generation             |
-| `device_fallback_reason` | str or null | Reason for fallback when requested and resolved device differ  |
-| `compute_backend`        | str         | Implementation variant identifier                              |
-| `n_features`             | int         | Number of features                                             |
-| `n_categorical_features` | int         | Number of categorical features                                 |
-| `n_classes`              | int or null | Realized class count in emitted labels (null for regression)   |
-| `graph_nodes`            | int         | Number of nodes in the DAG                                     |
-| `graph_edges`            | int         | Number of edges in the DAG                                     |
-| `graph_depth_nodes`      | int         | Longest path length in the DAG                                 |
-| `graph_edge_density`     | float       | Edge count / max possible edges                                |
-| `seed`                   | int         | Base seed for this dataset                                     |
-| `attempt_used`           | int         | Generation attempt index (0-based)                             |
-| `lineage`                | object      | DAG lineage record (see Lineage below)                         |
-| `shift`                  | object      | Resolved shift settings and realized observability signals     |
-| `noise_distribution`     | object      | Resolved noise-family selection and effective sampling params  |
-| `config`                 | object      | Full serialized generator configuration                        |
-| `filter`                 | object      | Filter results (see below)                                     |
-| `class_structure`        | object      | Present only for classification (see below)                    |
-| `missingness`            | object      | Present only when missingness is enabled                       |
-| `layout_mode`            | str         | Optional layout mode metadata (`"fixed"` for fixed-layout API) |
-| `layout_plan_seed`       | int         | Optional fixed-layout plan seed                                |
-| `layout_signature`       | str         | Optional deterministic fixed-layout fingerprint                |
+| Key                      | Type        | Description                                                                                        |
+| ------------------------ | ----------- | -------------------------------------------------------------------------------------------------- |
+| `backend`                | str         | Always `"torch"`                                                                                   |
+| `device`                 | str         | Compute device (e.g., `"cpu"`, `"cuda"`)                                                           |
+| `requested_device`       | str         | Requested runtime device after CLI/config normalization (for example `auto`, `cpu`, `cuda`, `mps`) |
+| `resolved_device`        | str         | Runtime backend selected from the requested device for generation                                  |
+| `device_fallback_reason` | str or null | Runtime fallback reason when execution backend is rewritten after resolution; `null` otherwise     |
+| `compute_backend`        | str         | Implementation variant identifier                                                                  |
+| `n_features`             | int         | Number of features                                                                                 |
+| `n_categorical_features` | int         | Number of categorical features                                                                     |
+| `n_classes`              | int or null | Realized class count in emitted labels (null for regression)                                       |
+| `graph_nodes`            | int         | Number of nodes in the DAG                                                                         |
+| `graph_edges`            | int         | Number of edges in the DAG                                                                         |
+| `graph_depth_nodes`      | int         | Longest path length in the DAG                                                                     |
+| `graph_edge_density`     | float       | Edge count / max possible edges                                                                    |
+| `seed`                   | int         | Base seed for this dataset                                                                         |
+| `attempt_used`           | int         | Generation attempt index (0-based)                                                                 |
+| `lineage`                | object      | DAG lineage record (see Lineage below)                                                             |
+| `shift`                  | object      | Resolved shift settings and realized observability signals                                         |
+| `noise_distribution`     | object      | Resolved noise-family selection and effective sampling params                                      |
+| `config`                 | object      | Full serialized generator configuration                                                            |
+| `filter`                 | object      | Filter results (see below)                                                                         |
+| `class_structure`        | object      | Present only for classification (see below)                                                        |
+| `missingness`            | object      | Present only when missingness is enabled                                                           |
+| `layout_mode`            | str         | Optional layout mode metadata (`"fixed"` for fixed-layout API)                                     |
+| `layout_plan_seed`       | int         | Optional fixed-layout plan seed                                                                    |
+| `layout_signature`       | str         | Optional deterministic fixed-layout fingerprint                                                    |
 
 ### Shift sub-object
 
@@ -314,8 +315,12 @@ protected by a SHA-256 checksum recorded in the metadata.
 
 **Postprocessing invariants**:
 
-- No constant columns — features with zero variance are removed during
-  postprocessing.
+- Standard generation (`generate_one`, `generate_batch`, `generate_batch_iter`)
+  removes constant columns and may permute feature columns during postprocess.
+- Fixed-layout generation (`generate_batch_fixed_layout`,
+  `generate_batch_fixed_layout_iter`) preserves emitted feature schema across
+  the batch: constant-column removal and feature-column permutation are
+  disabled.
 - Numeric features are clipped and standardized (approximately zero mean,
   unit variance).
 - Classification target classes are randomly permuted (label indices carry

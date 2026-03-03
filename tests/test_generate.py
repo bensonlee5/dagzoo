@@ -12,12 +12,6 @@ from dagsynth.config import (
 from dagsynth.core.constants import NODE_SPEC_SEED_OFFSET, SPLIT_PERMUTATION_SEED_OFFSET
 from dagsynth.core.dataset import (
     FixedLayoutPlan,
-    _attempt_seed,
-    _generate_torch,
-    _node_spec_seed,
-    _parent_node_indices,
-    _split_permutation_seed,
-    _stratified_split_indices,
     generate_batch,
     generate_batch_fixed_layout,
     generate_batch_fixed_layout_iter,
@@ -25,8 +19,11 @@ from dagsynth.core.dataset import (
     generate_one,
     sample_fixed_layout,
 )
+from dagsynth.core.generation_context import _attempt_seed, _node_spec_seed, _split_permutation_seed
+from dagsynth.core.generation_engine import _generate_torch, _parent_node_indices
 from dagsynth.core.layout_types import LayoutPlan
 from dagsynth.core.shift import mechanism_nonlinear_mass, resolve_shift_runtime_params
+from dagsynth.core.validation import _stratified_split_indices
 from dagsynth.io.lineage_schema import (
     LINEAGE_SCHEMA_NAME,
     LINEAGE_SCHEMA_VERSION,
@@ -433,7 +430,7 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
     )
 
     monkeypatch.setattr(
-        "dagsynth.core.dataset._sample_layout",
+        "dagsynth.core.generation_engine._sample_layout",
         lambda *_args, **_kwargs: layout,
     )
 
@@ -443,7 +440,7 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
         return x, y, {"filter": {"enabled": False}}
 
     monkeypatch.setattr(
-        "dagsynth.core.dataset._generate_graph_dataset_torch",
+        "dagsynth.core.generation_engine._generate_graph_dataset_torch",
         _stub_generate_graph_dataset_torch,
     )
 
@@ -474,7 +471,7 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
         )
 
     monkeypatch.setattr(
-        "dagsynth.core.dataset.postprocess_dataset",
+        "dagsynth.core.generation_engine.postprocess_dataset",
         _stub_postprocess_dataset,
     )
 
@@ -520,11 +517,11 @@ def test_generate_torch_forces_cpu_for_stratified_split(
         raise _SplitSentinel
 
     monkeypatch.setattr(
-        "dagsynth.core.dataset._generate_graph_dataset_torch",
+        "dagsynth.core.generation_engine._generate_graph_dataset_torch",
         _stub_generate_graph_dataset_torch,
     )
     monkeypatch.setattr(
-        "dagsynth.core.dataset._stratified_split_indices",
+        "dagsynth.core.generation_engine._stratified_split_indices",
         _stub_stratified_split_indices,
     )
 
@@ -597,11 +594,11 @@ def test_generate_torch_routes_postprocess_to_runtime_device(
         raise _PostprocessSentinel
 
     monkeypatch.setattr(
-        "dagsynth.core.dataset._generate_graph_dataset_torch",
+        "dagsynth.core.generation_engine._generate_graph_dataset_torch",
         _stub_generate_graph_dataset_torch,
     )
     monkeypatch.setattr(
-        "dagsynth.core.dataset.postprocess_dataset",
+        "dagsynth.core.generation_engine.postprocess_dataset",
         _stub_postprocess_dataset,
     )
 
@@ -687,15 +684,15 @@ def test_generate_torch_routes_missingness_to_runtime_device(
         raise _MissingnessSentinel
 
     monkeypatch.setattr(
-        "dagsynth.core.dataset._generate_graph_dataset_torch",
+        "dagsynth.core.generation_engine._generate_graph_dataset_torch",
         _stub_generate_graph_dataset_torch,
     )
     monkeypatch.setattr(
-        "dagsynth.core.dataset.postprocess_dataset",
+        "dagsynth.core.generation_engine.postprocess_dataset",
         _stub_postprocess_dataset,
     )
     monkeypatch.setattr(
-        "dagsynth.core.dataset.inject_missingness",
+        "dagsynth.core.generation_engine.inject_missingness",
         _stub_inject_missingness,
     )
 
@@ -875,7 +872,7 @@ def test_generate_batch_fixed_layout_raises_on_schema_mismatch(
         )
 
     monkeypatch.setattr(
-        "dagsynth.core.dataset._generate_one_with_resolved_layout",
+        "dagsynth.core.fixed_layout._generate_one_with_resolved_layout",
         _stub_generate_one_with_resolved_layout,
     )
 
@@ -910,7 +907,7 @@ def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch)
             "threshold_delta": 0.15,
         }
 
-    monkeypatch.setattr("dagsynth.core.dataset.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagsynth.core.generation_engine.apply_extra_trees_filter", _stub_filter)
     cfg = _tiny_config()
     cfg.filter.enabled = True
 
@@ -942,8 +939,8 @@ def test_auto_retries_on_cpu_when_mps_fails(monkeypatch: pytest.MonkeyPatch) -> 
             metadata={"backend": "torch", "device": "cpu"},
         )
 
-    monkeypatch.setattr("dagsynth.core.dataset._resolve_device", lambda *_args: "mps")
-    monkeypatch.setattr("dagsynth.core.dataset._generate_torch", _stub_generate_torch)
+    monkeypatch.setattr("dagsynth.core.generation_context._resolve_device", lambda *_args: "mps")
+    monkeypatch.setattr("dagsynth.core.generation_engine._generate_torch", _stub_generate_torch)
     cfg = _tiny_config()
 
     bundle = generate_one(cfg, seed=123, device="auto")
@@ -957,7 +954,7 @@ def test_auto_does_not_fallback_to_numpy_if_torch_runtime_fails(
     def _raise_runtime(*_args, **_kwargs):
         raise RuntimeError("simulated torch runtime failure")
 
-    monkeypatch.setattr("dagsynth.core.dataset._generate_torch", _raise_runtime)
+    monkeypatch.setattr("dagsynth.core.generation_engine._generate_torch", _raise_runtime)
     cfg = _tiny_config()
 
     with pytest.raises(RuntimeError, match="simulated torch runtime failure"):
@@ -968,7 +965,7 @@ def test_explicit_cuda_request_raises_when_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "dagsynth.core.dataset.torch.cuda.is_available",
+        "dagsynth.core.generation_context.torch.cuda.is_available",
         lambda: False,
     )
     cfg = _tiny_config()
@@ -1041,7 +1038,7 @@ def test_zero_num_datasets_does_not_resolve_device(monkeypatch: pytest.MonkeyPat
     def _raise_if_called(*_args, **_kwargs):
         raise RuntimeError("device resolution should not run for empty batches")
 
-    monkeypatch.setattr("dagsynth.core.dataset._resolve_device", _raise_if_called)
+    monkeypatch.setattr("dagsynth.core.generation_context._resolve_device", _raise_if_called)
     assert list(generate_batch_iter(cfg, num_datasets=0, seed=5, device="cuda")) == []
 
 
@@ -1125,7 +1122,7 @@ def test_generate_retries_when_stratified_split_is_infeasible(
         raise ValueError("infeasible_stratified_split: forced for test")
 
     monkeypatch.setattr(
-        "dagsynth.core.dataset._stratified_split_indices",
+        "dagsynth.core.generation_engine._stratified_split_indices",
         _raise_infeasible_split,
     )
 

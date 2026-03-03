@@ -4,6 +4,79 @@ High-throughput synthetic tabular data generation built around causal structure.
 Use it to generate, benchmark, and stress-test tabular datasets with
 deterministic seed behavior.
 
+```mermaid
+flowchart LR
+    %% Class Definitions
+    classDef setup fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b
+    classDef core fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+    classDef gate fill:#f1f8e9,stroke:#33691e,stroke-width:2px,color:#33691e
+    classDef out fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#4a148c
+
+    Seed([Root Seed]) --> RNG[Deterministic Seeding]
+    RNG --> Layout[Layout & DAG Sampling]
+    Layout --> Mechanisms[Random Functional Mechanisms]
+    Mechanisms --> Converters[Feature/Target Converters]
+    Converters --> Filter[Learnability Filter]
+    Filter --> Bundle[[DatasetBundle: X, y, Metadata]]
+
+    %% Assign Classes
+    class Seed,RNG setup
+    class Layout,Mechanisms,Converters core
+    class Filter gate
+    class Bundle out
+```
+
+### From Latent DAG to Tabular Data
+
+Unlike many generators that treat each column as an independent noise source, `dagsynth` generates data from a **latent causal structure**. A single node in the causal graph can branch into multiple observable features, preserving complex dependency patterns.
+
+```mermaid
+flowchart LR
+    %% Class Definitions
+    classDef latent fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b,stroke-dasharray: 5 5
+    classDef observable fill:#f5f5f5,stroke:#212121,stroke-width:2px,color:#212121
+
+    subgraph LatentSpace [Latent Causal DAG]
+        NodeA((Node A)) --> NodeB((Node B))
+    end
+
+    subgraph ObservableSpace [Tabular Dataset Layout]
+        Feat1[Feature 1: Numeric]
+        Feat2[Feature 2: Categorical]
+        Feat3[Feature 3: Numeric]
+        Target[Target Variable]
+    end
+
+    %% Mapping connections
+    NodeA -. mapping .-> Feat1
+    NodeA -. mapping .-> Feat2
+    NodeB -. mapping .-> Feat3
+    NodeB -. mapping .-> Target
+
+    %% Assign Classes
+    class NodeA,NodeB latent
+    class Feat1,Feat2,Feat3,Target observable
+
+    style LatentSpace fill:#f0faff,stroke:#01579b,stroke-dasharray: 5 5
+    style ObservableSpace fill:#fafafa,stroke:#212121
+```
+
+## Why dagsynth
+
+`dagsynth` is for situations where you need synthetic tabular data that is:
+
+- Causally structured: datasets are generated from a sampled latent DAG, not
+  independent column noise.
+- Reproducible: deterministic seed fan-out and effective-config trace artifacts
+  make runs auditable.
+- Stress-testable: shift, noise, missingness, and filter controls let you probe
+  model robustness under controlled distribution changes.
+- Operationally scalable: fixed-layout generation and benchmark guardrails
+  support repeatable high-throughput workflows.
+
+For the precise runtime model and module-level walkthrough, see
+[docs/how-it-works.md](docs/how-it-works.md).
+
 ## Quick Start
 
 Examples in this README assume a repo checkout (so `configs/*.yaml` is available):
@@ -73,46 +146,12 @@ dagsynth benchmark --help
 
 ## Codebase Navigation
 
-The project is organized into functional modules that manage the lifecycle of a synthetic dataset, from configuration and causal graph sampling to node execution and quality filtering.
+The project is organized into functional modules that manage the lifecycle
+of a synthetic dataset, from configuration and causal graph sampling to
+node execution and quality filtering.
 
-### 1. Entry Points & Orchestration
-
-The high-level logic that bridges CLI/API requests to the generation engine.
-
-- [`src/dagsynth/cli.py`](src/dagsynth/cli.py): Maps CLI flags to `GeneratorConfig` and handles command dispatch.
-- [`src/dagsynth/core/dataset.py`](src/dagsynth/core/dataset.py): The main orchestration engine. Manages batch generation, fixed-layout planning, and end-to-end synchronization.
-
-### 2. The Generation Pipeline (The "Assembly Line")
-
-Follow this sequence to understand how a latent causal structure becomes a realized dataset.
-
-- **Structure ([`graph/`](src/dagsynth/graph/)):** Samples the underlying Directed Acyclic Graph (DAG).
-- **Layout ([`core/layout.py`](src/dagsynth/core/layout.py)):** Maps features and targets to DAG nodes and assigns data types.
-- **Execution ([`core/node_pipeline.py`](src/dagsynth/core/node_pipeline.py)):** Processes nodes in topological order, applying functional relationships.
-- **Mechanisms ([`functions/`](src/dagsynth/functions/)):** Contains the mathematical families (linear, non-linear, mixture) that define how nodes interact.
-- **Conversion ([`converters/`](src/dagsynth/converters/)):** Transforms latent continuous values into observable numeric or categorical data.
-
-### 3. Control, Integrity & Quality
-
-Infrastructure that ensures reproducibility, deterministic behavior, and data quality.
-
-- [`src/dagsynth/rng.py`](src/dagsynth/rng.py): The `SeedManager` ensures strictly isolated, deterministic child seeds for every component.
-- [`src/dagsynth/filtering/`](src/dagsynth/filtering/): Implements the "learnability gate" (via CPU ExtraTrees) to reject invalid or trivial datasets.
-- [`src/dagsynth/core/metrics_torch.py`](src/dagsynth/core/metrics_torch.py): Unified torch-native metric extraction used by diagnostics and generation telemetry.
-- [`src/dagsynth/postprocess/`](src/dagsynth/postprocess/): Handles final-stage transformations, including deterministic missingness (MCAR/MAR/MNAR) injection.
-
-### 4. Configuration & Architecture
-
-- [`src/dagsynth/config.py`](src/dagsynth/config.py): The source of truth for all generator settings, implemented as strongly-typed dataclasses.
-- [`docs/design-decisions.md`](docs/design-decisions.md): Rationale behind the architectural choices and reproducibility guarantees.
-
-### Tip: Audit via Verification
-
-To verify the system's invariants and determinism while exploring the code:
-
-```bash
-uv run pytest -v tests/test_generate.py tests/test_rng.py
-```
+See [docs/development/codebase-navigation.md](docs/development/codebase-navigation.md)
+for the full module map with file paths and descriptions.
 
 ## Python API
 
@@ -132,4 +171,5 @@ For command-line and workflow details, use
 - [docs/development/roadmap.md](docs/development/roadmap.md)
 - [docs/development/backlog_decision_rules.md](docs/development/backlog_decision_rules.md)
 - [docs/design-decisions.md](docs/design-decisions.md)
+- [docs/development/codebase-navigation.md](docs/development/codebase-navigation.md)
 - [reference/literature_evidence_2026.md](reference/literature_evidence_2026.md)
