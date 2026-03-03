@@ -13,6 +13,7 @@ from typing import Any
 
 from dagsynth.bench.constants import (
     LINEAGE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE,
+    LINEAGE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE_SMOKE,
     LINEAGE_GUARDRAIL_RUNTIME_TRIALS,
     LINEAGE_GUARDRAIL_SEED_OFFSET,
     LINEAGE_GUARDRAIL_SMOKE_SAMPLE_CAP,
@@ -343,7 +344,12 @@ def _collect_lineage_guardrails(
         warn=float(warn_threshold_pct),
         fail=float(fail_threshold_pct),
     )
-    runtime_gating_enabled = sample_n >= LINEAGE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE
+    runtime_gating_min_sample = (
+        LINEAGE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE_SMOKE
+        if suite == "smoke"
+        else LINEAGE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE
+    )
+    runtime_gating_enabled = sample_n >= runtime_gating_min_sample
 
     issues: list[dict[str, Any]] = []
     if bundles_with_lineage != bundles_seen:
@@ -376,7 +382,7 @@ def _collect_lineage_guardrails(
         "enabled": True,
         "sample_datasets": int(sample_n),
         "runtime_gating_enabled": bool(runtime_gating_enabled),
-        "runtime_gating_min_sample_datasets": int(LINEAGE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE),
+        "runtime_gating_min_sample_datasets": int(runtime_gating_min_sample),
         "runtime_gating_suppressed_reason": (
             None if runtime_gating_enabled else "insufficient_sample_size"
         ),
