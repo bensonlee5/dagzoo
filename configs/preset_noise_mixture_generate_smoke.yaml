@@ -1,0 +1,35 @@
+seed: 74
+
+dataset:
+  task: classification
+  n_train: 256
+  n_test: 128
+  n_features_min: 8
+  n_features_max: 24
+  n_classes_min: 2
+  n_classes_max: 10
+
+graph:
+  n_nodes_min: 2
+  n_nodes_max: 12
+
+noise:
+  family: mixture
+  scale: 1.0
+  student_t_df: 6.0
+  mixture_weights:
+    gaussian: 0.6
+    laplace: 0.25
+    student_t: 0.15
+
+runtime:
+  device: cpu
+
+output:
+  out_dir: data/run_noise_mixture_smoke
+
+diagnostics:
+  enabled: false
+
+filter:
+  enabled: false

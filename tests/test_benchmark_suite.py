@@ -51,6 +51,15 @@ def _tiny_shift_cpu_config() -> GeneratorConfig:
     return cfg
 
 
+def _tiny_noise_cpu_config() -> GeneratorConfig:
+    cfg = _tiny_cpu_config()
+    cfg.noise.family = "laplace"
+    cfg.noise.scale = 1.0
+    cfg.noise.student_t_df = 6.0
+    cfg.noise.mixture_weights = None
+    return cfg
+
+
 def test_run_benchmark_suite_smoke_single_profile() -> None:
     cfg = _tiny_cpu_config()
     spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
@@ -466,6 +475,234 @@ def test_run_benchmark_suite_shift_directional_guardrail_failure_updates_status(
     assert regression_issue["degradation_pct"] == pytest.approx(expected_degradation)
 
 
+def test_run_benchmark_suite_noise_guardrails_emit_metrics() -> None:
+    cfg = _tiny_noise_cpu_config()
+    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+
+    summary = run_benchmark_suite(
+        [spec],
+        suite="smoke",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+        baseline_payload=None,
+        num_datasets_override=2,
+        warmup_override=0,
+        collect_memory=False,
+        collect_reproducibility=False,
+        collect_diagnostics=False,
+        diagnostics_root_dir=None,
+        fail_on_regression=False,
+        no_hardware_aware=True,
+    )
+
+    result = summary["profile_results"][0]
+    guardrails = result["noise_guardrails"]
+    assert guardrails["enabled"] is True
+    assert guardrails["status"] in {"pass", "warn", "fail"}
+    assert guardrails["family_requested"] == "laplace"
+    assert guardrails["runtime_gating_enabled"] is False
+    assert guardrails["metadata_coverage_rate"] == pytest.approx(1.0)
+
+
+def test_run_benchmark_suite_noise_runtime_guardrail_updates_regression_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_noise_cpu_config()
+    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+
+    def _stub_throughput(
+        config,
+        *,
+        num_datasets: int,
+        warmup_datasets: int = 10,
+        device: str | None = None,
+        on_bundle=None,
+    ):
+        _ = warmup_datasets
+        _ = device
+        nonlegacy_noise = str(config.noise.family) != "legacy"
+        dpm = 70.0 if nonlegacy_noise else 100.0
+        dps = dpm / 60.0
+        elapsed = (float(num_datasets) / dps) if dps > 0 else 0.0
+        if on_bundle is not None:
+            for i in range(num_datasets):
+                metadata = {
+                    "seed": i,
+                    "attempt_used": 0,
+                    "noise": {
+                        "family_requested": str(config.noise.family),
+                        "family_sampled": str(config.noise.family),
+                        "sampling_strategy": "dataset_level",
+                        "scale": float(config.noise.scale),
+                        "student_t_df": float(config.noise.student_t_df),
+                        "mixture_weights": None,
+                    },
+                }
+                on_bundle(
+                    DatasetBundle(
+                        X_train=np.zeros((3, 4), dtype=np.float32),
+                        y_train=np.zeros(3, dtype=np.int64),
+                        X_test=np.zeros((1, 4), dtype=np.float32),
+                        y_test=np.zeros(1, dtype=np.int64),
+                        feature_types=["num", "num", "num", "num"],
+                        metadata=metadata,
+                    )
+                )
+        return {
+            "profile": config.benchmark.profile_name,
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup_datasets,
+            "elapsed_seconds": elapsed,
+            "datasets_per_second": dps,
+            "datasets_per_minute": dpm,
+            "slo_pass_100_datasets_per_min": dpm >= 100.0,
+        }
+
+    monkeypatch.setattr("cauchy_generator.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite._collect_latency",
+        lambda _cfg, *, device, num_samples: {
+            "latency_samples": float(num_samples),
+            "latency_mean_ms": 1.0,
+            "latency_p95_ms": 1.0,
+            "latency_min_ms": 1.0,
+            "latency_max_ms": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite._collect_lineage_guardrails",
+        lambda *_args, **_kwargs: {"enabled": False},
+    )
+
+    summary = run_benchmark_suite(
+        [spec],
+        suite="smoke",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+        baseline_payload=None,
+        num_datasets_override=6,
+        warmup_override=0,
+        collect_memory=False,
+        collect_reproducibility=False,
+        collect_diagnostics=False,
+        diagnostics_root_dir=None,
+        fail_on_regression=False,
+        no_hardware_aware=True,
+    )
+
+    result = summary["profile_results"][0]
+    guardrails = result["noise_guardrails"]
+    assert guardrails["enabled"] is True
+    assert guardrails["runtime_gating_enabled"] is True
+    assert guardrails["status"] == "fail"
+    assert any(
+        issue["metric"] == "noise_runtime_degradation_pct" and issue["severity"] == "fail"
+        for issue in guardrails["issues"]
+    )
+    assert summary["regression"]["status"] == "fail"
+    assert any(
+        issue["metric"] == "noise_runtime_degradation_pct"
+        for issue in summary["regression"]["issues"]
+    )
+
+
+def test_run_benchmark_suite_noise_metadata_coverage_failure_updates_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_noise_cpu_config()
+    spec = ProfileRunSpec(key="cpu_test", config=cfg, device="cpu")
+
+    def _stub_throughput(
+        config,
+        *,
+        num_datasets: int,
+        warmup_datasets: int = 10,
+        device: str | None = None,
+        on_bundle=None,
+    ):
+        _ = warmup_datasets
+        _ = device
+        dpm = 100.0
+        dps = dpm / 60.0
+        elapsed = (float(num_datasets) / dps) if dps > 0 else 0.0
+        if on_bundle is not None:
+            for i in range(num_datasets):
+                metadata = {"seed": i, "attempt_used": 0}
+                if str(config.noise.family) == "legacy":
+                    metadata["noise"] = {
+                        "family_requested": "legacy",
+                        "family_sampled": "legacy",
+                        "sampling_strategy": "dataset_level",
+                        "scale": 1.0,
+                        "student_t_df": 5.0,
+                        "mixture_weights": None,
+                    }
+                on_bundle(
+                    DatasetBundle(
+                        X_train=np.zeros((3, 4), dtype=np.float32),
+                        y_train=np.zeros(3, dtype=np.int64),
+                        X_test=np.zeros((1, 4), dtype=np.float32),
+                        y_test=np.zeros(1, dtype=np.int64),
+                        feature_types=["num", "num", "num", "num"],
+                        metadata=metadata,
+                    )
+                )
+        return {
+            "profile": config.benchmark.profile_name,
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup_datasets,
+            "elapsed_seconds": elapsed,
+            "datasets_per_second": dps,
+            "datasets_per_minute": dpm,
+            "slo_pass_100_datasets_per_min": dpm >= 100.0,
+        }
+
+    monkeypatch.setattr("cauchy_generator.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite._collect_latency",
+        lambda _cfg, *, device, num_samples: {
+            "latency_samples": float(num_samples),
+            "latency_mean_ms": 1.0,
+            "latency_p95_ms": 1.0,
+            "latency_min_ms": 1.0,
+            "latency_max_ms": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        "cauchy_generator.bench.suite._collect_lineage_guardrails",
+        lambda *_args, **_kwargs: {"enabled": False},
+    )
+
+    summary = run_benchmark_suite(
+        [spec],
+        suite="smoke",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+        baseline_payload=None,
+        num_datasets_override=6,
+        warmup_override=0,
+        collect_memory=False,
+        collect_reproducibility=False,
+        collect_diagnostics=False,
+        diagnostics_root_dir=None,
+        fail_on_regression=False,
+        no_hardware_aware=True,
+    )
+
+    result = summary["profile_results"][0]
+    guardrails = result["noise_guardrails"]
+    assert guardrails["enabled"] is True
+    assert guardrails["status"] == "fail"
+    assert any(
+        issue["metric"] == "noise_metadata_coverage" and issue["severity"] == "fail"
+        for issue in guardrails["issues"]
+    )
+    assert summary["regression"]["status"] == "fail"
+    assert any(
+        issue["metric"] == "noise_metadata_coverage" for issue in summary["regression"]["issues"]
+    )
+
+
 def test_build_shift_directional_check_reports_none_degradation_when_baseline_zero() -> None:
     payload, issue = suite_mod._build_shift_directional_check(
         metric="graph_edge_density",
@@ -540,7 +777,9 @@ def test_run_benchmark_suite_lineage_runtime_guardrail_updates_regression_status
     )
 
 
-def test_write_suite_markdown_profile_table_includes_shift_column(tmp_path: Path) -> None:
+def test_write_suite_markdown_profile_table_includes_shift_and_noise_columns(
+    tmp_path: Path,
+) -> None:
     summary = {
         "suite": "smoke",
         "generated_at": "2026-01-01T00:00:00+00:00",
@@ -557,6 +796,7 @@ def test_write_suite_markdown_profile_table_includes_shift_column(tmp_path: Path
                 "missingness_guardrails": {"enabled": False},
                 "lineage_guardrails": {"enabled": False},
                 "shift_guardrails": {"enabled": True, "status": "pass"},
+                "noise_guardrails": {"enabled": True, "status": "warn"},
             }
         ],
         "regression": {"status": "pass", "issues": []},
@@ -564,6 +804,7 @@ def test_write_suite_markdown_profile_table_includes_shift_column(tmp_path: Path
     path = write_suite_markdown(summary, tmp_path / "summary.md")
     text = path.read_text(encoding="utf-8")
     assert "| Shift |" in text
+    assert "| Noise |" in text
     assert "| shift_smoke |" in text
 
 

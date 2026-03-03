@@ -1,0 +1,32 @@
+seed: 73
+
+dataset:
+  task: classification
+  n_train: 256
+  n_test: 128
+  n_features_min: 8
+  n_features_max: 24
+  n_classes_min: 2
+  n_classes_max: 10
+
+graph:
+  n_nodes_min: 2
+  n_nodes_max: 12
+
+noise:
+  family: student_t
+  scale: 1.0
+  student_t_df: 6.0
+  mixture_weights: null
+
+runtime:
+  device: cpu
+
+output:
+  out_dir: data/run_noise_student_t_smoke
+
+diagnostics:
+  enabled: false
+
+filter:
+  enabled: false

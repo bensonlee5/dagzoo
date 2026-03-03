@@ -12,6 +12,8 @@ These wrappers run `cauchy-gen` from the repo root (typically via `uv run`).
   - Uses `configs/preset_cuda_h100.yaml`.
 - `scripts/generate-many-class.sh [num_datasets] [device] [out_dir] [seed]`
   - Uses `configs/preset_many_class_generate_smoke.yaml`.
+- `scripts/generate-noise.sh [family] [num_datasets] [device] [out_dir] [seed]`
+  - Runs preset-based noise family workflows (`legacy`, `gaussian`, `laplace`, `student_t`, `mixture`).
 - `scripts/generate-smoke.sh [config] [num_datasets] [device]`
   - Runs quick in-memory generation with `--no-write`.
 - `scripts/generate-curriculum.sh --base-config ... --out-root ... --datasets-per-stage ... --n-test ... (--train-start/--train-stop/--train-step | --train-values)`
@@ -36,6 +38,8 @@ These wrappers run `cauchy-gen` from the repo root (typically via `uv run`).
 ./scripts/generate-default.sh 50 cpu data/run_cpu_50
 ./scripts/generate-h100.sh 500 cuda data/run_h100_500 123
 ./scripts/generate-many-class.sh 25 cpu data/run_many_class 123
+./scripts/generate-noise.sh gaussian 25 cpu data/run_noise_gaussian 123
+./scripts/generate-noise.sh mixture 25 cpu data/run_noise_mixture 124
 ./scripts/generate-from-config.sh configs/benchmark_medium_cuda.yaml 100 cuda data/run_medium 42
 ./scripts/generate-smoke.sh configs/default.yaml 3 cpu
 ./scripts/generate-curriculum.sh --base-config configs/default.yaml --out-root data/run_curriculum --datasets-per-stage 4 --n-test 256 --train-start 1024 --train-stop 1026 --train-step 1 --chunk-size 2 --device cpu
@@ -49,7 +53,9 @@ These wrappers run `cauchy-gen` from the repo root (typically via `uv run`).
 ./scripts/benchmark-suite.sh smoke cpu benchmarks/results/smoke_cpu_diag on
 uv run cauchy-gen generate --config configs/preset_diagnostics_on.yaml --num-datasets 25 --diagnostics --out data/run_diag
 uv run cauchy-gen generate --config configs/preset_missingness_mnar.yaml --num-datasets 25 --out data/run_missing_mnar
+uv run cauchy-gen generate --config configs/preset_noise_student_t_generate_smoke.yaml --num-datasets 25 --out data/run_noise_student_t
 uv run cauchy-gen benchmark --config configs/preset_missingness_mar.yaml --profile custom --suite smoke --no-memory --out-dir benchmarks/results/smoke_missing_mar
+uv run cauchy-gen benchmark --config configs/preset_noise_benchmark_smoke.yaml --profile custom --suite smoke --no-memory --out-dir benchmarks/results/smoke_noise
 ./scripts/bump-version.sh patch --dry-run
 ./scripts/bump-version.sh minor --tag
 ```
@@ -65,3 +71,6 @@ The diagnostics profile directory is sanitized and hash-suffixed (for example, `
 
 When missingness is enabled in benchmark configs, summary JSON includes
 `profile_results[*].missingness_guardrails` and may escalate regression status via runtime or acceptance issues.
+
+When non-legacy noise is enabled in benchmark configs, summary JSON includes
+`profile_results[*].noise_guardrails` and may escalate regression status via runtime or metadata validity issues.

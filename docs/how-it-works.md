@@ -174,7 +174,7 @@ Diagnostics and fixed-layout generation are related but distinct:
 
 Benchmark mode adds guardrails to detect runtime/metadata regressions and emits
 sections such as `missingness_guardrails`, `lineage_guardrails`, and
-`shift_guardrails` when relevant to the run.
+`shift_guardrails`, `noise_guardrails` when relevant to the run.
 
 ## Glossary quick reference
 

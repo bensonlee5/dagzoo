@@ -581,12 +581,17 @@ def _print_profile_result_line(result: dict[str, Any]) -> None:
     if isinstance(shift_guardrails, dict) and bool(shift_guardrails.get("enabled")):
         shift_hint = f" shift={shift_guardrails.get('status', 'pass')}"
 
+    noise_hint = ""
+    noise_guardrails = result.get("noise_guardrails")
+    if isinstance(noise_guardrails, dict) and bool(noise_guardrails.get("enabled")):
+        noise_hint = f" noise={noise_guardrails.get('status', 'pass')}"
+
     print(
         f"[{result.get('profile_key')}] device={result.get('device')} "
         f"backend={result.get('hardware_backend')} "
         f"datasets/min={float(result.get('datasets_per_minute', 0.0)):.2f} "
         f"latency_p95_ms={float(result.get('latency_p95_ms', 0.0)):.2f}"
-        f"{diagnostics_hint}{missingness_hint}{lineage_hint}{shift_hint}"
+        f"{diagnostics_hint}{missingness_hint}{lineage_hint}{shift_hint}{noise_hint}"
     )
 
 

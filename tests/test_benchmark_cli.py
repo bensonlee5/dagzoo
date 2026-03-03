@@ -258,6 +258,37 @@ def test_benchmark_cli_shift_guardrails_are_emitted(tmp_path) -> None:
     assert "runtime_gating_enabled" in guardrails
 
 
+def test_benchmark_cli_noise_guardrails_are_emitted(tmp_path) -> None:
+    out = tmp_path / "summary_noise.json"
+    code = main(
+        [
+            "benchmark",
+            "--config",
+            "configs/preset_noise_benchmark_smoke.yaml",
+            "--profile",
+            "custom",
+            "--suite",
+            "smoke",
+            "--num-datasets",
+            "2",
+            "--warmup",
+            "0",
+            "--no-hardware-aware",
+            "--no-memory",
+            "--json-out",
+            str(out),
+        ]
+    )
+    assert code == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    profile = payload["profile_results"][0]
+    guardrails = profile["noise_guardrails"]
+    assert guardrails["enabled"] is True
+    assert guardrails["status"] in {"pass", "warn", "fail"}
+    assert "metadata_coverage_rate" in guardrails
+    assert "runtime_gating_enabled" in guardrails
+
+
 def test_benchmark_cli_many_class_smoke_preset_emits_runtime_metrics(tmp_path) -> None:
     out = tmp_path / "summary_many_class_smoke.json"
     code = main(
@@ -304,3 +335,18 @@ def test_print_profile_result_line_includes_shift_status(capsys) -> None:
     )
     output = capsys.readouterr().out
     assert "shift=pass" in output
+
+
+def test_print_profile_result_line_includes_noise_status(capsys) -> None:
+    _print_profile_result_line(
+        {
+            "profile_key": "noise_smoke",
+            "device": "cpu",
+            "hardware_backend": "cpu",
+            "datasets_per_minute": 123.0,
+            "latency_p95_ms": 4.2,
+            "noise_guardrails": {"enabled": True, "status": "warn"},
+        }
+    )
+    output = capsys.readouterr().out
+    assert "noise=warn" in output

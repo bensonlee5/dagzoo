@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Noise rollout presets for generate/benchmark smoke workflows (`configs/preset_noise_*.yaml`)
+- Noise workflow script wrapper (`scripts/generate-noise.sh`)
+- Noise benchmark guardrail reporting (`noise_guardrails`) for runtime delta vs legacy control and metadata validity
+- Noise feature guide (`docs/features/noise.md`) and usage/workflow documentation updates
+
+### Changed
+
+- Benchmark profile summaries now surface noise guardrail status in CLI and Markdown reports
+
 ## [0.2.0] - 2026-03-02
 
 ### Added

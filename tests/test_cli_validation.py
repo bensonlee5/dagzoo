@@ -227,6 +227,77 @@ def test_generate_cli_shift_presets_emit_shift_metadata_no_write(
         assert payload["profile"] == expected_profile
 
 
+@pytest.mark.parametrize(
+    ("config_path", "expected_family"),
+    [
+        ("configs/preset_noise_gaussian_generate_smoke.yaml", "gaussian"),
+        ("configs/preset_noise_laplace_generate_smoke.yaml", "laplace"),
+        ("configs/preset_noise_student_t_generate_smoke.yaml", "student_t"),
+        ("configs/preset_noise_mixture_generate_smoke.yaml", "mixture"),
+    ],
+)
+def test_generate_cli_noise_presets_emit_noise_metadata_no_write(
+    monkeypatch: pytest.MonkeyPatch,
+    config_path: str,
+    expected_family: str,
+) -> None:
+    from cauchy_generator.core import dataset as dataset_mod
+
+    captured_noise: list[dict[str, object]] = []
+    original_generate_batch_iter = dataset_mod.generate_batch_iter
+
+    def _capture_generate_batch_iter(
+        config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        for bundle in original_generate_batch_iter(
+            config,
+            num_datasets=num_datasets,
+            seed=seed,
+            device=device,
+        ):
+            payload = bundle.metadata["noise"]
+            assert isinstance(payload, dict)
+            captured_noise.append(payload)
+            yield bundle
+
+    monkeypatch.setattr(
+        "cauchy_generator.cli.generate_batch_iter",
+        _capture_generate_batch_iter,
+    )
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            config_path,
+            "--num-datasets",
+            "2",
+            "--device",
+            "cpu",
+            "--no-hardware-aware",
+            "--no-write",
+        ]
+    )
+
+    assert code == 0
+    assert len(captured_noise) == 2
+    for payload in captured_noise:
+        assert payload["family_requested"] == expected_family
+        assert payload["sampling_strategy"] == "dataset_level"
+        if expected_family == "mixture":
+            assert payload["family_sampled"] in {"gaussian", "laplace", "student_t"}
+            weights = payload["mixture_weights"]
+            assert isinstance(weights, dict)
+            assert sum(float(v) for v in weights.values()) == pytest.approx(1.0)
+        else:
+            assert payload["family_sampled"] == expected_family
+            assert payload["mixture_weights"] is None
+
+
 def test_benchmark_cli_rejects_negative_warmup() -> None:
     with pytest.raises(SystemExit) as exc:
         main(

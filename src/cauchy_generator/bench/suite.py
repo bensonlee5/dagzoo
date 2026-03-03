@@ -35,6 +35,7 @@ from cauchy_generator.bench.constants import (
     SMOKE_WARMUP_DATASETS_CAP,
     SHIFT_GUARDRAIL_DIRECTIONAL_GATING_MIN_SAMPLE,
     SHIFT_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE,
+    NOISE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE,
 )
 from cauchy_generator.bench.micro import run_microbenchmarks
 from cauchy_generator.bench.metrics import (
@@ -45,6 +46,7 @@ from cauchy_generator.bench.metrics import (
 )
 from cauchy_generator.bench.collectors import (
     _MissingnessAcceptanceCollector,
+    _NoiseGuardrailCollector,
     _ShiftGuardrailCollector,
     _compose_bundle_callback,
 )
@@ -60,6 +62,7 @@ from cauchy_generator.bench.throughput import run_throughput_benchmark
 from cauchy_generator.config import (
     GeneratorConfig,
     MISSINGNESS_MECHANISM_NONE,
+    NOISE_FAMILY_LEGACY,
     SHIFT_PROFILE_OFF,
 )
 from cauchy_generator.core.dataset import generate_batch_iter, generate_one
@@ -274,6 +277,12 @@ def _is_shift_enabled(config: GeneratorConfig) -> bool:
     return bool(config.shift.enabled)
 
 
+def _is_noise_enabled(config: GeneratorConfig) -> bool:
+    """Return whether non-legacy noise controls are enabled in config."""
+
+    return str(config.noise.family).strip().lower() != NOISE_FAMILY_LEGACY
+
+
 def _build_shift_directional_check(
     *,
     metric: str,
@@ -384,11 +393,18 @@ def run_profile_benchmark(
     )
     shift_enabled = _is_shift_enabled(config)
     shift_guardrails = _ShiftGuardrailCollector() if shift_enabled else None
+    noise_enabled = _is_noise_enabled(config)
+    noise_guardrails = (
+        _NoiseGuardrailCollector(expected_family_requested=str(config.noise.family))
+        if noise_enabled
+        else None
+    )
 
     on_bundle_callback = _compose_bundle_callback(
         diagnostics_aggregator=diagnostics_aggregator,
         missingness_acceptance=missingness_acceptance,
         shift_guardrails=shift_guardrails,
+        noise_guardrails=noise_guardrails,
     )
 
     result = run_throughput_benchmark(
@@ -411,6 +427,7 @@ def run_profile_benchmark(
     result["missingness_guardrails"] = {"enabled": False}
     result["lineage_guardrails"] = {"enabled": False}
     result["shift_guardrails"] = {"enabled": False}
+    result["noise_guardrails"] = {"enabled": False}
 
     latency_stats = _collect_latency(
         config,
@@ -462,6 +479,11 @@ def run_profile_benchmark(
             diagnostics_aggregator=missingness_baseline_diagnostics_aggregator,
             missingness_acceptance=baseline_missingness_acceptance,
             shift_guardrails=_ShiftGuardrailCollector() if shift_enabled else None,
+            noise_guardrails=(
+                _NoiseGuardrailCollector(expected_family_requested=str(config.noise.family))
+                if noise_enabled
+                else None
+            ),
         )
 
         baseline_throughput = run_throughput_benchmark(
@@ -540,6 +562,11 @@ def run_profile_benchmark(
             diagnostics_aggregator=shift_baseline_diagnostics_aggregator,
             missingness_acceptance=shift_baseline_missingness_acceptance,
             shift_guardrails=baseline_shift_guardrails,
+            noise_guardrails=(
+                _NoiseGuardrailCollector(expected_family_requested=str(config.noise.family))
+                if noise_enabled
+                else None
+            ),
         )
 
         baseline_throughput = run_throughput_benchmark(
@@ -690,6 +717,98 @@ def run_profile_benchmark(
             "runtime_fail_threshold_pct": float(fail_threshold_pct),
             "issues": shift_issues,
             "status": _status_from_issues(shift_issues),
+        }
+
+    if noise_enabled and noise_guardrails is not None:
+        baseline_config = _copy_runtime_config(config)
+        baseline_config.noise.family = NOISE_FAMILY_LEGACY
+        baseline_config.noise.scale = 1.0
+        baseline_config.noise.student_t_df = 5.0
+        baseline_config.noise.mixture_weights = None
+        noise_baseline_diagnostics_aggregator: CoverageAggregator | None = None
+        if diagnostics_aggregator is not None:
+            noise_baseline_diagnostics_aggregator = _build_diagnostics_aggregator(baseline_config)
+        noise_baseline_missingness_acceptance = (
+            _MissingnessAcceptanceCollector(target_rate=float(config.dataset.missing_rate))
+            if missingness_acceptance is not None
+            else None
+        )
+        noise_baseline_shift_guardrails = _ShiftGuardrailCollector() if shift_enabled else None
+        baseline_noise_guardrails = _NoiseGuardrailCollector(
+            expected_family_requested=str(baseline_config.noise.family)
+        )
+        baseline_on_bundle_callback = _compose_bundle_callback(
+            diagnostics_aggregator=noise_baseline_diagnostics_aggregator,
+            missingness_acceptance=noise_baseline_missingness_acceptance,
+            shift_guardrails=noise_baseline_shift_guardrails,
+            noise_guardrails=baseline_noise_guardrails,
+        )
+        baseline_throughput = run_throughput_benchmark(
+            baseline_config,
+            num_datasets=num_datasets,
+            warmup_datasets=warmup,
+            device=requested_device,
+            on_bundle=baseline_on_bundle_callback,
+        )
+
+        baseline_dpm = float(baseline_throughput.get("datasets_per_minute", 0.0))
+        current_dpm = float(result.get("datasets_per_minute", 0.0))
+        runtime_degradation = degradation_percent("datasets_per_minute", current_dpm, baseline_dpm)
+        runtime_degradation_value = (
+            float(runtime_degradation) if runtime_degradation is not None else 0.0
+        )
+        runtime_severity = _severity_from_thresholds(
+            runtime_degradation_value,
+            warn=float(warn_threshold_pct),
+            fail=float(fail_threshold_pct),
+        )
+        runtime_gating_enabled = num_datasets >= NOISE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE
+
+        current_summary = noise_guardrails.build_summary()
+        baseline_summary = baseline_noise_guardrails.build_summary()
+        noise_issues = list(current_summary["issues"])
+        if runtime_gating_enabled and runtime_severity != "pass":
+            noise_issues.append(
+                _build_guardrail_issue(
+                    metric="noise_runtime_degradation_pct",
+                    severity=runtime_severity,
+                    current=current_dpm,
+                    baseline=baseline_dpm,
+                    degradation_pct=runtime_degradation_value,
+                    detail=(
+                        "Non-legacy noise throughput regressed versus an equivalent "
+                        "legacy-noise control run."
+                    ),
+                )
+            )
+
+        result["noise_guardrails"] = {
+            "enabled": True,
+            "family_requested": str(config.noise.family),
+            "sample_datasets": int(num_datasets),
+            "metadata_coverage_rate": float(current_summary["metadata_coverage_rate"]),
+            "metadata_valid_rate": float(current_summary["metadata_valid_rate"]),
+            "valid_metadata_count": int(current_summary["valid_metadata_count"]),
+            "sampled_family_counts": dict(current_summary["sampled_family_counts"]),
+            "invalid_reason_counts": dict(current_summary["invalid_reason_counts"]),
+            "runtime_gating_enabled": bool(runtime_gating_enabled),
+            "runtime_gating_min_sample_datasets": int(NOISE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE),
+            "runtime_gating_suppressed_reason": (
+                None if runtime_gating_enabled else "insufficient_sample_size"
+            ),
+            "runtime_baseline_family_requested": str(baseline_config.noise.family),
+            "runtime_baseline_sampled_family_counts": dict(
+                baseline_summary["sampled_family_counts"]
+            ),
+            "runtime_baseline_datasets_per_minute": baseline_dpm,
+            "runtime_with_noise_datasets_per_minute": current_dpm,
+            "runtime_degradation_pct": (
+                float(runtime_degradation) if runtime_degradation is not None else None
+            ),
+            "runtime_warn_threshold_pct": float(warn_threshold_pct),
+            "runtime_fail_threshold_pct": float(fail_threshold_pct),
+            "issues": noise_issues,
+            "status": _status_from_issues(noise_issues),
         }
 
     result["lineage_guardrails"] = _collect_lineage_guardrails(
@@ -856,7 +975,10 @@ def run_benchmark_suite(
     shift_issues = _collect_guardrail_regression_issues(
         profile_results, guardrail_key="shift_guardrails"
     )
-    additional_issues = [*missingness_issues, *lineage_issues, *shift_issues]
+    noise_issues = _collect_guardrail_regression_issues(
+        profile_results, guardrail_key="noise_guardrails"
+    )
+    additional_issues = [*missingness_issues, *lineage_issues, *shift_issues, *noise_issues]
     if additional_issues:
         existing_issues = regression.get("issues", [])
         if not isinstance(existing_issues, list):

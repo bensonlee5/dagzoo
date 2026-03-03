@@ -50,6 +50,13 @@ cauchy-gen benchmark \
   --suite smoke \
   --no-memory \
   --out-dir benchmarks/results/smoke_shift_guardrails
+
+cauchy-gen benchmark \
+  --config configs/preset_noise_benchmark_smoke.yaml \
+  --profile custom \
+  --suite smoke \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_noise_guardrails
 ```
 
 ______________________________________________________________________
@@ -80,6 +87,7 @@ When present in a run summary, inspect:
 - `missingness_guardrails`
 - `lineage_guardrails`
 - `shift_guardrails`
+- `noise_guardrails`
 
 Also review throughput/latency aggregates for profile/suite trends.
 
@@ -89,3 +97,4 @@ ______________________________________________________________________
 
 - Workflow hub: [usage-guide.md](../usage-guide.md)
 - Output contract: [output-format.md](../output-format.md)
+- Noise workflows: [noise.md](noise.md)

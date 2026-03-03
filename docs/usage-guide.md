@@ -116,7 +116,19 @@ Detailed guide: [Shift / Drift](features/shift.md)
 
 ______________________________________________________________________
 
-## 7. Benchmark workflows and guardrails
+## 7. Noise workflows
+
+Use noise workflows for explicit Gaussian/Laplace/Student-t/mixture regimes:
+
+```bash
+cauchy-gen generate --config configs/preset_noise_mixture_generate_smoke.yaml --num-datasets 25 --out data/run_noise_mixture
+```
+
+Detailed guide: [Noise Diversification](features/noise.md)
+
+______________________________________________________________________
+
+## 8. Benchmark workflows and guardrails
 
 Use benchmark workflows for smoke checks, feature guardrails, and regression
 gating.
@@ -136,6 +148,7 @@ ______________________________________________________________________
   [missingness](features/missingness.md),
   [many-class](features/many-class.md),
   [shift](features/shift.md),
+  [noise](features/noise.md),
   [benchmark guardrails](features/benchmark-guardrails.md)
 - Output contract: [output-format.md](output-format.md)
 - System guide and terminology: [how-it-works.md](how-it-works.md)
