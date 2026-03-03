@@ -86,7 +86,7 @@ def extract_dataset_metrics(
         shift_enabled=_float_or_default(raw.get("shift_enabled"), 0.0),
         shift_graph_scale=_float_or_default(raw.get("shift_graph_scale"), 0.0),
         shift_mechanism_scale=_float_or_default(raw.get("shift_mechanism_scale"), 0.0),
-        shift_noise_scale=_float_or_default(raw.get("shift_noise_scale"), 0.0),
+        shift_variance_scale=_float_or_default(raw.get("shift_variance_scale"), 0.0),
         shift_edge_odds_multiplier=_float_or_default(raw.get("shift_edge_odds_multiplier"), 1.0),
         shift_mechanism_nonlinear_mass=_float_or_default(
             raw.get("shift_mechanism_nonlinear_mass"),

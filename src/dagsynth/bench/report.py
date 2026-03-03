@@ -30,14 +30,14 @@ def _format_float(value: Any, digits: int = 3) -> str:
     return f"{float(value):.{digits}f}"
 
 
-def _build_profile_table(profile_results: list[dict[str, Any]]) -> list[str]:
-    """Create a markdown table summarizing per-profile performance metrics."""
+def _build_preset_table(preset_results: list[dict[str, Any]]) -> list[str]:
+    """Create a markdown table summarizing per-preset performance metrics."""
 
     lines = [
-        "| Profile | Device | Backend | Datasets/min | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) | Diagnostics | Missingness | Lineage | Shift | Noise |",
+        "| Preset | Device | Backend | Datasets/min | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) | Diagnostics | Missingness | Lineage | Shift | Noise |",
         "|---|---|---:|---:|---:|---:|---:|---|---|---|---|---|",
     ]
-    for result in profile_results:
+    for result in preset_results:
         diagnostics_state = "on" if bool(result.get("diagnostics_enabled")) else "off"
         missingness_state = "off"
         guardrails = result.get("missingness_guardrails")
@@ -57,7 +57,7 @@ def _build_profile_table(profile_results: list[dict[str, Any]]) -> list[str]:
             noise_state = str(noise_guardrails.get("status", "pass"))
         lines.append(
             "| "
-            f"{result.get('profile_key', '-')} | "
+            f"{result.get('preset_key', '-')} | "
             f"{result.get('device', '-')} | "
             f"{result.get('hardware_backend', '-')} | "
             f"{_format_float(result.get('datasets_per_minute'), 2)} | "
@@ -73,14 +73,14 @@ def _build_profile_table(profile_results: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def _build_diagnostics_table(profile_results: list[dict[str, Any]]) -> list[str]:
-    """Create a markdown table with per-profile diagnostics artifact pointers."""
+def _build_diagnostics_table(preset_results: list[dict[str, Any]]) -> list[str]:
+    """Create a markdown table with per-preset diagnostics artifact pointers."""
 
     lines = [
-        "| Profile | Coverage JSON | Coverage Markdown |",
+        "| Preset | Coverage JSON | Coverage Markdown |",
         "|---|---|---|",
     ]
-    for result in profile_results:
+    for result in preset_results:
         artifacts = result.get("diagnostics_artifacts")
         json_path = "-"
         md_path = "-"
@@ -91,7 +91,7 @@ def _build_diagnostics_table(profile_results: list[dict[str, Any]]) -> list[str]
                 json_path = f"`{json_value}`"
             if isinstance(md_value, str) and md_value:
                 md_path = f"`{md_value}`"
-        lines.append(f"| {result.get('profile_key', '-')} | {json_path} | {md_path} |")
+        lines.append(f"| {result.get('preset_key', '-')} | {json_path} | {md_path} |")
     return lines
 
 
@@ -113,25 +113,25 @@ def write_suite_markdown(summary: dict[str, Any], out_path: str | Path) -> Path:
         lines.append(f"- Regression status: `{regression.get('status', 'pass')}`")
     lines.append("")
 
-    profile_results = summary.get("profile_results", [])
-    if isinstance(profile_results, list) and profile_results:
-        lines.append("## Profiles")
-        lines.extend(_build_profile_table(profile_results))
+    preset_results = summary.get("preset_results", [])
+    if isinstance(preset_results, list) and preset_results:
+        lines.append("## Presets")
+        lines.extend(_build_preset_table(preset_results))
         lines.append("")
-        if any(bool(result.get("diagnostics_enabled")) for result in profile_results):
+        if any(bool(result.get("diagnostics_enabled")) for result in preset_results):
             lines.append("## Diagnostics Artifacts")
-            lines.extend(_build_diagnostics_table(profile_results))
+            lines.extend(_build_diagnostics_table(preset_results))
             lines.append("")
 
     if isinstance(regression, dict) and regression.get("issues"):
         lines.append("## Regression Issues")
-        lines.append("| Severity | Profile | Metric | Current | Baseline | Degradation % |")
+        lines.append("| Severity | Preset | Metric | Current | Baseline | Degradation % |")
         lines.append("|---|---|---|---:|---:|---:|")
         for issue in regression["issues"]:
             lines.append(
                 "| "
                 f"{issue.get('severity')} | "
-                f"{issue.get('profile')} | "
+                f"{issue.get('preset')} | "
                 f"{issue.get('metric')} | "
                 f"{_format_float(issue.get('current'), 3)} | "
                 f"{_format_float(issue.get('baseline'), 3)} | "

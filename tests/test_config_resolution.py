@@ -9,7 +9,7 @@ from dagsynth.bench.constants import (
 from dagsynth.config import GeneratorConfig
 from dagsynth.core.config_resolution import (
     BenchmarkSmokeCaps,
-    resolve_benchmark_profile_config,
+    resolve_benchmark_preset_config,
     resolve_generate_config,
     serialize_resolution_events,
 )
@@ -91,17 +91,17 @@ def test_resolve_generate_config_treats_null_runtime_device_as_auto() -> None:
     assert resolved.config.runtime.device == "auto"
 
 
-def test_resolve_benchmark_profile_config_applies_smoke_caps() -> None:
+def test_resolve_benchmark_preset_config_applies_smoke_caps() -> None:
     cfg = GeneratorConfig.from_yaml("configs/benchmark_cpu.yaml")
     assert cfg.dataset.n_train > SMOKE_N_TRAIN_CAP
     assert cfg.dataset.n_test == SMOKE_N_TEST_CAP
     assert cfg.dataset.n_features_max > SMOKE_N_FEATURES_CAP
     assert cfg.graph.n_nodes_max > SMOKE_N_NODES_CAP
 
-    resolved = resolve_benchmark_profile_config(
-        profile_key="cpu",
+    resolved = resolve_benchmark_preset_config(
+        preset_key="cpu",
         config=cfg,
-        profile_device="cpu",
+        preset_device="cpu",
         suite="smoke",
         hardware_policy="none",
         smoke_caps=BenchmarkSmokeCaps(
@@ -126,7 +126,7 @@ def test_resolve_benchmark_profile_config_applies_smoke_caps() -> None:
     )
 
 
-def test_resolve_benchmark_profile_config_revalidates_after_smoke_caps() -> None:
+def test_resolve_benchmark_preset_config_revalidates_after_smoke_caps() -> None:
     cfg = GeneratorConfig.from_dict(
         {
             "dataset": {
@@ -143,10 +143,10 @@ def test_resolve_benchmark_profile_config_revalidates_after_smoke_caps() -> None
         ValueError,
         match=r"dataset classification split constraints for n_classes_max",
     ):
-        resolve_benchmark_profile_config(
-            profile_key="cpu",
+        resolve_benchmark_preset_config(
+            preset_key="cpu",
             config=cfg,
-            profile_device="cpu",
+            preset_device="cpu",
             suite="smoke",
             hardware_policy="none",
             smoke_caps=BenchmarkSmokeCaps(
@@ -158,14 +158,14 @@ def test_resolve_benchmark_profile_config_revalidates_after_smoke_caps() -> None
         )
 
 
-def test_resolve_benchmark_profile_config_treats_null_runtime_device_as_auto() -> None:
+def test_resolve_benchmark_preset_config_treats_null_runtime_device_as_auto() -> None:
     cfg = GeneratorConfig.from_yaml("configs/benchmark_cpu.yaml")
     cfg.runtime.device = None  # type: ignore[assignment]
 
-    resolved = resolve_benchmark_profile_config(
-        profile_key="cpu",
+    resolved = resolve_benchmark_preset_config(
+        preset_key="cpu",
         config=cfg,
-        profile_device=None,
+        preset_device=None,
         suite="standard",
         hardware_policy="none",
         smoke_caps=None,
@@ -175,15 +175,15 @@ def test_resolve_benchmark_profile_config_treats_null_runtime_device_as_auto() -
     assert resolved.config.runtime.device == "auto"
 
 
-def test_resolve_benchmark_profile_config_requires_smoke_caps_for_smoke_suite() -> None:
+def test_resolve_benchmark_preset_config_requires_smoke_caps_for_smoke_suite() -> None:
     cfg = GeneratorConfig.from_yaml("configs/benchmark_cpu.yaml")
     with pytest.raises(
         ValueError, match="Benchmark smoke suite config resolution requires smoke cap values"
     ):
-        resolve_benchmark_profile_config(
-            profile_key="cpu",
+        resolve_benchmark_preset_config(
+            preset_key="cpu",
             config=cfg,
-            profile_device="cpu",
+            preset_device="cpu",
             suite="smoke",
             hardware_policy="none",
             smoke_caps=None,

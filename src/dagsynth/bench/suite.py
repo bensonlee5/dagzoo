@@ -1,4 +1,4 @@
-"""Benchmark suite orchestration across runtime profiles."""
+"""Benchmark suite orchestration across runtime presets."""
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ from typing import Any
 import torch
 from dagsynth.bench.baseline import compare_summary_to_baseline
 from dagsynth.bench.constants import (
-    DIAGNOSTICS_DUPLICATE_PROFILE_SUFFIX_BASE,
+    DIAGNOSTICS_DUPLICATE_PRESET_SUFFIX_BASE,
     KIB,
     LATENCY_SEED_OFFSET,
     MIB,
     MICROBENCH_REPEATS,
     MISSINGNESS_RATE_FAIL_ABS_ERROR,
     MISSINGNESS_RATE_WARN_ABS_ERROR,
-    PROFILE_KEY_HASH_SUFFIX_LEN,
+    PRESET_KEY_HASH_SUFFIX_LEN,
     REPRODUCIBILITY_SEED_OFFSET,
     SMOKE_LATENCY_SAMPLES_CAP,
     SMOKE_N_FEATURES_CAP,
@@ -64,11 +64,11 @@ from dagsynth.config import (
     GeneratorConfig,
     MISSINGNESS_MECHANISM_NONE,
     NOISE_FAMILY_GAUSSIAN,
-    SHIFT_PROFILE_OFF,
+    SHIFT_MODE_OFF,
 )
 from dagsynth.core.config_resolution import (
     BenchmarkSmokeCaps,
-    resolve_benchmark_profile_config,
+    resolve_benchmark_preset_config,
     serialize_resolution_events,
 )
 from dagsynth.core.dataset import generate_batch_iter, generate_one
@@ -78,13 +78,13 @@ from dagsynth.diagnostics import (
     write_coverage_summary_json,
     write_coverage_summary_markdown,
 )
-from dagsynth.meta_targets import (
-    build_coverage_aggregation_config,
+from dagsynth.diagnostics_targets import (
+    build_diagnostics_aggregation_config,
 )
 from dagsynth.rng import SeedManager, offset_seed32
 
 
-DEFAULT_PROFILE_CONFIGS: dict[str, str] = {
+DEFAULT_PRESET_CONFIGS: dict[str, str] = {
     "cpu": "configs/benchmark_cpu.yaml",
     "cuda_desktop": "configs/benchmark_cuda_desktop.yaml",
     "cuda_h100": "configs/benchmark_cuda_h100.yaml",
@@ -92,8 +92,8 @@ DEFAULT_PROFILE_CONFIGS: dict[str, str] = {
 
 
 @dataclass(slots=True)
-class ProfileRunSpec:
-    """Benchmark execution spec for one profile/config pair."""
+class PresetRunSpec:
+    """Benchmark execution spec for one preset/config pair."""
 
     key: str
     config: GeneratorConfig
@@ -115,19 +115,19 @@ def _peak_rss_mb() -> float:
     return rss / KIB
 
 
-def _profile_counts(
+def _preset_counts(
     config: GeneratorConfig,
     *,
-    profile_key: str,
+    preset_key: str,
     suite: str,
     num_datasets_override: int | None,
     warmup_override: int | None,
 ) -> tuple[int, int]:
-    """Resolve benchmark dataset and warmup counts for a profile and suite mode."""
+    """Resolve benchmark dataset and warmup counts for a preset and suite mode."""
 
-    profile_map = config.benchmark.profiles.get(profile_key, {})
-    num = int(profile_map.get("num_datasets", config.benchmark.num_datasets))
-    warmup = int(profile_map.get("warmup_datasets", config.benchmark.warmup_datasets))
+    preset_map = config.benchmark.presets.get(preset_key, {})
+    num = int(preset_map.get("num_datasets", config.benchmark.num_datasets))
+    warmup = int(preset_map.get("warmup_datasets", config.benchmark.warmup_datasets))
 
     if num_datasets_override is not None:
         num = int(num_datasets_override)
@@ -142,7 +142,7 @@ def _profile_counts(
 
 
 def _latency_sample_count(config: GeneratorConfig, suite: str, num_datasets: int) -> int:
-    """Choose per-profile latency sample count for the requested suite level."""
+    """Choose per-preset latency sample count for the requested suite level."""
 
     n = max(1, min(int(config.benchmark.latency_num_samples), num_datasets))
     if suite == "smoke":
@@ -191,13 +191,13 @@ def _collect_reproducibility(
     }
 
 
-def _sanitize_profile_key(profile_key: str) -> str:
-    """Normalize profile key into a filesystem-safe unique path segment."""
+def _sanitize_preset_key(preset_key: str) -> str:
+    """Normalize preset key into a filesystem-safe unique path segment."""
 
-    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", profile_key).strip("._-")
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", preset_key).strip("._-")
     if not normalized:
-        normalized = "profile"
-    suffix = hashlib.sha1(profile_key.encode("utf-8")).hexdigest()[:PROFILE_KEY_HASH_SUFFIX_LEN]
+        normalized = "preset"
+    suffix = hashlib.sha1(preset_key.encode("utf-8")).hexdigest()[:PRESET_KEY_HASH_SUFFIX_LEN]
     return f"{normalized}_{suffix}"
 
 
@@ -210,7 +210,7 @@ def _artifact_pointer(path: Path) -> str:
 def _build_diagnostics_aggregator(config: GeneratorConfig) -> CoverageAggregator:
     """Create a diagnostics coverage aggregator from config."""
 
-    return CoverageAggregator(build_coverage_aggregation_config(config.diagnostics))
+    return CoverageAggregator(build_diagnostics_aggregation_config(config.diagnostics))
 
 
 def _is_missingness_enabled(config: GeneratorConfig) -> bool:
@@ -291,8 +291,8 @@ def _build_shift_directional_check(
     return payload, issue
 
 
-def run_profile_benchmark(
-    spec: ProfileRunSpec,
+def run_preset_benchmark(
+    spec: PresetRunSpec,
     *,
     suite: str,
     num_datasets_override: int | None,
@@ -308,12 +308,12 @@ def run_profile_benchmark(
     diagnostics_occurrence_index: int,
     diagnostics_occurrence_total: int,
 ) -> dict[str, Any]:
-    """Run one benchmark profile and collect throughput, latency, and optional diagnostics."""
+    """Run one benchmark preset and collect throughput, latency, and optional diagnostics."""
 
-    resolved_profile = resolve_benchmark_profile_config(
-        profile_key=spec.key,
+    resolved_preset = resolve_benchmark_preset_config(
+        preset_key=spec.key,
         config=spec.config,
-        profile_device=spec.device,
+        preset_device=spec.device,
         suite=suite,
         hardware_policy=hardware_policy,
         smoke_caps=BenchmarkSmokeCaps(
@@ -323,13 +323,13 @@ def run_profile_benchmark(
             n_nodes=SMOKE_N_NODES_CAP,
         ),
     )
-    config = resolved_profile.config
-    requested_device = resolved_profile.requested_device
-    hw = resolved_profile.hardware
+    config = resolved_preset.config
+    requested_device = resolved_preset.requested_device
+    hw = resolved_preset.hardware
 
-    num_datasets, warmup = _profile_counts(
+    num_datasets, warmup = _preset_counts(
         config,
-        profile_key=spec.key,
+        preset_key=spec.key,
         suite=suite,
         num_datasets_override=num_datasets_override,
         warmup_override=warmup_override,
@@ -374,17 +374,17 @@ def run_profile_benchmark(
         device=requested_device,
         on_bundle=on_bundle_callback,
     )
-    result["profile_key"] = spec.key
+    result["preset_key"] = spec.key
     result["suite"] = suite
     result["device"] = requested_device
     result["hardware_backend"] = hw.backend
     result["hardware_device_name"] = hw.device_name
     result["hardware_memory_gb"] = hw.total_memory_gb
     result["hardware_peak_flops"] = hw.peak_flops
-    result["hardware_profile"] = hw.profile
+    result["hardware_tier"] = hw.tier
     result["hardware_policy"] = str(hardware_policy)
     result["effective_config"] = config.to_dict()
-    result["effective_config_trace"] = serialize_resolution_events(resolved_profile.trace_events)
+    result["effective_config_trace"] = serialize_resolution_events(resolved_preset.trace_events)
     result["diagnostics_enabled"] = diagnostics_enabled
     result["diagnostics_artifacts"] = None
     result["missingness_guardrails"] = {"enabled": False}
@@ -508,10 +508,10 @@ def run_profile_benchmark(
         shift_params = resolve_shift_runtime_params(config)
         baseline_config = _copy_runtime_config(config)
         baseline_config.shift.enabled = False
-        baseline_config.shift.profile = SHIFT_PROFILE_OFF
+        baseline_config.shift.mode = SHIFT_MODE_OFF
         baseline_config.shift.graph_scale = None
         baseline_config.shift.mechanism_scale = None
-        baseline_config.shift.noise_scale = None
+        baseline_config.shift.variance_scale = None
         shift_baseline_diagnostics_aggregator: CoverageAggregator | None = None
         if diagnostics_aggregator is not None:
             shift_baseline_diagnostics_aggregator = _build_diagnostics_aggregator(baseline_config)
@@ -620,7 +620,7 @@ def run_profile_benchmark(
         )
         noise_check, noise_issue = _build_shift_directional_check(
             metric="noise_variance_multiplier",
-            enabled=float(shift_params.noise_scale) > 0.0,
+            enabled=float(shift_params.variance_scale) > 0.0,
             gating_enabled=directional_gating_enabled,
             current=current_summary.get("mean_noise_variance_multiplier"),
             baseline=baseline_summary.get("mean_noise_variance_multiplier"),
@@ -635,10 +635,10 @@ def run_profile_benchmark(
 
         result["shift_guardrails"] = {
             "enabled": True,
-            "profile": str(shift_params.profile),
+            "mode": str(shift_params.mode),
             "graph_scale": float(shift_params.graph_scale),
             "mechanism_scale": float(shift_params.mechanism_scale),
-            "noise_scale": float(shift_params.noise_scale),
+            "variance_scale": float(shift_params.variance_scale),
             "sample_datasets": int(num_datasets),
             "metadata_coverage_rate": metadata_coverage_rate,
             "shift_enabled_coverage_rate": shift_enabled_coverage_rate,
@@ -685,7 +685,7 @@ def run_profile_benchmark(
     if noise_enabled and noise_guardrails is not None:
         baseline_config = _copy_runtime_config(config)
         baseline_config.noise.family = NOISE_FAMILY_GAUSSIAN
-        baseline_config.noise.scale = 1.0
+        baseline_config.noise.base_scale = 1.0
         baseline_config.noise.student_t_df = 5.0
         baseline_config.noise.mixture_weights = None
         noise_baseline_diagnostics_aggregator: CoverageAggregator | None = None
@@ -788,17 +788,17 @@ def run_profile_benchmark(
         and diagnostics_aggregator is not None
         and diagnostics_root_dir is not None
     ):
-        profile_segment = _sanitize_profile_key(spec.key)
+        preset_segment = _sanitize_preset_key(spec.key)
         if diagnostics_occurrence_total > 1:
-            run_number = diagnostics_occurrence_index + DIAGNOSTICS_DUPLICATE_PROFILE_SUFFIX_BASE
-            profile_segment = f"{profile_segment}_run{run_number}"
-        profile_diagnostics_dir = diagnostics_root_dir / "diagnostics" / profile_segment
+            run_number = diagnostics_occurrence_index + DIAGNOSTICS_DUPLICATE_PRESET_SUFFIX_BASE
+            preset_segment = f"{preset_segment}_run{run_number}"
+        preset_diagnostics_dir = diagnostics_root_dir / "diagnostics" / preset_segment
         summary = diagnostics_aggregator.build_summary()
         json_path = write_coverage_summary_json(
-            summary, profile_diagnostics_dir / "coverage_summary.json"
+            summary, preset_diagnostics_dir / "coverage_summary.json"
         )
         md_path = write_coverage_summary_markdown(
-            summary, profile_diagnostics_dir / "coverage_summary.md"
+            summary, preset_diagnostics_dir / "coverage_summary.md"
         )
         result["diagnostics_artifacts"] = {
             "json": _artifact_pointer(json_path),
@@ -808,21 +808,21 @@ def run_profile_benchmark(
     return result
 
 
-def resolve_profile_run_specs(
+def resolve_preset_run_specs(
     *,
-    profile_keys: list[str] | None,
+    preset_keys: list[str] | None,
     config_path: str | None,
-) -> list[ProfileRunSpec]:
-    """Resolve requested profile keys into concrete benchmark run specs."""
+) -> list[PresetRunSpec]:
+    """Resolve requested preset keys into concrete benchmark run specs."""
 
-    keys = list(profile_keys or [])
+    keys = list(preset_keys or [])
     if "all" in keys:
         keys = ["cpu", "cuda_desktop", "cuda_h100"]
 
     if not keys:
-        keys = ["custom"] if config_path else ["cpu", "cuda_desktop", "cuda_h100"]
+        keys = ["custom"] if config_path else ["cpu"]
 
-    resolved: list[ProfileRunSpec] = []
+    resolved: list[PresetRunSpec] = []
     seen: set[str] = set()
     for key in keys:
         if key in seen:
@@ -831,29 +831,29 @@ def resolve_profile_run_specs(
 
         if key == "custom":
             if not config_path:
-                raise ValueError("Profile 'custom' requires --config.")
+                raise ValueError("Preset 'custom' requires --config.")
             config = GeneratorConfig.from_yaml(config_path)
-            profile_key = config.benchmark.profile_name or "custom"
+            preset_key = config.benchmark.preset_name or "custom"
             resolved.append(
-                ProfileRunSpec(key=profile_key, config=config, device=config.runtime.device)
+                PresetRunSpec(key=preset_key, config=config, device=config.runtime.device)
             )
             continue
 
-        config_file = DEFAULT_PROFILE_CONFIGS.get(key)
+        config_file = DEFAULT_PRESET_CONFIGS.get(key)
         if not config_file:
-            raise ValueError(f"Unknown benchmark profile key: {key}")
+            raise ValueError(f"Unknown benchmark preset key: {key}")
 
         config = GeneratorConfig.from_yaml(config_file)
-        profile_device = str(
-            config.benchmark.profiles.get(key, {}).get("device", config.runtime.device)
+        preset_device = str(
+            config.benchmark.presets.get(key, {}).get("device", config.runtime.device)
         )
-        resolved.append(ProfileRunSpec(key=key, config=config, device=profile_device))
+        resolved.append(PresetRunSpec(key=key, config=config, device=preset_device))
 
     return resolved
 
 
 def run_benchmark_suite(
-    profile_specs: list[ProfileRunSpec],
+    preset_specs: list[PresetRunSpec],
     *,
     suite: str,
     warn_threshold_pct: float,
@@ -868,7 +868,7 @@ def run_benchmark_suite(
     fail_on_regression: bool,
     hardware_policy: str,
 ) -> dict[str, Any]:
-    """Run a benchmark suite over one or more profiles and attach regression diagnostics."""
+    """Run a benchmark suite over one or more presets and attach regression diagnostics."""
 
     normalized_suite = suite.lower().strip()
     if normalized_suite not in {"smoke", "standard", "full"}:
@@ -878,15 +878,15 @@ def run_benchmark_suite(
 
     include_micro = normalized_suite == "full"
     enable_repro = collect_reproducibility or normalized_suite == "full"
-    key_totals: Counter[str] = Counter(spec.key for spec in profile_specs)
+    key_totals: Counter[str] = Counter(spec.key for spec in preset_specs)
     key_seen: dict[str, int] = {}
 
-    profile_results: list[dict[str, Any]] = []
-    for spec in profile_specs:
+    preset_results: list[dict[str, Any]] = []
+    for spec in preset_specs:
         occurrence_index = key_seen.get(spec.key, 0)
         key_seen[spec.key] = occurrence_index + 1
-        profile_results.append(
-            run_profile_benchmark(
+        preset_results.append(
+            run_preset_benchmark(
                 spec,
                 suite=normalized_suite,
                 num_datasets_override=num_datasets_override,
@@ -907,7 +907,7 @@ def run_benchmark_suite(
     summary: dict[str, Any] = {
         "suite": normalized_suite,
         "generated_at": dt.datetime.now(dt.UTC).isoformat(),
-        "profile_results": profile_results,
+        "preset_results": preset_results,
     }
 
     regression: dict[str, Any]
@@ -927,16 +927,16 @@ def run_benchmark_suite(
         }
 
     missingness_issues = _collect_guardrail_regression_issues(
-        profile_results, guardrail_key="missingness_guardrails"
+        preset_results, guardrail_key="missingness_guardrails"
     )
     lineage_issues = _collect_guardrail_regression_issues(
-        profile_results, guardrail_key="lineage_guardrails"
+        preset_results, guardrail_key="lineage_guardrails"
     )
     shift_issues = _collect_guardrail_regression_issues(
-        profile_results, guardrail_key="shift_guardrails"
+        preset_results, guardrail_key="shift_guardrails"
     )
     noise_issues = _collect_guardrail_regression_issues(
-        profile_results, guardrail_key="noise_guardrails"
+        preset_results, guardrail_key="noise_guardrails"
     )
     additional_issues = [*missingness_issues, *lineage_issues, *shift_issues, *noise_issues]
     if additional_issues:

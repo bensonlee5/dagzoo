@@ -107,7 +107,7 @@ walkthroughs, see `docs/how-it-works.md`.
 
 - `dagsynth generate --config ... --num-datasets ... --device cuda --seed ...`
 - `dagsynth generate --missing-rate ... --missing-mechanism ... --missing-mar-observed-fraction ... --missing-mar-logit-scale ... --missing-mnar-logit-scale ...`
-- `dagsynth benchmark --suite standard --profile all --baseline ... --fail-on-regression`
+- `dagsynth benchmark --suite standard --preset all --baseline ... --fail-on-regression`
 
 #### Output Contract
 

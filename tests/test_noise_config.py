@@ -12,7 +12,7 @@ from dagsynth.config import (
 def test_noise_config_defaults_from_default_yaml() -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     assert cfg.noise.family == NOISE_FAMILY_GAUSSIAN
-    assert cfg.noise.scale == pytest.approx(1.0)
+    assert cfg.noise.base_scale == pytest.approx(1.0)
     assert cfg.noise.student_t_df == pytest.approx(5.0)
     assert cfg.noise.mixture_weights is None
 

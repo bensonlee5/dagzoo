@@ -24,7 +24,7 @@ class ResolutionEvent:
 
 @dataclass(slots=True, frozen=True)
 class BenchmarkSmokeCaps:
-    """Hard caps applied to benchmark profile configs in smoke mode."""
+    """Hard caps applied to benchmark preset configs in smoke mode."""
 
     n_train: int
     n_test: int
@@ -43,10 +43,10 @@ class ResolvedGenerateConfig:
 
 
 @dataclass(slots=True)
-class ResolvedBenchmarkProfileConfig:
-    """Fully resolved benchmark profile config with hardware info and override trace."""
+class ResolvedBenchmarkPresetConfig:
+    """Fully resolved benchmark preset config with hardware info and override trace."""
 
-    profile_key: str
+    preset_key: str
     config: GeneratorConfig
     hardware: HardwareInfo
     requested_device: str
@@ -290,26 +290,26 @@ def resolve_generate_config(
     )
 
 
-def resolve_benchmark_profile_config(
+def resolve_benchmark_preset_config(
     *,
-    profile_key: str,
+    preset_key: str,
     config: GeneratorConfig,
-    profile_device: str | None,
+    preset_device: str | None,
     suite: str,
     hardware_policy: str,
     smoke_caps: BenchmarkSmokeCaps | None,
-) -> ResolvedBenchmarkProfileConfig:
-    """Resolve effective config for one benchmark profile run."""
+) -> ResolvedBenchmarkPresetConfig:
+    """Resolve effective config for one benchmark preset run."""
 
     resolved = _clone_config(config)
     trace_events: list[ResolutionEvent] = []
 
-    requested_device = _normalize_requested_device(profile_device, resolved.runtime.device)
+    requested_device = _normalize_requested_device(preset_device, resolved.runtime.device)
     _set_config_path(
         resolved,
         path="runtime.device",
         value=requested_device,
-        source="benchmark.profile_device",
+        source="benchmark.preset_device",
         events=trace_events,
     )
 
@@ -331,8 +331,8 @@ def resolve_benchmark_profile_config(
         _apply_smoke_caps(resolved, smoke_caps=smoke_caps, events=trace_events)
 
     resolved.validate_generation_constraints()
-    return ResolvedBenchmarkProfileConfig(
-        profile_key=profile_key,
+    return ResolvedBenchmarkPresetConfig(
+        preset_key=preset_key,
         config=resolved,
         hardware=hw,
         requested_device=requested_device,
@@ -349,9 +349,9 @@ def serialize_resolution_events(events: list[ResolutionEvent]) -> list[dict[str,
 __all__ = [
     "BenchmarkSmokeCaps",
     "ResolutionEvent",
-    "ResolvedBenchmarkProfileConfig",
+    "ResolvedBenchmarkPresetConfig",
     "ResolvedGenerateConfig",
-    "resolve_benchmark_profile_config",
+    "resolve_benchmark_preset_config",
     "resolve_generate_config",
     "serialize_resolution_events",
 ]

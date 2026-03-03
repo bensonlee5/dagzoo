@@ -31,8 +31,8 @@ features/targets, and applying quality/realism controls.
 `dagsynth` has three commands:
 
 - `generate`: produce datasets and optionally write artifacts.
-- `benchmark`: run profile/suite workloads and report guardrails.
-- `hardware`: inspect detected backend/device/profile.
+- `benchmark`: run preset/suite workloads and report guardrails.
+- `hardware`: inspect detected backend/device/tier.
 
 ```mermaid
 flowchart LR
@@ -60,7 +60,7 @@ flowchart LR
 
     subgraph BenchPath["benchmark"]
         direction TB
-        BCfg["resolve suite/profile specs"] --> BTune["per-profile hardware policy"]
+        BCfg["resolve suite/preset specs"] --> BTune["per-preset hardware policy"]
         BTune --> Runs["run benchmark suite"]
         Runs --> Guards["emit guardrails (runtime/metadata)"]
         Guards --> Reports["write summary JSON/Markdown"]
@@ -68,7 +68,7 @@ flowchart LR
 
     subgraph HardwarePath["hardware"]
         direction TB
-        Detect["detect_hardware"] --> Print["print backend/device/profile"]
+        Detect["detect_hardware"] --> Print["print backend/device/tier"]
     end
 ```
 
@@ -117,16 +117,16 @@ follows the baseline path unchanged.
 
 The three shift axes use explicit scale semantics:
 
-| Axis              | What changes                           | Scale mapping                                       |
-| ----------------- | -------------------------------------- | --------------------------------------------------- |
-| `graph_scale`     | DAG edge-density prior                 | `edge_logit_bias_shift = ln(2) * graph_scale`       |
-| `mechanism_scale` | function-family sampling probabilities | `softmax(mechanism_scale * centered_family_logits)` |
-| `noise_scale`     | stochastic noise magnitude             | `sigma_multiplier = exp((ln(2)/2) * noise_scale)`   |
+| Axis              | What changes                           | Scale mapping                                                 |
+| ----------------- | -------------------------------------- | ------------------------------------------------------------- |
+| `graph_scale`     | DAG edge-density prior                 | `edge_logit_bias_shift = ln(2) * graph_scale`                 |
+| `mechanism_scale` | function-family sampling probabilities | `softmax(mechanism_scale * centered_family_logits)`           |
+| `variance_scale`  | stochastic noise magnitude             | `variance_sigma_multiplier = exp((ln(2)/2) * variance_scale)` |
 
 Interpretation:
 
 - `graph_scale = 1.0` doubles edge odds relative to baseline.
-- `noise_scale = 1.0` corresponds to +3 dB variance (2x variance).
+- `variance_scale = 1.0` corresponds to +3 dB variance (2x variance).
 - `mechanism_scale > 0` shifts mass toward nonlinear families (`nn`, `tree`,
   `discretization`, `gp`, `product`) while remaining probabilistic.
 - Emitted bundle metadata includes resolved shift settings and derived signals
@@ -211,7 +211,7 @@ sections such as `missingness_guardrails`, `lineage_guardrails`, and
   and depth in one layout draw.
 - **learnability filter**: CPU ExtraTrees-based gate for signal quality.
 - **wins ratio**: bootstrap fraction where model beats baseline.
-- **shift profile**: opt-in distribution-drift control over graph, mechanism,
+- **shift mode**: opt-in distribution-drift control over graph, mechanism,
   and noise sampling axes.
 
 ### Diagnostics and fixed layout
@@ -243,7 +243,7 @@ sections such as `missingness_guardrails`, `lineage_guardrails`, and
   `X_test`, `y_test`, `feature_types`, `metadata`).
 - **lineage artifact**: persisted DAG lineage payloads and adjacency references.
 - **shard**: directory grouping multiple datasets and lineage artifacts.
-- **hardware profile**: detected execution tier (`cpu`, `cuda_*`, etc.).
+- **hardware tier**: detected execution tier (`cpu`, `cuda_*`, etc.).
 
 ## Where to go next
 

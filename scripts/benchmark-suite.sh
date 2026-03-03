@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SUITE="${1:-standard}"
-PROFILE="${2:-all}"
+PRESET="${2:-all}"
 OUT_DIR="${3:-}"
 DIAGNOSTICS="${4:-off}"
 DIAGNOSTICS_OUT_DIR="${5:-}"
@@ -12,7 +12,7 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-args=(benchmark --suite "$SUITE" --profile "$PROFILE")
+args=(benchmark --suite "$SUITE" --preset "$PRESET")
 if [[ -n "$OUT_DIR" ]]; then
   args+=(--out-dir "$OUT_DIR")
 fi

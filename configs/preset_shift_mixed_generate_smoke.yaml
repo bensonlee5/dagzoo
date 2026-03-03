@@ -13,7 +13,7 @@ graph:
 
 shift:
   enabled: true
-  profile: mixed
+  mode: mixed
 
 runtime:
   device: cpu

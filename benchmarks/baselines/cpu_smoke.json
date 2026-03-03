@@ -4,7 +4,7 @@
   "metrics": [
     "datasets_per_minute"
   ],
-  "profiles": {
+  "presets": {
     "cpu": {
       "datasets_per_minute": 200.0
     }

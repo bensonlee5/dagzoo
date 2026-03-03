@@ -31,10 +31,10 @@ in the resolved output directory.
 Run a smoke benchmark:
 
 ```bash
-dagsynth benchmark --suite smoke --profile cpu --out-dir benchmarks/results/smoke_cpu
+dagsynth benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
 ```
 
-Inspect detected hardware profile:
+Inspect detected hardware tier:
 
 ```bash
 dagsynth hardware

@@ -21,7 +21,7 @@ from dagsynth.core.constants import (
     SPLIT_PERMUTATION_SEED_OFFSET,
 )
 from dagsynth.core.layout import _build_node_specs, _sample_layout
-from dagsynth.core.layout_types import LayoutPayload
+from dagsynth.core.layout_types import LayoutPlan
 from dagsynth.core.metadata import (
     _build_lineage_metadata,
     _build_shift_metadata,
@@ -45,7 +45,7 @@ from dagsynth.types import DatasetBundle
 class FixedLayoutPlan:
     """Pre-sampled layout bundle for fixed-layout batch generation."""
 
-    layout: LayoutPayload
+    layout: LayoutPlan
     requested_device: str
     resolved_device: str
     plan_seed: int
@@ -62,7 +62,7 @@ class NoiseRuntimeSelection:
     family_requested: NoiseFamily
     family_sampled: NoiseFamily
     sampling_strategy: str
-    scale: float
+    base_scale: float
     student_t_df: float
     mixture_weights: dict[str, float] | None = None
 
@@ -125,14 +125,14 @@ def _resolve_noise_runtime_selection(
     """Resolve deterministic per-dataset noise-family selection."""
 
     family_requested = config.noise.family
-    scale = float(config.noise.scale)
+    base_scale = float(config.noise.base_scale)
     student_t_df = float(config.noise.student_t_df)
     if family_requested != NOISE_FAMILY_MIXTURE:
         return NoiseRuntimeSelection(
             family_requested=family_requested,
             family_sampled=family_requested,
             sampling_strategy="dataset_level",
-            scale=scale,
+            base_scale=base_scale,
             student_t_df=student_t_df,
             mixture_weights=None,
         )
@@ -153,7 +153,7 @@ def _resolve_noise_runtime_selection(
         family_requested=family_requested,
         family_sampled=sampled_family,
         sampling_strategy="dataset_level",
-        scale=scale,
+        base_scale=base_scale,
         student_t_df=student_t_df,
         mixture_weights={key: float(value) for key, value in normalized_weights.items()},
     )
@@ -164,19 +164,19 @@ def _noise_sampling_spec(selection: NoiseRuntimeSelection) -> NoiseSamplingSpec:
 
     return NoiseSamplingSpec(
         family=selection.family_sampled,
-        scale=float(selection.scale),
+        scale=float(selection.base_scale),
         student_t_df=float(selection.student_t_df),
     )
 
 
-def _build_noise_metadata(selection: NoiseRuntimeSelection) -> dict[str, Any]:
-    """Build per-dataset noise metadata payload."""
+def _build_noise_distribution_metadata(selection: NoiseRuntimeSelection) -> dict[str, Any]:
+    """Build per-dataset noise-distribution metadata payload."""
 
     return {
         "family_requested": str(selection.family_requested),
         "family_sampled": str(selection.family_sampled),
         "sampling_strategy": str(selection.sampling_strategy),
-        "scale": float(selection.scale),
+        "base_scale": float(selection.base_scale),
         "student_t_df": float(selection.student_t_df),
         "mixture_weights": (
             {key: float(value) for key, value in selection.mixture_weights.items()}
@@ -257,7 +257,7 @@ def _parent_node_indices(adjacency: torch.Tensor, node_index: int) -> list[int]:
 
 def _generate_graph_dataset_torch(
     config: GeneratorConfig,
-    layout: LayoutPayload,
+    layout: LayoutPlan,
     seed: int,
     device: str,
     *,
@@ -270,13 +270,13 @@ def _generate_graph_dataset_torch(
     generator = torch.Generator(device=device)
     generator.manual_seed(seed)
 
-    num_features = int(layout["n_features"])
+    num_features = int(layout.n_features)
     task = config.dataset.task
-    n_classes = int(layout["n_classes"])
-    adjacency = layout["adjacency"]
+    n_classes = int(layout.n_classes)
+    adjacency = layout.adjacency
     if not isinstance(adjacency, torch.Tensor):
         adjacency = torch.as_tensor(adjacency, dtype=torch.bool, device=device)
-    num_nodes = int(layout["graph_nodes"])
+    num_nodes = int(layout.graph_nodes)
 
     node_outputs: dict[int, torch.Tensor] = {}
     feature_values: list[torch.Tensor | None] = [None] * num_features
@@ -326,8 +326,8 @@ def _generate_graph_dataset_torch(
 
     dtype = _torch_dtype(config)
     x = torch.zeros((n_rows, num_features), dtype=dtype, device=device)
-    feature_types = list(layout["feature_types"])
-    card_by_feature: dict[int, int] = layout["card_by_feature"]
+    feature_types = list(layout.feature_types)
+    card_by_feature: dict[int, int] = layout.card_by_feature
 
     for i in range(num_features):
         v = feature_values[i]
@@ -366,7 +366,7 @@ def _generate_graph_dataset_torch(
 
 def _generate_torch(
     config: GeneratorConfig,
-    layout: LayoutPayload,
+    layout: LayoutPlan,
     seed: int,
     device: str,
     *,
@@ -374,6 +374,9 @@ def _generate_torch(
     n_test: int,
     shift_params: ShiftRuntimeParams | None = None,
     noise_runtime_selection: NoiseRuntimeSelection | None = None,
+    requested_device: str,
+    resolved_device: str,
+    device_fallback_reason: str | None = None,
     preserve_feature_schema: bool = False,
 ) -> DatasetBundle:
     """Generate one dataset in Torch while preserving postprocess/filter contracts."""
@@ -398,7 +401,7 @@ def _generate_torch(
                 device,
                 n_rows=n_rows,
                 mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
-                noise_sigma_multiplier=float(shift_params.noise_sigma_multiplier),
+                noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
                 noise_spec=noise_spec,
             )
         except Exception as exc:
@@ -445,7 +448,7 @@ def _generate_torch(
             y_train_t,
             x_test_t,
             y_test_t,
-            list(layout["feature_types"]),
+            list(layout.feature_types),
             config.dataset.task,
             split_postprocess_generator,
             device,
@@ -478,7 +481,7 @@ def _generate_torch(
             class_structure = _classification_class_structure(
                 y_train=y_train,
                 y_test=y_test,
-                n_classes_sampled=int(layout["n_classes"]),
+                n_classes_sampled=int(layout.n_classes),
             )
             n_classes = int(class_structure["n_classes_realized"])
         shift_metadata = _build_shift_metadata(shift_params=shift_params)
@@ -486,20 +489,23 @@ def _generate_torch(
         metadata = {
             "backend": "torch",
             "device": device,
+            "requested_device": str(requested_device),
+            "resolved_device": str(resolved_device),
+            "device_fallback_reason": device_fallback_reason,
             "compute_backend": "torch_appendix_full",
             "n_features": int(x_train.shape[1]),
             "n_categorical_features": int(sum(1 for t in feature_types if t == "cat")),
             "n_classes": n_classes,
-            "graph_nodes": int(layout["graph_nodes"]),
-            "graph_edges": int(layout["graph_edges"]),
-            "graph_depth_nodes": int(layout["graph_depth_nodes"]),
-            "graph_edge_density": float(layout["graph_edge_density"]),
+            "graph_nodes": int(layout.graph_nodes),
+            "graph_edges": int(layout.graph_edges),
+            "graph_depth_nodes": int(layout.graph_depth_nodes),
+            "graph_edge_density": float(layout.graph_edge_density),
             "lineage": _build_lineage_metadata(layout, feature_index_map=feature_index_map),
             "seed": seed,
             "attempt_used": attempt,
             "filter": aux_meta.get("filter", {}),
             "shift": shift_metadata,
-            "noise": _build_noise_metadata(noise_runtime_selection),
+            "noise_distribution": _build_noise_distribution_metadata(noise_runtime_selection),
             "config": asdict(config),
         }
         if missingness_summary is not None:
@@ -579,7 +585,7 @@ def _generate_one_seeded(
 def _validate_class_split_for_layout(
     config: GeneratorConfig,
     *,
-    layout: LayoutPayload,
+    layout: LayoutPlan,
     n_train: int,
     n_test: int,
 ) -> None:
@@ -588,7 +594,7 @@ def _validate_class_split_for_layout(
     if config.dataset.task != "classification":
         return
     validate_class_split_feasibility(
-        n_classes=int(layout["n_classes"]),
+        n_classes=int(layout.n_classes),
         n_train=int(n_train),
         n_test=int(n_test),
         context=(
@@ -606,7 +612,7 @@ def _generate_one_with_resolved_layout(
     resolved_device: str,
     n_train: int,
     n_test: int,
-    layout: LayoutPayload,
+    layout: LayoutPlan,
     preserve_feature_schema: bool = False,
 ) -> DatasetBundle:
     """Generate one dataset from an already-resolved split/layout context."""
@@ -628,9 +634,12 @@ def _generate_one_with_resolved_layout(
                 n_test=n_test,
                 shift_params=shift_params,
                 noise_runtime_selection=noise_runtime_selection,
+                requested_device=requested_device,
+                resolved_device=resolved_device,
+                device_fallback_reason=None,
                 preserve_feature_schema=preserve_feature_schema,
             )
-        except Exception:
+        except Exception as exc:
             # Keep auto mode robust on partially supported MPS runtimes by retrying on CPU.
             return _generate_torch(
                 config,
@@ -641,6 +650,9 @@ def _generate_one_with_resolved_layout(
                 n_test=n_test,
                 shift_params=shift_params,
                 noise_runtime_selection=noise_runtime_selection,
+                requested_device=requested_device,
+                resolved_device="cpu",
+                device_fallback_reason=f"auto_mps_runtime_error:{exc.__class__.__name__}",
                 preserve_feature_schema=preserve_feature_schema,
             )
 
@@ -653,14 +665,17 @@ def _generate_one_with_resolved_layout(
         n_test=n_test,
         shift_params=shift_params,
         noise_runtime_selection=noise_runtime_selection,
+        requested_device=requested_device,
+        resolved_device=resolved_device,
+        device_fallback_reason=None,
         preserve_feature_schema=preserve_feature_schema,
     )
 
 
-def _layout_signature(layout: LayoutPayload) -> str:
+def _layout_signature(layout: LayoutPlan) -> str:
     """Return a deterministic, stable signature for a sampled layout payload."""
 
-    adjacency = layout["adjacency"]
+    adjacency = layout.adjacency
     adjacency_payload: list[list[int]]
     if isinstance(adjacency, torch.Tensor):
         adjacency_payload = adjacency.to(device="cpu", dtype=torch.int64).tolist()
@@ -668,17 +683,17 @@ def _layout_signature(layout: LayoutPayload) -> str:
         adjacency_payload = torch.as_tensor(adjacency, dtype=torch.int64, device="cpu").tolist()
 
     signature_payload = {
-        "n_features": int(layout["n_features"]),
-        "n_classes": int(layout["n_classes"]),
-        "feature_types": list(layout["feature_types"]),
+        "n_features": int(layout.n_features),
+        "n_classes": int(layout.n_classes),
+        "feature_types": list(layout.feature_types),
         "card_by_feature": {
-            str(int(k)): int(v) for k, v in sorted(dict(layout["card_by_feature"]).items())
+            str(int(k)): int(v) for k, v in sorted(dict(layout.card_by_feature).items())
         },
-        "graph_nodes": int(layout["graph_nodes"]),
-        "graph_edges": int(layout["graph_edges"]),
-        "graph_depth_nodes": int(layout["graph_depth_nodes"]),
-        "feature_node_assignment": [int(v) for v in list(layout["feature_node_assignment"])],
-        "target_node_assignment": int(layout["target_node_assignment"]),
+        "graph_nodes": int(layout.graph_nodes),
+        "graph_edges": int(layout.graph_edges),
+        "graph_depth_nodes": int(layout.graph_depth_nodes),
+        "feature_node_assignment": [int(v) for v in list(layout.feature_node_assignment)],
+        "target_node_assignment": int(layout.target_node_assignment),
         "adjacency": adjacency_payload,
     }
     encoded = json.dumps(signature_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")

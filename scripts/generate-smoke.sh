@@ -24,7 +24,7 @@ CMD=(
   --config "$CONFIG_PATH"
   --num-datasets "$NUM_DATASETS"
   --device "$DEVICE"
-  --no-write
+  --no-dataset-write
 )
 
 echo "Running smoke generation: ${CMD[*]}"

@@ -25,7 +25,7 @@ diagnostics:
   enabled: false
 
 benchmark:
-  profile_name: many_class_smoke
+  preset_name: many_class_smoke
   suite: smoke
   num_datasets: 10
   warmup_datasets: 0
@@ -35,7 +35,7 @@ benchmark:
   collect_reproducibility: false
   reproducibility_num_datasets: 1
   latency_num_samples: 5
-  profiles:
+  presets:
     many_class_smoke:
       device: cpu
       num_datasets: 10

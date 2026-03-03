@@ -19,7 +19,7 @@ Usage:
     [--hardware-policy <none|cuda_tiered_v1>] \
     [--seed <int>] \
     [--n-features <int> | --stage-columns <csv>] \
-    [--no-write] \
+    [--no-dataset-write] \
     [--dry-run]
 
 Notes:
@@ -155,7 +155,7 @@ while [[ $# -gt 0 ]]; do
       STAGE_COLUMNS="$2"
       shift 2
       ;;
-    --no-write)
+    --no-dataset-write)
       NO_WRITE=1
       shift
       ;;
@@ -364,7 +364,7 @@ for idx in "${!TRAIN_ROWS[@]}"; do
       --seed "$chunk_seed"
     )
     if (( NO_WRITE == 1 )); then
-      cmd+=(--no-write)
+      cmd+=(--no-dataset-write)
     else
       cmd+=(--out "$chunk_out")
     fi

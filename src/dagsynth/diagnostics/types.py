@@ -19,7 +19,7 @@ class DatasetMetrics:
     shift_enabled: float
     shift_graph_scale: float
     shift_mechanism_scale: float
-    shift_noise_scale: float
+    shift_variance_scale: float
     shift_edge_odds_multiplier: float
     shift_mechanism_nonlinear_mass: float
     shift_noise_variance_multiplier: float

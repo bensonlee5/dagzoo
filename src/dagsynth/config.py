@@ -25,7 +25,7 @@ _MISSINGNESS_MECHANISM_VALUE_MAP: dict[str, MissingnessMechanism] = {
     MISSINGNESS_MECHANISM_MNAR: MISSINGNESS_MECHANISM_MNAR,
 }
 
-ShiftProfile = Literal[
+ShiftMode = Literal[
     "off",
     "graph_drift",
     "mechanism_drift",
@@ -33,20 +33,20 @@ ShiftProfile = Literal[
     "mixed",
     "custom",
 ]
-SHIFT_PROFILE_OFF: Literal["off"] = "off"
-SHIFT_PROFILE_GRAPH_DRIFT: Literal["graph_drift"] = "graph_drift"
-SHIFT_PROFILE_MECHANISM_DRIFT: Literal["mechanism_drift"] = "mechanism_drift"
-SHIFT_PROFILE_NOISE_DRIFT: Literal["noise_drift"] = "noise_drift"
-SHIFT_PROFILE_MIXED: Literal["mixed"] = "mixed"
-SHIFT_PROFILE_CUSTOM: Literal["custom"] = "custom"
+SHIFT_MODE_OFF: Literal["off"] = "off"
+SHIFT_MODE_GRAPH_DRIFT: Literal["graph_drift"] = "graph_drift"
+SHIFT_MODE_MECHANISM_DRIFT: Literal["mechanism_drift"] = "mechanism_drift"
+SHIFT_MODE_NOISE_DRIFT: Literal["noise_drift"] = "noise_drift"
+SHIFT_MODE_MIXED: Literal["mixed"] = "mixed"
+SHIFT_MODE_CUSTOM: Literal["custom"] = "custom"
 
-_SHIFT_PROFILE_VALUE_MAP: dict[str, ShiftProfile] = {
-    SHIFT_PROFILE_OFF: SHIFT_PROFILE_OFF,
-    SHIFT_PROFILE_GRAPH_DRIFT: SHIFT_PROFILE_GRAPH_DRIFT,
-    SHIFT_PROFILE_MECHANISM_DRIFT: SHIFT_PROFILE_MECHANISM_DRIFT,
-    SHIFT_PROFILE_NOISE_DRIFT: SHIFT_PROFILE_NOISE_DRIFT,
-    SHIFT_PROFILE_MIXED: SHIFT_PROFILE_MIXED,
-    SHIFT_PROFILE_CUSTOM: SHIFT_PROFILE_CUSTOM,
+_SHIFT_MODE_VALUE_MAP: dict[str, ShiftMode] = {
+    SHIFT_MODE_OFF: SHIFT_MODE_OFF,
+    SHIFT_MODE_GRAPH_DRIFT: SHIFT_MODE_GRAPH_DRIFT,
+    SHIFT_MODE_MECHANISM_DRIFT: SHIFT_MODE_MECHANISM_DRIFT,
+    SHIFT_MODE_NOISE_DRIFT: SHIFT_MODE_NOISE_DRIFT,
+    SHIFT_MODE_MIXED: SHIFT_MODE_MIXED,
+    SHIFT_MODE_CUSTOM: SHIFT_MODE_CUSTOM,
 }
 
 NoiseFamily = Literal["gaussian", "laplace", "student_t", "mixture"]
@@ -93,19 +93,19 @@ def normalize_missing_mechanism(value: str) -> MissingnessMechanism:
     return result
 
 
-def normalize_shift_profile(value: object) -> ShiftProfile:
-    """Normalize shift profile into a validated internal value."""
+def normalize_shift_mode(value: object) -> ShiftMode:
+    """Normalize shift mode into a validated internal value."""
 
     if isinstance(value, bool) or not isinstance(value, str):
         raise ValueError(
-            "Unsupported shift.profile "
+            "Unsupported shift.mode "
             f"'{value}'. Expected off, graph_drift, mechanism_drift, noise_drift, mixed, or custom."
         )
     normalized = value.strip().lower()
-    result = _SHIFT_PROFILE_VALUE_MAP.get(normalized)
+    result = _SHIFT_MODE_VALUE_MAP.get(normalized)
     if result is None:
         raise ValueError(
-            "Unsupported shift.profile "
+            "Unsupported shift.mode "
             f"'{value}'. Expected off, graph_drift, mechanism_drift, noise_drift, mixed, or custom."
         )
     return result
@@ -418,7 +418,7 @@ def _normalize_shift_fields(shift: ShiftConfig) -> None:
 
     if not isinstance(shift.enabled, bool):
         raise ValueError(f"shift.enabled must be a boolean, got {shift.enabled!r}.")
-    shift.profile = normalize_shift_profile(shift.profile)
+    shift.mode = normalize_shift_mode(shift.mode)
     shift.graph_scale = _validate_optional_finite_float_field(
         field_name="shift.graph_scale",
         value=shift.graph_scale,
@@ -437,9 +437,9 @@ def _normalize_shift_fields(shift: ShiftConfig) -> None:
         hi_inclusive=True,
         expectation="a finite value in [0, 1]",
     )
-    shift.noise_scale = _validate_optional_finite_float_field(
-        field_name="shift.noise_scale",
-        value=shift.noise_scale,
+    shift.variance_scale = _validate_optional_finite_float_field(
+        field_name="shift.variance_scale",
+        value=shift.variance_scale,
         lo=0.0,
         hi=1.0,
         lo_inclusive=True,
@@ -452,9 +452,9 @@ def _normalize_noise_fields(noise: NoiseConfig) -> None:
     """Stage 1: normalize noise family and scalar fields."""
 
     noise.family = normalize_noise_family(noise.family)
-    noise.scale = _validate_finite_float_field(
-        field_name="noise.scale",
-        value=noise.scale,
+    noise.base_scale = _validate_finite_float_field(
+        field_name="noise.base_scale",
+        value=noise.base_scale,
         lo=0.0,
         hi=None,
         lo_inclusive=False,
@@ -648,38 +648,37 @@ def _stage2_validate_graph_constraints(graph: GraphConfig) -> None:
 
 
 def _stage2_validate_shift_constraints(shift: ShiftConfig) -> None:
-    """Stage 2: validate shift profile and override compatibility."""
+    """Stage 2: validate shift mode and override compatibility."""
 
     has_overrides = any(
-        scale is not None for scale in (shift.graph_scale, shift.mechanism_scale, shift.noise_scale)
+        scale is not None
+        for scale in (shift.graph_scale, shift.mechanism_scale, shift.variance_scale)
     )
     if not shift.enabled:
-        if shift.profile != SHIFT_PROFILE_OFF:
-            raise ValueError("shift.profile must be 'off' when shift.enabled is false.")
+        if shift.mode != SHIFT_MODE_OFF:
+            raise ValueError("shift.mode must be 'off' when shift.enabled is false.")
         if has_overrides:
             raise ValueError("shift override scales must be unset when shift.enabled is false.")
         return
 
-    if shift.profile == SHIFT_PROFILE_OFF:
-        raise ValueError("shift.profile must not be 'off' when shift.enabled is true.")
+    if shift.mode == SHIFT_MODE_OFF:
+        raise ValueError("shift.mode must not be 'off' when shift.enabled is true.")
 
-    if shift.profile == SHIFT_PROFILE_CUSTOM and not has_overrides:
-        raise ValueError("shift.profile 'custom' requires at least one override scale.")
+    if shift.mode == SHIFT_MODE_CUSTOM and not has_overrides:
+        raise ValueError("shift.mode 'custom' requires at least one override scale.")
 
-    if shift.profile == SHIFT_PROFILE_GRAPH_DRIFT and (
-        shift.mechanism_scale is not None or shift.noise_scale is not None
+    if shift.mode == SHIFT_MODE_GRAPH_DRIFT and (
+        shift.mechanism_scale is not None or shift.variance_scale is not None
     ):
-        raise ValueError("shift.profile 'graph_drift' only allows shift.graph_scale override.")
-    if shift.profile == SHIFT_PROFILE_MECHANISM_DRIFT and (
-        shift.graph_scale is not None or shift.noise_scale is not None
+        raise ValueError("shift.mode 'graph_drift' only allows shift.graph_scale override.")
+    if shift.mode == SHIFT_MODE_MECHANISM_DRIFT and (
+        shift.graph_scale is not None or shift.variance_scale is not None
     ):
-        raise ValueError(
-            "shift.profile 'mechanism_drift' only allows shift.mechanism_scale override."
-        )
-    if shift.profile == SHIFT_PROFILE_NOISE_DRIFT and (
+        raise ValueError("shift.mode 'mechanism_drift' only allows shift.mechanism_scale override.")
+    if shift.mode == SHIFT_MODE_NOISE_DRIFT and (
         shift.graph_scale is not None or shift.mechanism_scale is not None
     ):
-        raise ValueError("shift.profile 'noise_drift' only allows shift.noise_scale override.")
+        raise ValueError("shift.mode 'noise_drift' only allows shift.variance_scale override.")
 
 
 def _stage2_validate_noise_constraints(noise: NoiseConfig) -> None:
@@ -754,10 +753,10 @@ def _validate_min_max_pair(
 @dataclass(slots=True)
 class ShiftConfig:
     enabled: bool = False
-    profile: ShiftProfile = SHIFT_PROFILE_OFF
+    mode: ShiftMode = SHIFT_MODE_OFF
     graph_scale: float | None = None
     mechanism_scale: float | None = None
-    noise_scale: float | None = None
+    variance_scale: float | None = None
 
     def __post_init__(self) -> None:
         _normalize_shift_fields(self)
@@ -766,7 +765,7 @@ class ShiftConfig:
 @dataclass(slots=True)
 class NoiseConfig:
     family: NoiseFamily = NOISE_FAMILY_GAUSSIAN
-    scale: float = 1.0
+    base_scale: float = 1.0
     student_t_df: float = 5.0
     mixture_weights: dict[NoiseMixtureComponent, float] | None = None
 
@@ -801,7 +800,7 @@ class DiagnosticsConfig:
 
 @dataclass(slots=True)
 class BenchmarkConfig:
-    profile_name: str = "medium_cuda"
+    preset_name: str = "medium_cuda"
     num_datasets: int = 2000
     warmup_datasets: int = 25
     suite: str = "standard"
@@ -811,7 +810,7 @@ class BenchmarkConfig:
     collect_reproducibility: bool = False
     reproducibility_num_datasets: int = 2
     latency_num_samples: int = 20
-    profiles: dict[str, dict[str, int | str]] = field(
+    presets: dict[str, dict[str, int | str]] = field(
         default_factory=lambda: {
             "cpu": {"num_datasets": 200, "warmup_datasets": 10, "device": "cpu"},
             "cuda_desktop": {

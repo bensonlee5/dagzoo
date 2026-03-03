@@ -51,3 +51,5 @@ benchmarks/results/
 
 # Reference PDFs (large binary files)
 *.pdf
+
+effective_config_artifacts/

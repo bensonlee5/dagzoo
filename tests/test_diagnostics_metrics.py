@@ -28,7 +28,7 @@ def _tiny_shift_config(*, profile: str, scale_field: str, scale_value: float) ->
     cfg.graph.n_nodes_min = 20
     cfg.graph.n_nodes_max = 20
     cfg.shift.enabled = True
-    cfg.shift.profile = profile
+    cfg.shift.mode = profile
     setattr(cfg.shift, scale_field, scale_value)
     return cfg
 
@@ -88,7 +88,7 @@ def test_extract_dataset_metrics_regression_branch(
     assert metrics.shift_enabled == pytest.approx(0.0)
     assert metrics.shift_graph_scale == pytest.approx(0.0)
     assert metrics.shift_mechanism_scale == pytest.approx(0.0)
-    assert metrics.shift_noise_scale == pytest.approx(0.0)
+    assert metrics.shift_variance_scale == pytest.approx(0.0)
     assert metrics.shift_edge_odds_multiplier == pytest.approx(1.0)
     assert metrics.shift_noise_variance_multiplier == pytest.approx(1.0)
 
@@ -140,7 +140,7 @@ def test_extract_dataset_metrics_reproducible_for_fixed_input(
 def test_extract_dataset_metrics_exposes_shift_metadata_fields() -> None:
     cfg = _tiny_shift_config(profile="custom", scale_field="graph_scale", scale_value=0.7)
     cfg.shift.mechanism_scale = 0.4
-    cfg.shift.noise_scale = 0.3
+    cfg.shift.variance_scale = 0.3
 
     bundle = generate_one(cfg, seed=3123, device="cpu")
     metrics = extract_dataset_metrics(bundle)
@@ -149,7 +149,7 @@ def test_extract_dataset_metrics_exposes_shift_metadata_fields() -> None:
     assert metrics.shift_enabled == pytest.approx(1.0)
     assert metrics.shift_graph_scale == pytest.approx(float(shift_payload["graph_scale"]))
     assert metrics.shift_mechanism_scale == pytest.approx(float(shift_payload["mechanism_scale"]))
-    assert metrics.shift_noise_scale == pytest.approx(float(shift_payload["noise_scale"]))
+    assert metrics.shift_variance_scale == pytest.approx(float(shift_payload["variance_scale"]))
     assert metrics.shift_edge_odds_multiplier == pytest.approx(
         float(shift_payload["edge_odds_multiplier"])
     )
@@ -176,7 +176,7 @@ def test_extract_dataset_metrics_shift_profiles_move_in_expected_directions() ->
         scale_value=1.0,
     )
     noise_cfg = _tiny_shift_config(
-        profile="noise_drift", scale_field="noise_scale", scale_value=1.0
+        profile="noise_drift", scale_field="variance_scale", scale_value=1.0
     )
 
     base_metrics = extract_dataset_metrics(generate_one(baseline, seed=3188, device="cpu"))
@@ -276,7 +276,7 @@ def test_extract_dataset_metrics_normalizes_bundle_to_cpu_before_extraction(
             "shift_enabled": 1.0,
             "shift_graph_scale": 0.4,
             "shift_mechanism_scale": 0.2,
-            "shift_noise_scale": 0.1,
+            "shift_variance_scale": 0.1,
             "shift_edge_odds_multiplier": 1.2,
             "shift_mechanism_nonlinear_mass": 0.7,
             "shift_noise_variance_multiplier": 1.1,

@@ -21,7 +21,7 @@ diagnostics:
   enabled: false
 
 benchmark:
-  profile_name: lineage_smoke
+  preset_name: lineage_smoke
   suite: smoke
   num_datasets: 20
   warmup_datasets: 0
@@ -31,7 +31,7 @@ benchmark:
   collect_reproducibility: false
   reproducibility_num_datasets: 1
   latency_num_samples: 5
-  profiles:
+  presets:
     lineage_smoke:
       device: cpu
       num_datasets: 20

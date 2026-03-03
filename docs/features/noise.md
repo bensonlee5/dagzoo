@@ -38,7 +38,7 @@ Benchmark guardrail smoke run:
 ```bash
 dagsynth benchmark \
   --config configs/preset_noise_benchmark_smoke.yaml \
-  --profile custom \
+  --preset custom \
   --suite smoke \
   --no-memory \
   --out-dir benchmarks/results/smoke_noise
@@ -49,12 +49,12 @@ ______________________________________________________________________
 ## What to inspect
 
 - Per-dataset `metadata.ndjson` entries:
-  - `noise.family_requested`
-  - `noise.family_sampled`
-  - `noise.sampling_strategy`
-  - `noise.scale`
-  - `noise.student_t_df`
-  - `noise.mixture_weights` (when requested family is `mixture`)
+  - `noise_distribution.family_requested`
+  - `noise_distribution.family_sampled`
+  - `noise_distribution.sampling_strategy`
+  - `noise_distribution.base_scale`
+  - `noise_distribution.student_t_df`
+  - `noise_distribution.mixture_weights` (when requested family is `mixture`)
 - Benchmark summary `noise_guardrails`:
   - metadata coverage/validity
   - sampled-family counts

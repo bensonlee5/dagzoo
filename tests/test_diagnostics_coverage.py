@@ -29,7 +29,7 @@ def _metric_fixture(**overrides: float | int | str | None) -> DatasetMetrics:
         shift_enabled=0.0,
         shift_graph_scale=0.0,
         shift_mechanism_scale=0.0,
-        shift_noise_scale=0.0,
+        shift_variance_scale=0.0,
         shift_edge_odds_multiplier=1.0,
         shift_mechanism_nonlinear_mass=0.625,
         shift_noise_variance_multiplier=1.0,
@@ -220,7 +220,7 @@ def test_generate_no_write_with_coverage_enabled_emits_artifacts(
             "cpu",
             "--hardware-policy",
             "none",
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
     assert code == 0

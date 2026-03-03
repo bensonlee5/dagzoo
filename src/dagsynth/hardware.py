@@ -18,7 +18,7 @@ class HardwareInfo:
     device_name: str
     total_memory_gb: float | None
     peak_flops: float
-    profile: str
+    tier: str
 
 
 def get_peak_flops(device_name: str) -> float:
@@ -71,8 +71,8 @@ def get_peak_flops(device_name: str) -> float:
     return float("inf")
 
 
-def _recommend_profile(device_name: str, backend: str) -> str:
-    """Map detected hardware to a coarse runtime profile tier."""
+def _recommend_tier(device_name: str, backend: str) -> str:
+    """Map detected hardware to a coarse runtime tier."""
 
     if backend != "cuda":
         return "cpu"
@@ -102,7 +102,7 @@ def detect_hardware(requested_device: str | None = None) -> HardwareInfo:
             device_name=name,
             total_memory_gb=mem_gb,
             peak_flops=peak,
-            profile=_recommend_profile(name, "cuda"),
+            tier=_recommend_tier(name, "cuda"),
         )
 
     if (
@@ -116,7 +116,7 @@ def detect_hardware(requested_device: str | None = None) -> HardwareInfo:
             device_name="apple_mps",
             total_memory_gb=None,
             peak_flops=float("inf"),
-            profile="cpu",
+            tier="cpu",
         )
 
     if requested in ("cpu", "auto"):
@@ -126,7 +126,7 @@ def detect_hardware(requested_device: str | None = None) -> HardwareInfo:
             device_name="cpu",
             total_memory_gb=None,
             peak_flops=float("inf"),
-            profile="cpu",
+            tier="cpu",
         )
 
     return HardwareInfo(
@@ -135,5 +135,5 @@ def detect_hardware(requested_device: str | None = None) -> HardwareInfo:
         device_name="cpu",
         total_memory_gb=None,
         peak_flops=float("inf"),
-        profile="cpu",
+        tier="cpu",
     )

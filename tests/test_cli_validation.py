@@ -16,7 +16,7 @@ def test_generate_cli_rejects_invalid_device() -> None:
                 "cud",
                 "--num-datasets",
                 "1",
-                "--no-write",
+                "--no-dataset-write",
             ]
         )
     assert int(exc.value.code) == 2
@@ -31,7 +31,7 @@ def test_generate_cli_rejects_negative_num_datasets() -> None:
                 "configs/default.yaml",
                 "--num-datasets",
                 "-1",
-                "--no-write",
+                "--no-dataset-write",
             ]
         )
     assert int(exc.value.code) == 2
@@ -48,7 +48,7 @@ def test_generate_cli_rejects_negative_seed() -> None:
                 "1",
                 "--seed",
                 "-1",
-                "--no-write",
+                "--no-dataset-write",
             ]
         )
     assert int(exc.value.code) == 2
@@ -65,7 +65,7 @@ def test_generate_cli_rejects_oversized_seed() -> None:
                 "1",
                 "--seed",
                 "4294967296",
-                "--no-write",
+                "--no-dataset-write",
             ]
         )
     assert int(exc.value.code) == 2
@@ -103,7 +103,7 @@ def test_generate_cli_uses_default_config_without_noise_overrides(
             "cpu",
             "--hardware-policy",
             "none",
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
     assert code == 0
@@ -143,7 +143,7 @@ def test_generate_cli_writes_resolution_trace_artifact_no_write(
             "none",
             "--out",
             str(out_dir),
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
     assert code == 0
@@ -196,7 +196,7 @@ def test_generate_cli_many_class_preset_end_to_end_no_write(
             "cpu",
             "--hardware-policy",
             "none",
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
 
@@ -265,7 +265,7 @@ def test_generate_cli_shift_presets_emit_shift_metadata_no_write(
             "cpu",
             "--hardware-policy",
             "none",
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
 
@@ -273,7 +273,7 @@ def test_generate_cli_shift_presets_emit_shift_metadata_no_write(
     assert len(captured_shift) == 2
     for payload in captured_shift:
         assert payload["enabled"] is True
-        assert payload["profile"] == expected_profile
+        assert payload["mode"] == expected_profile
 
 
 @pytest.mark.parametrize(
@@ -308,7 +308,7 @@ def test_generate_cli_noise_presets_emit_noise_metadata_no_write(
             seed=seed,
             device=device,
         ):
-            payload = bundle.metadata["noise"]
+            payload = bundle.metadata["noise_distribution"]
             assert isinstance(payload, dict)
             captured_noise.append(payload)
             yield bundle
@@ -329,7 +329,7 @@ def test_generate_cli_noise_presets_emit_noise_metadata_no_write(
             "cpu",
             "--hardware-policy",
             "none",
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
 
@@ -355,7 +355,7 @@ def test_benchmark_cli_rejects_negative_warmup() -> None:
                 "benchmark",
                 "--config",
                 "configs/default.yaml",
-                "--profile",
+                "--preset",
                 "custom",
                 "--suite",
                 "smoke",
@@ -409,7 +409,7 @@ def test_generate_cli_coverage_tolerates_null_quantiles_and_targets(
             "cpu",
             "--hardware-policy",
             "none",
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
     assert code == 0
@@ -453,7 +453,7 @@ def test_generate_cli_no_write_allows_null_output_dir_when_coverage_disabled(
             "cpu",
             "--hardware-policy",
             "none",
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
     assert code == 0
@@ -494,7 +494,7 @@ def test_generate_cli_enables_diagnostics_flag(
             "--diagnostics",
             "--hardware-policy",
             "none",
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
     assert code == 0
@@ -546,7 +546,7 @@ def test_generate_cli_applies_missingness_overrides_no_write(
             "2.2",
             "--hardware-policy",
             "none",
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
     assert code == 0
@@ -574,7 +574,7 @@ def test_generate_cli_rejects_invalid_missingness_combination() -> None:
                 "none",
                 "--hardware-policy",
                 "none",
-                "--no-write",
+                "--no-dataset-write",
             ]
         )
     assert int(exc.value.code) == 2
@@ -602,7 +602,7 @@ def test_generate_cli_rejects_invalid_missingness_scalar(flag: str, value: str) 
                 "1",
                 flag,
                 value,
-                "--no-write",
+                "--no-dataset-write",
             ]
         )
     assert int(exc.value.code) == 2
@@ -621,7 +621,7 @@ def test_generate_cli_rejects_removed_steering_flags(flag_args: list[str]) -> No
                 "--num-datasets",
                 "1",
                 *flag_args,
-                "--no-write",
+                "--no-dataset-write",
             ]
         )
     assert int(exc.value.code) == 2
@@ -661,7 +661,7 @@ def test_generate_cli_missingness_no_write_end_to_end(tmp_path) -> None:
             "1.5",
             "--hardware-policy",
             "none",
-            "--no-write",
+            "--no-dataset-write",
         ]
     )
     assert code == 0

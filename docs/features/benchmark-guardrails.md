@@ -8,7 +8,7 @@ ______________________________________________________________________
 ## When to use
 
 - You need fast smoke checks before wider experimentation.
-- You want standardized performance baselines by profile/suite.
+- You want standardized performance baselines by preset/suite.
 - You need CI gating with warn/fail regression thresholds.
 
 ______________________________________________________________________
@@ -18,8 +18,8 @@ ______________________________________________________________________
 Quick smoke and broader standard runs:
 
 ```bash
-dagsynth benchmark --suite smoke --profile cpu --out-dir benchmarks/results/smoke_cpu
-dagsynth benchmark --suite standard --profile cpu --out-dir benchmarks/results/standard_cpu
+dagsynth benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
+dagsynth benchmark --suite standard --preset cpu --out-dir benchmarks/results/standard_cpu
 ```
 
 Diagnostics-enabled benchmark:
@@ -27,7 +27,7 @@ Diagnostics-enabled benchmark:
 ```bash
 dagsynth benchmark \
   --suite smoke \
-  --profile cpu \
+  --preset cpu \
   --diagnostics \
   --out-dir benchmarks/results/smoke_cpu_diag
 ```
@@ -39,21 +39,21 @@ ______________________________________________________________________
 ```bash
 dagsynth benchmark \
   --config configs/preset_missingness_mar.yaml \
-  --profile custom \
+  --preset custom \
   --suite smoke \
   --no-memory \
   --out-dir benchmarks/results/smoke_missing_mar
 
 dagsynth benchmark \
   --config configs/preset_shift_benchmark_smoke.yaml \
-  --profile custom \
+  --preset custom \
   --suite smoke \
   --no-memory \
   --out-dir benchmarks/results/smoke_shift_guardrails
 
 dagsynth benchmark \
   --config configs/preset_noise_benchmark_smoke.yaml \
-  --profile custom \
+  --preset custom \
   --suite smoke \
   --no-memory \
   --out-dir benchmarks/results/smoke_noise_guardrails
@@ -68,7 +68,7 @@ For CI-like checks:
 ```bash
 dagsynth benchmark \
   --config configs/preset_shift_benchmark_smoke.yaml \
-  --profile custom \
+  --preset custom \
   --suite smoke \
   --warn-threshold-pct 10 \
   --fail-threshold-pct 20 \
@@ -89,7 +89,7 @@ When present in a run summary, inspect:
 - `shift_guardrails`
 - `noise_guardrails`
 
-Also review throughput/latency aggregates for profile/suite trends.
+Also review throughput/latency aggregates for preset/suite trends.
 
 ______________________________________________________________________
 

@@ -15,7 +15,7 @@ graph:
 
 noise:
   family: student_t
-  scale: 1.0
+  base_scale: 1.0
   student_t_df: 6.0
   mixture_weights: null
 

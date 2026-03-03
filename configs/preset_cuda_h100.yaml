@@ -21,7 +21,7 @@ output:
   shard_size: 512
   compression: zstd
 benchmark:
-  profile_name: cuda_h100
+  preset_name: cuda_h100
   suite: standard
   num_datasets: 5000
   warmup_datasets: 50
@@ -31,7 +31,7 @@ benchmark:
   collect_reproducibility: false
   reproducibility_num_datasets: 2
   latency_num_samples: 20
-  profiles:
+  presets:
     cpu:
       device: cpu
       num_datasets: 200

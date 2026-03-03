@@ -27,7 +27,7 @@ def test_hardware_policy_none_is_immutable_and_noop() -> None:
         device_name="cpu",
         total_memory_gb=None,
         peak_flops=float("inf"),
-        profile="cpu",
+        tier="cpu",
     )
     effective = apply_hardware_policy(cfg, hw, policy_name="none")
 
@@ -47,13 +47,13 @@ def test_hardware_policy_cuda_tiered_applied_when_h100_profile() -> None:
         device_name="NVIDIA H100 SXM",
         total_memory_gb=80.0,
         peak_flops=989e12,
-        profile="cuda_h100",
+        tier="cuda_h100",
     )
     effective = apply_hardware_policy(cfg, hw, policy_name="cuda_tiered_v1")
 
     assert cfg.dataset.n_train == original_train
     assert effective.dataset.n_train >= 4096
-    assert effective.benchmark.profile_name == "cuda_h100_auto"
+    assert effective.benchmark.preset_name == "cuda_h100_auto"
 
 
 def test_hardware_policy_unknown_name_raises() -> None:
@@ -64,7 +64,7 @@ def test_hardware_policy_unknown_name_raises() -> None:
         device_name="cpu",
         total_memory_gb=None,
         peak_flops=float("inf"),
-        profile="cpu",
+        tier="cpu",
     )
     with pytest.raises(ValueError, match="Unknown hardware policy"):
         _ = apply_hardware_policy(cfg, hw, policy_name="missing")

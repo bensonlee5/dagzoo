@@ -24,8 +24,8 @@ def _policy_cuda_tiered_v1(config: GeneratorConfig, hw: HardwareInfo) -> Generat
     if hw.backend != "cuda":
         return config
 
-    if hw.profile == "cuda_h100":
-        config.benchmark.profile_name = "cuda_h100_auto"
+    if hw.tier == "cuda_h100":
+        config.benchmark.preset_name = "cuda_h100_auto"
         config.dataset.n_train = max(config.dataset.n_train, 4096)
         config.dataset.n_test = max(config.dataset.n_test, 1024)
         config.dataset.n_features_max = max(config.dataset.n_features_max, 192)
@@ -35,8 +35,8 @@ def _policy_cuda_tiered_v1(config: GeneratorConfig, hw: HardwareInfo) -> Generat
         config.benchmark.warmup_datasets = max(config.benchmark.warmup_datasets, 50)
         return config
 
-    if hw.profile == "cuda_datacenter":
-        config.benchmark.profile_name = "cuda_datacenter_auto"
+    if hw.tier == "cuda_datacenter":
+        config.benchmark.preset_name = "cuda_datacenter_auto"
         config.dataset.n_train = max(config.dataset.n_train, 1536)
         config.dataset.n_test = max(config.dataset.n_test, 512)
         config.dataset.n_features_max = max(config.dataset.n_features_max, 96)
@@ -46,11 +46,11 @@ def _policy_cuda_tiered_v1(config: GeneratorConfig, hw: HardwareInfo) -> Generat
         config.benchmark.warmup_datasets = max(config.benchmark.warmup_datasets, 30)
         return config
 
-    if hw.profile == "cuda_desktop":
-        config.benchmark.profile_name = "cuda_desktop_auto"
+    if hw.tier == "cuda_desktop":
+        config.benchmark.preset_name = "cuda_desktop_auto"
         return config
 
-    config.benchmark.profile_name = "cuda_unknown_fallback"
+    config.benchmark.preset_name = "cuda_unknown_fallback"
     return config
 
 

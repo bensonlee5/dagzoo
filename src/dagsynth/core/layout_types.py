@@ -1,8 +1,9 @@
-"""Internal typed contracts for sampled layout and node-generation enums."""
+"""Internal typed layout contracts for generation modules."""
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from dataclasses import dataclass
+from typing import Literal
 
 import torch
 
@@ -21,7 +22,8 @@ MechanismFamily = Literal[
 AggregationKind = Literal["sum", "product", "max", "logsumexp"]
 
 
-class LayoutPayload(TypedDict):
+@dataclass(slots=True)
+class LayoutPlan:
     """Typed sampled layout payload shared across generation modules."""
 
     n_features: int
@@ -44,6 +46,6 @@ __all__ = [
     "AggregationKind",
     "ConverterKind",
     "FeatureType",
-    "LayoutPayload",
+    "LayoutPlan",
     "MechanismFamily",
 ]

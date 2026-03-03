@@ -190,7 +190,7 @@ def _extract_shift_observability(metadata: dict[str, Any]) -> dict[str, float | 
         shift_payload.get("mechanism_scale"),
         default=0.0,
     )
-    shift_noise_scale = _coerce_finite_float(shift_payload.get("noise_scale"), default=0.0)
+    shift_variance_scale = _coerce_finite_float(shift_payload.get("variance_scale"), default=0.0)
     shift_edge_odds_multiplier = _coerce_finite_float(
         shift_payload.get("edge_odds_multiplier"),
         default=1.0,
@@ -222,7 +222,7 @@ def _extract_shift_observability(metadata: dict[str, Any]) -> dict[str, float | 
         "shift_enabled": 1.0 if shift_enabled else 0.0,
         "shift_graph_scale": float(shift_graph_scale),
         "shift_mechanism_scale": float(shift_mechanism_scale),
-        "shift_noise_scale": float(shift_noise_scale),
+        "shift_variance_scale": float(shift_variance_scale),
         "shift_edge_odds_multiplier": float(shift_edge_odds_multiplier),
         "shift_mechanism_nonlinear_mass": float(shift_mechanism_nonlinear_mass),
         "shift_noise_variance_multiplier": float(shift_noise_variance_multiplier),

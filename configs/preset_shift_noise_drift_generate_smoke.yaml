@@ -13,7 +13,7 @@ graph:
 
 shift:
   enabled: true
-  profile: noise_drift
+  mode: noise_drift
 
 runtime:
   device: cpu

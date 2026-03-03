@@ -13,43 +13,43 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## Shift profiles
+## Shift modes
 
-Profile-only examples:
+Mode-only examples:
 
 ```yaml
 shift:
   enabled: true
-  profile: graph_drift
+  mode: graph_drift
 ```
 
 ```yaml
 shift:
   enabled: true
-  profile: mechanism_drift
+  mode: mechanism_drift
 ```
 
 ```yaml
 shift:
   enabled: true
-  profile: noise_drift
+  mode: noise_drift
 ```
 
 ```yaml
 shift:
   enabled: true
-  profile: mixed
+  mode: mixed
 ```
 
-Custom profile with explicit scales:
+Custom mode with explicit scales:
 
 ```yaml
 shift:
   enabled: true
-  profile: custom
+  mode: custom
   graph_scale: 0.6
   mechanism_scale: 0.2
-  noise_scale: 0.4
+  variance_scale: 0.4
 ```
 
 ______________________________________________________________________
@@ -60,7 +60,7 @@ ______________________________________________________________________
   Start at `0.5` for moderate structure drift.
 - `mechanism_scale`: increases probability mass on nonlinear mechanism
   families. Start at `0.5` for moderate mechanism tilt.
-- `noise_scale`: variance multiplier is `exp(ln(2) * noise_scale)`.
+- `variance_scale`: variance multiplier is `exp(ln(2) * variance_scale)`.
   Start at `0.5` (+1.5 dB) for moderate noise drift.
 
 ______________________________________________________________________
@@ -86,7 +86,7 @@ ______________________________________________________________________
 
 ## What to inspect
 
-- Per-dataset `metadata.ndjson` records include resolved profile/scales and derived
+- Per-dataset `metadata.ndjson` records include resolved mode/scales and derived
   multipliers (`edge_odds_multiplier`, `noise_variance_multiplier`,
   `mechanism_nonlinear_mass`).
 - Diagnostics coverage summaries include shift observability metrics such as

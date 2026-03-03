@@ -40,21 +40,21 @@ def build_baseline_payload(
     """Extract a compact baseline payload from a benchmark suite summary."""
 
     metric_names = list(metrics)
-    profiles: dict[str, dict[str, float]] = {}
-    for result in suite_summary.get("profile_results", []):
-        profile_key = str(result.get("profile_key"))
+    presets: dict[str, dict[str, float]] = {}
+    for result in suite_summary.get("preset_results", []):
+        preset_key = str(result.get("preset_key"))
         metrics_payload: dict[str, float] = {}
         for metric in metric_names:
             value = result.get(metric)
             if isinstance(value, (int, float)):
                 metrics_payload[metric] = float(value)
-        profiles[profile_key] = metrics_payload
+        presets[preset_key] = metrics_payload
 
     return {
         "version": 1,
         "suite": suite_summary.get("suite"),
         "metrics": metric_names,
-        "profiles": profiles,
+        "presets": presets,
     }
 
 
@@ -74,18 +74,18 @@ def compare_summary_to_baseline(
     if not metric_names:
         metric_names = list(DEFAULT_GATING_METRICS)
 
-    baseline_profiles = baseline_payload.get("profiles", {})
+    baseline_presets = baseline_payload.get("presets", {})
     issues: list[dict[str, Any]] = []
 
-    for result in suite_summary.get("profile_results", []):
-        profile_key = str(result.get("profile_key"))
-        profile_baseline = baseline_profiles.get(profile_key)
-        if not isinstance(profile_baseline, dict):
+    for result in suite_summary.get("preset_results", []):
+        preset_key = str(result.get("preset_key"))
+        preset_baseline = baseline_presets.get(preset_key)
+        if not isinstance(preset_baseline, dict):
             continue
 
         for metric in metric_names:
             cur_val = result.get(metric)
-            base_val = profile_baseline.get(metric)
+            base_val = preset_baseline.get(metric)
             if not isinstance(cur_val, (int, float)) or not isinstance(base_val, (int, float)):
                 continue
 
@@ -96,7 +96,7 @@ def compare_summary_to_baseline(
             severity = "fail" if degr >= fail_threshold_pct else "warn"
             issues.append(
                 {
-                    "profile": profile_key,
+                    "preset": preset_key,
                     "metric": metric,
                     "current": float(cur_val),
                     "baseline": float(base_val),

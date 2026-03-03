@@ -46,7 +46,7 @@ def run_throughput_benchmark(
     device: str | None = None,
     on_bundle: Callable[[DatasetBundle], object] | None = None,
 ) -> dict[str, Any]:
-    """Measure end-to-end generation throughput for a benchmark profile."""
+    """Measure end-to-end generation throughput for a benchmark preset."""
 
     if warmup_datasets > 0:
         _consume_generation(
@@ -68,7 +68,7 @@ def run_throughput_benchmark(
     dps = num_datasets / elapsed if elapsed > 0 else 0.0
     dpm = dps * SECONDS_PER_MINUTE
     return {
-        "profile": config.benchmark.profile_name,
+        "preset": config.benchmark.preset_name,
         "num_datasets": num_datasets,
         "warmup_datasets": warmup_datasets,
         "elapsed_seconds": elapsed,

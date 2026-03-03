@@ -31,14 +31,14 @@ ______________________________________________________________________
 
 ## Benchmark precedence
 
-Each profile in `dagsynth benchmark` resolves independently in this order:
+Each preset in `dagsynth benchmark` resolves independently in this order:
 
-1. Base profile config:
-   - built-in profile config (`cpu`, `cuda_desktop`, `cuda_h100`) or
-   - custom config (`--config` + `--profile custom`)
-1. Profile device selection:
-   - profile-defined device, or
-   - CLI `--device` when a single profile run is selected
+1. Base preset config:
+   - built-in preset config (`cpu`, `cuda_desktop`, `cuda_h100`) or
+   - custom config (`--config` + `--preset custom`)
+1. Preset device selection:
+   - preset-defined device, or
+   - CLI `--device` when a single preset run is selected
 1. Hardware policy transforms (`--hardware-policy`)
 1. Suite caps for `--suite smoke`:
    - `dataset.n_train <= 256`
@@ -47,7 +47,7 @@ Each profile in `dagsynth benchmark` resolves independently in this order:
    - `graph.n_nodes_min/max <= 16`
 
 Runtime count overrides (`--num-datasets`, `--warmup`) are benchmark execution controls and do
-not mutate the profile effective config payload.
+not mutate the preset effective config payload.
 
 ______________________________________________________________________
 
@@ -56,10 +56,10 @@ ______________________________________________________________________
 `GeneratorConfig` validation is explicit and runs in three stages:
 
 1. Stage 1: field-level normalization and typing per section (`dataset`, `graph`, `shift`, `noise`, `runtime`, `output`, `diagnostics`, `benchmark`, `filter`)
-1. Stage 2: cross-field constraints (for example shift profile compatibility, missingness constraints, and min/max envelopes)
+1. Stage 2: cross-field constraints (for example shift mode compatibility, missingness constraints, and min/max envelopes)
 1. Stage 3: post-override revalidation by re-running stage 1 + stage 2 through `GeneratorConfig.validate_generation_constraints()`
 
-`resolve_generate_config()` and `resolve_benchmark_profile_config()` both call stage 3 after applying all runtime overrides/caps.
+`resolve_generate_config()` and `resolve_benchmark_preset_config()` both call stage 3 after applying all runtime overrides/caps.
 
 ______________________________________________________________________
 
@@ -84,10 +84,10 @@ Each run writes:
 
 When benchmark artifact output is enabled (`--out-dir` or default timestamped path), each run writes:
 
-- `<artifact_dir>/effective_configs/<profile>.yaml`
-- `<artifact_dir>/effective_configs/<profile>_trace.yaml`
+- `<artifact_dir>/effective_configs/<preset>.yaml`
+- `<artifact_dir>/effective_configs/<preset>_trace.yaml`
 
-If the same profile key appears multiple times in one run, files are suffixed with `_runN`.
+If the same preset key appears multiple times in one run, files are suffixed with `_runN`.
 
 ______________________________________________________________________
 
