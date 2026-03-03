@@ -130,6 +130,30 @@ def test_regression_allows_class_fields_without_split_feasibility_check() -> Non
     assert cfg.dataset.n_classes_max == 32
 
 
+@pytest.mark.parametrize("value", [-0.1, 1.1, float("inf"), float("nan"), True])
+def test_categorical_ratio_min_bounds_are_validated(value: float | bool) -> None:
+    with pytest.raises(
+        ValueError, match="dataset.categorical_ratio_min must be a finite value in \\[0, 1\\]"
+    ):
+        GeneratorConfig.from_dict({"dataset": {"categorical_ratio_min": value}})
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1, float("inf"), float("nan"), True])
+def test_categorical_ratio_max_bounds_are_validated(value: float | bool) -> None:
+    with pytest.raises(
+        ValueError, match="dataset.categorical_ratio_max must be a finite value in \\[0, 1\\]"
+    ):
+        GeneratorConfig.from_dict({"dataset": {"categorical_ratio_max": value}})
+
+
+def test_categorical_ratio_bounds_accept_endpoints() -> None:
+    cfg = GeneratorConfig.from_dict(
+        {"dataset": {"categorical_ratio_min": 0.0, "categorical_ratio_max": 1.0}}
+    )
+    assert cfg.dataset.categorical_ratio_min == pytest.approx(0.0)
+    assert cfg.dataset.categorical_ratio_max == pytest.approx(1.0)
+
+
 def test_load_cuda_presets() -> None:
     cfg_h100 = GeneratorConfig.from_yaml("configs/preset_cuda_h100.yaml")
     assert cfg_h100.runtime.device == "cuda"

@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-03-03
+
+### Changed
+
+- Added internal typed layout contracts in `core/layout_types.py`:
+  `LayoutPayload`, `FeatureType`, `ConverterKind`, `MechanismFamily`, and
+  `AggregationKind`.
+- Updated generation/layout/metadata wiring to use typed layout payloads
+  instead of untyped `dict[str, Any]` signatures.
+- Node pipeline now exposes explicit feature-key parsing (`parse_feature_key`)
+  and uses helper boundaries for latent-dimension resolution and latent padding.
+- Multi-parent function composition now supports optional explicit aggregation
+  selection while preserving random-selection default behavior.
+- Clarified DAG adjacency direction contract in generation/docs:
+  `adjacency[src, dst]` means `src -> dst`; parent lookup is column-based.
+- Standardized seed derivation callsites in `core/dataset.py` behind named
+  helper functions for attempts, node-spec sampling, and split permutations.
+- Internal naming cleanup across layout/dataset/node codepaths for clearer
+  node/feature/dimension semantics.
+- No CLI flag changes, no lineage schema version changes, and no dataset
+  metadata contract changes.
+
+## [0.3.1] - 2026-03-03
+
+### Changed
+
+- Added a shared config-resolution engine (`core/config_resolution.py`) used by both `generate` and benchmark profile execution paths.
+- Added per-run field-level effective config trace artifacts:
+  - `generate`: `effective_config_trace.yaml`
+  - `benchmark`: `effective_configs/*_trace.yaml`
+- Added CLI flags `--print-resolution-trace` for `generate` and `benchmark`.
+- Benchmarks now include per-profile `effective_config_trace` payloads in summary output.
+- Added canonical precedence documentation: `docs/config-resolution.md`.
+- **Breaking:** `dataset.categorical_ratio_min` and `dataset.categorical_ratio_max` now validate strictly in `[0, 1]` at config load time.
+- Updated shipped config presets to use in-range categorical ratio bounds (`0.0..1.0`).
+
 ## [0.3.0] - 2026-03-03
 
 ### Changed

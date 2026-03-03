@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from dagsynth.functions.random_functions import (
+    MechanismFamily,
     _apply_tree,
     apply_random_function,
 )
@@ -65,7 +66,7 @@ def test_deterministic_with_shift_tilt_and_noise_multiplier() -> None:
     "family",
     ["nn", "tree", "discretization", "gp", "linear", "quadratic", "em", "product"],
 )
-def test_each_family(family: str) -> None:
+def test_each_family(family: MechanismFamily) -> None:
     g = _make_generator(10)
     x = torch.randn(64, 4, generator=g)
     y = apply_random_function(x, _make_generator(10), out_dim=3, function_type=family)
@@ -77,4 +78,4 @@ def test_invalid_type_raises() -> None:
     g = _make_generator()
     x = torch.randn(32, 4, generator=g)
     with pytest.raises(ValueError, match="Unknown random function family"):
-        apply_random_function(x, g, out_dim=2, function_type="bogus")
+        apply_random_function(x, g, out_dim=2, function_type="bogus")  # type: ignore[arg-type]

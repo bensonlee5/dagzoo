@@ -3,6 +3,7 @@
 import pytest
 import torch
 
+from dagsynth.core.layout_types import AggregationKind
 from dagsynth.functions.multi import apply_multi_function
 from conftest import make_generator as _make_generator
 
@@ -20,6 +21,18 @@ def test_multiple_inputs() -> None:
     b = torch.randn(64, 2, generator=g)
     y = apply_multi_function([a, b], g, out_dim=4)
     assert y.shape == (64, 4)
+
+
+@pytest.mark.parametrize("aggregation_kind", ["sum", "product", "max", "logsumexp"])
+def test_multiple_inputs_support_explicit_aggregation_kind(
+    aggregation_kind: AggregationKind,
+) -> None:
+    g = _make_generator(2)
+    a = torch.randn(64, 3, generator=g)
+    b = torch.randn(64, 2, generator=g)
+    y = apply_multi_function([a, b], g, out_dim=4, aggregation_kind=aggregation_kind)
+    assert y.shape == (64, 4)
+    assert torch.all(torch.isfinite(y))
 
 
 def test_empty_raises() -> None:

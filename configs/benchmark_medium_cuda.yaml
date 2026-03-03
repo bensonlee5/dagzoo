@@ -7,8 +7,8 @@ dataset:
   n_features_max: 64
   n_classes_min: 2
   n_classes_max: 10
-  categorical_ratio_min: -0.5
-  categorical_ratio_max: 1.2
+  categorical_ratio_min: 0.0
+  categorical_ratio_max: 1.0
   max_categorical_cardinality: 9
 graph:
   n_nodes_min: 2

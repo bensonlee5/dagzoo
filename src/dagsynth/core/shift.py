@@ -14,11 +14,12 @@ from dagsynth.config import (
     SHIFT_PROFILE_NOISE_DRIFT,
     SHIFT_PROFILE_OFF,
 )
+from dagsynth.core.layout_types import MechanismFamily
 
 _LOG_TWO = math.log(2.0)
 _NOISE_VARIANCE_DB_SPAN = _LOG_TWO / 2.0
 
-MECHANISM_FAMILY_ORDER: tuple[str, ...] = (
+MECHANISM_FAMILY_ORDER: tuple[MechanismFamily, ...] = (
     "nn",
     "tree",
     "discretization",
@@ -29,7 +30,7 @@ MECHANISM_FAMILY_ORDER: tuple[str, ...] = (
     "product",
 )
 
-MECHANISM_FAMILY_BASE_LOGITS: dict[str, float] = {
+MECHANISM_FAMILY_BASE_LOGITS: dict[MechanismFamily, float] = {
     "nn": 0.7,
     "tree": 0.7,
     "discretization": 0.5,
@@ -39,7 +40,7 @@ MECHANISM_FAMILY_BASE_LOGITS: dict[str, float] = {
     "em": -0.3,
     "product": 0.9,
 }
-NONLINEAR_MECHANISM_FAMILIES: tuple[str, ...] = (
+NONLINEAR_MECHANISM_FAMILIES: tuple[MechanismFamily, ...] = (
     "nn",
     "tree",
     "discretization",
@@ -71,7 +72,9 @@ class ShiftRuntimeParams:
     noise_sigma_multiplier: float
 
 
-def centered_mechanism_family_logits(families: tuple[str, ...]) -> tuple[float, ...]:
+def centered_mechanism_family_logits(
+    families: tuple[MechanismFamily, ...],
+) -> tuple[float, ...]:
     """Return centered family logits used for mechanism drift sampling."""
 
     if not families:
@@ -84,8 +87,8 @@ def centered_mechanism_family_logits(families: tuple[str, ...]) -> tuple[float, 
 def mechanism_family_probabilities(
     *,
     mechanism_logit_tilt: float,
-    families: tuple[str, ...] = MECHANISM_FAMILY_ORDER,
-) -> dict[str, float]:
+    families: tuple[MechanismFamily, ...] = MECHANISM_FAMILY_ORDER,
+) -> dict[MechanismFamily, float]:
     """Resolve mechanism family probabilities for a given tilt value."""
 
     if not families:
@@ -108,8 +111,8 @@ def mechanism_family_probabilities(
 def mechanism_nonlinear_mass(
     *,
     mechanism_logit_tilt: float,
-    families: tuple[str, ...] = MECHANISM_FAMILY_ORDER,
-    nonlinear_families: tuple[str, ...] = NONLINEAR_MECHANISM_FAMILIES,
+    families: tuple[MechanismFamily, ...] = MECHANISM_FAMILY_ORDER,
+    nonlinear_families: tuple[MechanismFamily, ...] = NONLINEAR_MECHANISM_FAMILIES,
 ) -> float:
     """Return probability mass over nonlinear mechanism families."""
 

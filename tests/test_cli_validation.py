@@ -110,6 +110,52 @@ def test_generate_cli_uses_default_config_without_noise_overrides(
     assert captured["called"] is True
 
 
+def test_generate_cli_writes_resolution_trace_artifact_no_write(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out_dir = tmp_path / "run"
+
+    def _stub_generate_batch_iter(
+        config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        _ = config
+        _ = seed
+        _ = device
+        for _ in range(num_datasets):
+            yield object()
+
+    monkeypatch.setattr("dagsynth.cli.generate_batch_iter", _stub_generate_batch_iter)
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            "configs/default.yaml",
+            "--num-datasets",
+            "1",
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
+            "--out",
+            str(out_dir),
+            "--no-write",
+        ]
+    )
+    assert code == 0
+    trace_path = out_dir / "effective_config_trace.yaml"
+    assert trace_path.exists()
+    trace_payload = yaml.safe_load(trace_path.read_text(encoding="utf-8"))
+    assert isinstance(trace_payload, list)
+    assert any(
+        isinstance(item, dict) and item.get("path") == "runtime.device" for item in trace_payload
+    )
+
+
 def test_generate_cli_many_class_preset_end_to_end_no_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

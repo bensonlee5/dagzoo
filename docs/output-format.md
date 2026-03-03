@@ -241,7 +241,8 @@ lineage is persisted to disk, payloads are rewritten to compact version
 ```
 
 - `adjacency` is an n_nodes x n_nodes list of lists. Entries are 0 or 1.
-  Upper-triangular only; diagonal is always 0.
+  Upper-triangular only; diagonal is always 0. Direction convention is
+  `adjacency[src][dst]` (`src -> dst`), so parents of node `j` are found from column `j`.
 - `feature_to_node[i]` is the DAG node index that produces feature `i`.
 - `target_to_node` is the DAG node index that produces the target.
 

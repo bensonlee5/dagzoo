@@ -9,9 +9,14 @@ from dagsynth.config import (
     NOISE_FAMILY_LAPLACE,
     NOISE_FAMILY_STUDENT_T,
 )
+from dagsynth.core.constants import NODE_SPEC_SEED_OFFSET, SPLIT_PERMUTATION_SEED_OFFSET
 from dagsynth.core.dataset import (
     FixedLayoutPlan,
+    _attempt_seed,
     _generate_torch,
+    _node_spec_seed,
+    _parent_node_indices,
+    _split_permutation_seed,
     _stratified_split_indices,
     generate_batch,
     generate_batch_fixed_layout,
@@ -27,6 +32,7 @@ from dagsynth.io.lineage_schema import (
     validate_metadata_lineage,
     validate_lineage_payload,
 )
+from dagsynth.rng import offset_seed32
 from dagsynth.types import DatasetBundle
 
 
@@ -67,6 +73,35 @@ def _layout_stub(
         "feature_node_assignment": list(feature_node_assignment),
         "target_node_assignment": int(target_node_assignment),
     }
+
+
+def test_parent_node_indices_reads_parents_from_adjacency_columns() -> None:
+    adjacency = torch.tensor(
+        [
+            [0, 1, 0, 1],
+            [0, 0, 1, 1],
+            [0, 0, 0, 1],
+            [0, 0, 0, 0],
+        ],
+        dtype=torch.bool,
+    )
+    assert _parent_node_indices(adjacency, 0) == []
+    assert _parent_node_indices(adjacency, 1) == [0]
+    assert _parent_node_indices(adjacency, 2) == [1]
+    assert _parent_node_indices(adjacency, 3) == [0, 1, 2]
+
+
+def test_dataset_seed_helpers_match_offset_seed32_formulas() -> None:
+    run_seed = 1337
+    attempt = 5
+    node_index = 7
+    assert _attempt_seed(run_seed, attempt) == offset_seed32(run_seed, attempt)
+    assert _node_spec_seed(run_seed, node_index) == offset_seed32(
+        run_seed, NODE_SPEC_SEED_OFFSET + node_index
+    )
+    assert _split_permutation_seed(run_seed, attempt) == offset_seed32(
+        run_seed, SPLIT_PERMUTATION_SEED_OFFSET + attempt
+    )
 
 
 def test_generate_one_shapes() -> None:

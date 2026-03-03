@@ -21,14 +21,15 @@ from dagsynth.core.constants import (
     SPLIT_PERMUTATION_SEED_OFFSET,
 )
 from dagsynth.core.layout import _build_node_specs, _sample_layout
+from dagsynth.core.layout_types import LayoutPayload
 from dagsynth.core.metadata import (
     _build_lineage_metadata,
     _build_shift_metadata,
 )
+from dagsynth.core.node_pipeline import apply_node_pipeline, parse_feature_key
 from dagsynth.core.shift import ShiftRuntimeParams, resolve_shift_runtime_params
 from dagsynth.core.validation import _classification_split_valid, _stratified_split_indices
 from dagsynth.filtering import apply_extra_trees_filter
-from dagsynth.core.node_pipeline import apply_node_pipeline
 from dagsynth.postprocess import inject_missingness, postprocess_dataset
 from dagsynth.rng import SeedManager, offset_seed32, validate_seed32
 from dagsynth.sampling.noise import (
@@ -44,7 +45,7 @@ from dagsynth.types import DatasetBundle
 class FixedLayoutPlan:
     """Pre-sampled layout bundle for fixed-layout batch generation."""
 
-    layout: dict[str, Any]
+    layout: LayoutPayload
     requested_device: str
     resolved_device: str
     plan_seed: int
@@ -96,6 +97,24 @@ def _resolve_run_seed(config: GeneratorConfig, seed_override: int | None) -> int
     if seed_override is None:
         return validate_seed32(config.seed, field_name="seed")
     return validate_seed32(seed_override, field_name="seed")
+
+
+def _attempt_seed(run_seed: int, attempt_index: int) -> int:
+    """Derive deterministic per-attempt seed from one run seed."""
+
+    return offset_seed32(run_seed, attempt_index)
+
+
+def _node_spec_seed(run_seed: int, node_index: int) -> int:
+    """Derive deterministic per-node spec seed from one run seed."""
+
+    return offset_seed32(run_seed, NODE_SPEC_SEED_OFFSET + node_index)
+
+
+def _split_permutation_seed(run_seed: int, attempt_index: int) -> int:
+    """Derive deterministic split/postprocess seed from one run seed."""
+
+    return offset_seed32(run_seed, SPLIT_PERMUTATION_SEED_OFFSET + attempt_index)
 
 
 def _resolve_noise_runtime_selection(
@@ -229,9 +248,16 @@ def _classification_class_structure(
     }
 
 
+def _parent_node_indices(adjacency: torch.Tensor, node_index: int) -> list[int]:
+    """Return parent indices for node `node_index` from `adjacency[src, dst]`."""
+
+    parent_indices = torch.where(adjacency[:, node_index])[0].tolist()
+    return sorted(int(parent_index) for parent_index in parent_indices)
+
+
 def _generate_graph_dataset_torch(
     config: GeneratorConfig,
-    layout: dict[str, Any],
+    layout: LayoutPayload,
     seed: int,
     device: str,
     *,
@@ -244,26 +270,31 @@ def _generate_graph_dataset_torch(
     generator = torch.Generator(device=device)
     generator.manual_seed(seed)
 
-    n_features = int(layout["n_features"])
+    num_features = int(layout["n_features"])
     task = config.dataset.task
     n_classes = int(layout["n_classes"])
     adjacency = layout["adjacency"]
     if not isinstance(adjacency, torch.Tensor):
         adjacency = torch.as_tensor(adjacency, dtype=torch.bool, device=device)
-    n_nodes = int(layout["graph_nodes"])
+    num_nodes = int(layout["graph_nodes"])
 
     node_outputs: dict[int, torch.Tensor] = {}
-    feature_values: list[torch.Tensor | None] = [None] * n_features
+    feature_values: list[torch.Tensor | None] = [None] * num_features
     target_values: torch.Tensor | None = None
 
-    for node_idx in range(n_nodes):
-        parents = torch.where(adjacency[:, node_idx])[0].tolist()
-        parent_data = [node_outputs[int(p)] for p in parents if int(p) in node_outputs]
+    for node_index in range(num_nodes):
+        # Adjacency convention is adjacency[src, dst] (row=source, column=sink).
+        parent_indices = _parent_node_indices(adjacency, node_index)
+        parent_data = [
+            node_outputs[parent_index]
+            for parent_index in parent_indices
+            if parent_index in node_outputs
+        ]
 
         # Build specs using a deterministic per-node generator for layout consistency
         spec_gen = torch.Generator(device="cpu")
-        spec_gen.manual_seed(offset_seed32(seed, NODE_SPEC_SEED_OFFSET + node_idx))
-        specs = _build_node_specs(node_idx, layout, task, spec_gen)
+        spec_gen.manual_seed(_node_spec_seed(seed, node_index))
+        specs = _build_node_specs(node_index, layout, task, spec_gen)
 
         x_node, extracted = apply_node_pipeline(
             parent_data,
@@ -275,21 +306,30 @@ def _generate_graph_dataset_torch(
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )
-        node_outputs[node_idx] = x_node
+        node_outputs[node_index] = x_node
 
         for key, values in extracted.items():
-            if key.startswith("feature_"):
-                col = int(key.split("_", maxsplit=1)[1])
-                feature_values[col] = values
+            feature_index = parse_feature_key(key)
+            if feature_index is not None:
+                if feature_index < 0 or feature_index >= num_features:
+                    raise ValueError(
+                        "Extracted feature index out of range: "
+                        f"{feature_index} for n_features={num_features}."
+                    )
+                feature_values[feature_index] = values
             elif key == "target":
                 target_values = values
+            else:
+                raise ValueError(
+                    f"Unexpected extracted key {key!r}; expected 'feature_{{index}}' or 'target'."
+                )
 
     dtype = _torch_dtype(config)
-    x = torch.zeros((n_rows, n_features), dtype=dtype, device=device)
+    x = torch.zeros((n_rows, num_features), dtype=dtype, device=device)
     feature_types = list(layout["feature_types"])
     card_by_feature: dict[int, int] = layout["card_by_feature"]
 
-    for i in range(n_features):
+    for i in range(num_features):
         v = feature_values[i]
         if v is None:
             if feature_types[i] == "cat":
@@ -326,7 +366,7 @@ def _generate_graph_dataset_torch(
 
 def _generate_torch(
     config: GeneratorConfig,
-    layout: dict[str, Any],
+    layout: LayoutPayload,
     seed: int,
     device: str,
     *,
@@ -354,7 +394,7 @@ def _generate_torch(
             x, y, aux_meta = _generate_graph_dataset_torch(
                 config,
                 layout,
-                offset_seed32(seed, attempt),
+                _attempt_seed(seed, attempt),
                 device,
                 n_rows=n_rows,
                 mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
@@ -370,9 +410,7 @@ def _generate_torch(
 
         # Keep split/postprocess control-plane randomness on CPU to avoid tiny-op accelerator overhead.
         split_postprocess_generator = torch.Generator(device="cpu")
-        split_postprocess_generator.manual_seed(
-            offset_seed32(seed, SPLIT_PERMUTATION_SEED_OFFSET + attempt)
-        )
+        split_postprocess_generator.manual_seed(_split_permutation_seed(seed, attempt))
 
         if config.dataset.task == "classification":
             try:
@@ -541,7 +579,7 @@ def _generate_one_seeded(
 def _validate_class_split_for_layout(
     config: GeneratorConfig,
     *,
-    layout: dict[str, Any],
+    layout: LayoutPayload,
     n_train: int,
     n_test: int,
 ) -> None:
@@ -568,7 +606,7 @@ def _generate_one_with_resolved_layout(
     resolved_device: str,
     n_train: int,
     n_test: int,
-    layout: dict[str, Any],
+    layout: LayoutPayload,
     preserve_feature_schema: bool = False,
 ) -> DatasetBundle:
     """Generate one dataset from an already-resolved split/layout context."""
@@ -619,10 +657,10 @@ def _generate_one_with_resolved_layout(
     )
 
 
-def _layout_signature(layout: dict[str, Any]) -> str:
+def _layout_signature(layout: LayoutPayload) -> str:
     """Return a deterministic, stable signature for a sampled layout payload."""
 
-    adjacency = layout.get("adjacency")
+    adjacency = layout["adjacency"]
     adjacency_payload: list[list[int]]
     if isinstance(adjacency, torch.Tensor):
         adjacency_payload = adjacency.to(device="cpu", dtype=torch.int64).tolist()

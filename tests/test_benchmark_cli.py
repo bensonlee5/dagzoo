@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import yaml
+
 from dagsynth.cli import _print_profile_result_line, main
 
 
@@ -36,6 +38,37 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
     assert isinstance(lineage_guardrails["enabled"], bool)
     if lineage_guardrails["enabled"]:
         assert lineage_guardrails["status"] in {"pass", "warn", "fail"}
+
+
+def test_benchmark_cli_writes_effective_config_trace_artifacts(tmp_path) -> None:
+    out_dir = tmp_path / "bench_results"
+    code = main(
+        [
+            "benchmark",
+            "--profile",
+            "cpu",
+            "--suite",
+            "smoke",
+            "--num-datasets",
+            "1",
+            "--warmup",
+            "0",
+            "--hardware-policy",
+            "none",
+            "--no-memory",
+            "--out-dir",
+            str(out_dir),
+        ]
+    )
+    assert code == 0
+    trace_files = sorted((out_dir / "effective_configs").glob("*_trace.yaml"))
+    assert trace_files
+    trace_payload = yaml.safe_load(trace_files[0].read_text(encoding="utf-8"))
+    assert isinstance(trace_payload, list)
+    assert any(
+        isinstance(item, dict) and item.get("source") == "benchmark.suite_smoke_caps"
+        for item in trace_payload
+    )
 
 
 def test_benchmark_cli_fail_on_regression(tmp_path) -> None:

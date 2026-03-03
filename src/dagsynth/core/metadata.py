@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 
+from dagsynth.core.layout_types import LayoutPayload
 from dagsynth.core.shift import ShiftRuntimeParams, mechanism_nonlinear_mass
 from dagsynth.io.lineage_schema import (
     LINEAGE_SCHEMA_NAME,
@@ -16,7 +17,7 @@ from dagsynth.io.lineage_schema import (
 
 
 def _build_lineage_metadata(
-    layout: dict[str, Any],
+    layout: LayoutPayload,
     *,
     feature_index_map: list[int],
 ) -> dict[str, Any]:

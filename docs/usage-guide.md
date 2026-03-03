@@ -32,7 +32,8 @@ Use this when you want a default high-quality batch.
 dagsynth generate --config configs/default.yaml --num-datasets 10 --out data/run1
 ```
 
-Each generate run writes `effective_config.yaml` under the resolved output directory.
+Each generate run writes `effective_config.yaml` and `effective_config_trace.yaml`
+under the resolved output directory.
 
 ______________________________________________________________________
 
@@ -155,5 +156,6 @@ ______________________________________________________________________
   [noise](features/noise.md),
   [benchmark guardrails](features/benchmark-guardrails.md)
 - Output contract: [output-format.md](output-format.md)
+- Config precedence and trace artifacts: [config-resolution.md](config-resolution.md)
 - System guide and terminology: [how-it-works.md](how-it-works.md)
 - Architecture rationale and evolution policy: [design-decisions.md](design-decisions.md)

@@ -3,6 +3,7 @@ import torch
 from dagsynth.core.node_pipeline import (
     ConverterSpec,
     apply_node_pipeline,
+    parse_feature_key,
 )
 from conftest import make_generator as _make_generator
 
@@ -60,3 +61,14 @@ def test_torch_deterministic() -> None:
 
     torch.testing.assert_close(x1, x2)
     torch.testing.assert_close(e1["v"], e2["v"])
+
+
+def test_parse_feature_key_accepts_expected_pattern() -> None:
+    assert parse_feature_key("feature_0") == 0
+    assert parse_feature_key("feature_42") == 42
+
+
+def test_parse_feature_key_rejects_unexpected_pattern() -> None:
+    assert parse_feature_key("feature_") is None
+    assert parse_feature_key("feature_name") is None
+    assert parse_feature_key("target") is None

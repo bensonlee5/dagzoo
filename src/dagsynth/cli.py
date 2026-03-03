@@ -8,7 +8,6 @@ import math
 import re
 import sys
 from collections.abc import Iterator
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +21,6 @@ from dagsynth.bench.baseline import (
 from dagsynth.bench.report import write_suite_json, write_suite_markdown
 from dagsynth.bench.suite import resolve_profile_run_specs, run_benchmark_suite
 from dagsynth.config import (
-    DatasetConfig,
     GeneratorConfig,
     MISSINGNESS_MECHANISM_MAR,
     MISSINGNESS_MECHANISM_MCAR,
@@ -31,13 +29,17 @@ from dagsynth.config import (
     normalize_missing_mechanism,
 )
 from dagsynth.core.dataset import generate_batch_iter
+from dagsynth.core.config_resolution import (
+    resolve_generate_config,
+    serialize_resolution_events,
+)
 from dagsynth.diagnostics import (
     CoverageAggregator,
     write_coverage_summary_json,
     write_coverage_summary_markdown,
 )
-from dagsynth.hardware import HardwareInfo, detect_hardware
-from dagsynth.hardware_policy import apply_hardware_policy, list_hardware_policies
+from dagsynth.hardware import detect_hardware
+from dagsynth.hardware_policy import list_hardware_policies
 from dagsynth.io.parquet_writer import write_packed_parquet_shards_stream
 from dagsynth.meta_targets import (
     build_coverage_aggregation_config,
@@ -275,6 +277,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print resolved effective config YAML before generation.",
     )
+    g.add_argument(
+        "--print-resolution-trace",
+        action="store_true",
+        help="Print field-level override trace for resolved config before generation.",
+    )
     b = sub.add_parser("benchmark", help="Run benchmark suite across one or more profiles.")
     b.add_argument("--config", default=None, help="Optional YAML config for profile 'custom'.")
     b.add_argument(
@@ -368,6 +375,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print each profile's resolved effective config YAML before execution.",
     )
+    b.add_argument(
+        "--print-resolution-trace",
+        action="store_true",
+        help="Print each profile's field-level override trace before execution.",
+    )
 
     h = sub.add_parser("hardware", help="Inspect detected hardware and profile mapping.")
     h.add_argument(
@@ -377,53 +389,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Requested device (auto/cpu/cuda/mps).",
     )
     return parser
-
-
-def _resolve_config_with_hardware(
-    config: GeneratorConfig,
-    *,
-    device: str | None,
-    hardware_policy: str,
-) -> tuple[GeneratorConfig, HardwareInfo]:
-    """Apply hardware detection and explicit policy selection."""
-
-    hw = detect_hardware(device or config.runtime.device)
-    config = apply_hardware_policy(config, hw, policy_name=hardware_policy)
-    config.validate_generation_constraints()
-    return config, hw
-
-
-def _apply_missingness_cli_overrides(config: GeneratorConfig, args: argparse.Namespace) -> None:
-    """Apply and validate missingness overrides from CLI arguments."""
-
-    has_missingness_override = any(
-        value is not None
-        for value in (
-            args.missing_rate,
-            args.missing_mechanism,
-            args.missing_mar_observed_fraction,
-            args.missing_mar_logit_scale,
-            args.missing_mnar_logit_scale,
-        )
-    )
-    if not has_missingness_override:
-        return
-
-    if args.missing_rate is not None:
-        config.dataset.missing_rate = float(args.missing_rate)
-    if args.missing_mechanism is not None:
-        config.dataset.missing_mechanism = args.missing_mechanism
-    if args.missing_mar_observed_fraction is not None:
-        config.dataset.missing_mar_observed_fraction = float(args.missing_mar_observed_fraction)
-    if args.missing_mar_logit_scale is not None:
-        config.dataset.missing_mar_logit_scale = float(args.missing_mar_logit_scale)
-    if args.missing_mnar_logit_scale is not None:
-        config.dataset.missing_mnar_logit_scale = float(args.missing_mnar_logit_scale)
-
-    try:
-        config.dataset = DatasetConfig(**asdict(config.dataset))
-    except ValueError as exc:
-        _raise_usage_error(str(exc))
 
 
 def _effective_config_yaml(config: GeneratorConfig) -> str:
@@ -444,11 +409,36 @@ def _write_effective_config(config: GeneratorConfig, path: Path) -> Path:
     return path
 
 
+def _effective_resolution_trace_yaml(trace_payload: list[dict[str, Any]]) -> str:
+    """Render a field-level config resolution trace as YAML text."""
+
+    return yaml.safe_dump(
+        trace_payload,
+        sort_keys=False,
+        default_flow_style=False,
+    )
+
+
+def _write_effective_config_trace(trace_payload: list[dict[str, Any]], path: Path) -> Path:
+    """Persist effective config resolution trace YAML to disk."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_effective_resolution_trace_yaml(trace_payload), encoding="utf-8")
+    return path
+
+
 def _print_effective_config(config: GeneratorConfig, *, header: str) -> None:
     """Print effective config YAML to stdout with a short header."""
 
     print(header)
     print(_effective_config_yaml(config).rstrip())
+
+
+def _print_resolution_trace(trace_payload: list[dict[str, Any]], *, header: str) -> None:
+    """Print config resolution trace YAML to stdout with a short header."""
+
+    print(header)
+    print(_effective_resolution_trace_yaml(trace_payload).rstrip())
 
 
 def _write_generate_diagnostics_artifacts(
@@ -468,14 +458,24 @@ def _run_generate(args: argparse.Namespace) -> int:
     """Execute the ``generate`` command."""
 
     config = GeneratorConfig.from_yaml(args.config)
-    config, hw = _resolve_config_with_hardware(
-        config,
-        device=args.device,
-        hardware_policy=str(args.hardware_policy),
-    )
-    _apply_missingness_cli_overrides(config, args)
-    if args.diagnostics:
-        config.diagnostics.enabled = True
+    try:
+        resolved = resolve_generate_config(
+            config,
+            device_override=args.device,
+            hardware_policy=str(args.hardware_policy),
+            missing_rate=args.missing_rate,
+            missing_mechanism=args.missing_mechanism,
+            missing_mar_observed_fraction=args.missing_mar_observed_fraction,
+            missing_mar_logit_scale=args.missing_mar_logit_scale,
+            missing_mnar_logit_scale=args.missing_mnar_logit_scale,
+            diagnostics_enabled=bool(args.diagnostics),
+        )
+    except ValueError as exc:
+        _raise_usage_error(str(exc))
+
+    config = resolved.config
+    hw = resolved.hardware
+    trace_payload = serialize_resolution_events(resolved.trace_events)
 
     seed = args.seed if args.seed is not None else config.seed
     out_dir = args.out or config.output.out_dir
@@ -491,7 +491,14 @@ def _run_generate(args: argparse.Namespace) -> int:
         config,
         Path(effective_config_root) / "effective_config.yaml",
     )
+    trace_path = _write_effective_config_trace(
+        trace_payload,
+        Path(effective_config_root) / "effective_config_trace.yaml",
+    )
     print(f"Wrote effective config: {effective_config_path}")
+    print(f"Wrote effective config trace: {trace_path}")
+    if args.print_resolution_trace:
+        _print_resolution_trace(trace_payload, header="Resolution trace:")
 
     diagnostics_enabled = bool(config.diagnostics.enabled)
     diagnostics_out_dir: Path | None = None
@@ -514,7 +521,7 @@ def _run_generate(args: argparse.Namespace) -> int:
         config,
         num_datasets=args.num_datasets,
         seed=seed,
-        device=args.device,
+        device=resolved.requested_device,
     )
     if diagnostics_aggregator is not None:
         base_stream = stream
@@ -602,14 +609,17 @@ def _sanitize_profile_segment(profile_key: str) -> str:
     return normalized or "profile"
 
 
-def _write_benchmark_effective_configs(summary: dict[str, Any], artifact_dir: Path) -> list[Path]:
-    """Persist per-profile effective configs when benchmark artifacts are enabled."""
+def _write_benchmark_effective_configs(
+    summary: dict[str, Any], artifact_dir: Path
+) -> tuple[list[Path], list[Path]]:
+    """Persist per-profile effective config payloads and resolution traces."""
 
     profile_results = summary.get("profile_results", [])
     if not isinstance(profile_results, list):
-        return []
+        return [], []
 
-    output_paths: list[Path] = []
+    config_paths: list[Path] = []
+    trace_paths: list[Path] = []
     key_counts: dict[str, int] = {}
     out_root = artifact_dir / "effective_configs"
     out_root.mkdir(parents=True, exist_ok=True)
@@ -629,8 +639,17 @@ def _write_benchmark_effective_configs(summary: dict[str, Any], artifact_dir: Pa
             yaml.safe_dump(payload, sort_keys=False, default_flow_style=False),
             encoding="utf-8",
         )
-        output_paths.append(path)
-    return output_paths
+        config_paths.append(path)
+
+        trace_payload = result.get("effective_config_trace")
+        if isinstance(trace_payload, list):
+            trace_path = out_root / f"{key}{suffix}_trace.yaml"
+            trace_path.write_text(
+                yaml.safe_dump(trace_payload, sort_keys=False, default_flow_style=False),
+                encoding="utf-8",
+            )
+            trace_paths.append(trace_path)
+    return config_paths, trace_paths
 
 
 def _print_profile_result_line(result: dict[str, Any]) -> None:
@@ -729,6 +748,15 @@ def _run_benchmark(args: argparse.Namespace) -> int:
             profile_key = str(result.get("profile_key", "unknown"))
             print(f"Effective config [{profile_key}]:")
             print(yaml.safe_dump(payload, sort_keys=False, default_flow_style=False).rstrip())
+    if args.print_resolution_trace:
+        for result in summary.get("profile_results", []):
+            if not isinstance(result, dict):
+                continue
+            trace_payload = result.get("effective_config_trace")
+            if not isinstance(trace_payload, list):
+                continue
+            profile_key = str(result.get("profile_key", "unknown"))
+            _print_resolution_trace(trace_payload, header=f"Resolution trace [{profile_key}]:")
 
     for result in summary.get("profile_results", []):
         _print_profile_result_line(result)
@@ -741,8 +769,8 @@ def _run_benchmark(args: argparse.Namespace) -> int:
     if artifact_dir is not None:
         json_path = write_suite_json(summary, artifact_dir / "summary.json")
         md_path = write_suite_markdown(summary, artifact_dir / "summary.md")
-        effective_paths = _write_benchmark_effective_configs(summary, artifact_dir)
-        if effective_paths:
+        effective_paths, trace_paths = _write_benchmark_effective_configs(summary, artifact_dir)
+        if effective_paths or trace_paths:
             print(
                 "Wrote benchmark effective configs under: "
                 f"{(artifact_dir / 'effective_configs').resolve()}"

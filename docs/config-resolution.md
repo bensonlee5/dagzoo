@@ -1,0 +1,107 @@
+# Config Resolution
+
+Canonical precedence and effective-config behavior for `dagsynth` runtime commands.
+
+This document is the source of truth for:
+
+- which config source wins when multiple sources set the same field
+- where effective config artifacts are written
+- how to inspect field-level override traces
+
+______________________________________________________________________
+
+## Generate precedence
+
+`dagsynth generate` resolves config in this order (later steps win):
+
+1. Base YAML (`--config`)
+1. CLI device override (`--device`) -> `runtime.device`
+1. Hardware policy transforms (`--hardware-policy`)
+1. Missingness CLI overrides:
+   - `--missing-rate`
+   - `--missing-mechanism`
+   - `--missing-mar-observed-fraction`
+   - `--missing-mar-logit-scale`
+   - `--missing-mnar-logit-scale`
+1. Diagnostics CLI switch (`--diagnostics`) -> `diagnostics.enabled=true`
+
+After overrides are applied, typed config validation runs. Invalid combinations fail fast.
+
+______________________________________________________________________
+
+## Benchmark precedence
+
+Each profile in `dagsynth benchmark` resolves independently in this order:
+
+1. Base profile config:
+   - built-in profile config (`cpu`, `cuda_desktop`, `cuda_h100`) or
+   - custom config (`--config` + `--profile custom`)
+1. Profile device selection:
+   - profile-defined device, or
+   - CLI `--device` when a single profile run is selected
+1. Hardware policy transforms (`--hardware-policy`)
+1. Suite caps for `--suite smoke`:
+   - `dataset.n_train <= 256`
+   - `dataset.n_test <= 128`
+   - `dataset.n_features_min/max <= 24`
+   - `graph.n_nodes_min/max <= 16`
+
+Runtime count overrides (`--num-datasets`, `--warmup`) are benchmark execution controls and do
+not mutate the profile effective config payload.
+
+______________________________________________________________________
+
+## Effective config artifacts
+
+### Generate
+
+Each run writes:
+
+- `<effective_config_root>/effective_config.yaml`
+- `<effective_config_root>/effective_config_trace.yaml`
+
+`effective_config_root` is:
+
+1. `--out`, else
+1. `output.out_dir` from config, else
+1. `--diagnostics-out-dir`, else
+1. `diagnostics.out_dir` from config, else
+1. `effective_config_artifacts/`
+
+### Benchmark
+
+When benchmark artifact output is enabled (`--out-dir` or default timestamped path), each run writes:
+
+- `<artifact_dir>/effective_configs/<profile>.yaml`
+- `<artifact_dir>/effective_configs/<profile>_trace.yaml`
+
+If the same profile key appears multiple times in one run, files are suffixed with `_runN`.
+
+______________________________________________________________________
+
+## Resolution trace schema
+
+Trace artifacts are ordered lists of field-level override events:
+
+```yaml
+- path: runtime.device
+  source: cli.device
+  old_value: auto
+  new_value: cpu
+- path: dataset.n_train
+  source: benchmark.suite_smoke_caps
+  old_value: 512
+  new_value: 256
+```
+
+Fields:
+
+- `path`: dotted config path that changed
+- `source`: override source identifier
+- `old_value`: value before this override
+- `new_value`: value after this override
+
+Use CLI flags to print payloads to stdout:
+
+- `dagsynth generate --print-effective-config --print-resolution-trace ...`
+- `dagsynth benchmark --print-effective-config --print-resolution-trace ...`

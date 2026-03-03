@@ -66,6 +66,11 @@ from dagsynth.config import (
     NOISE_FAMILY_GAUSSIAN,
     SHIFT_PROFILE_OFF,
 )
+from dagsynth.core.config_resolution import (
+    BenchmarkSmokeCaps,
+    resolve_benchmark_profile_config,
+    serialize_resolution_events,
+)
 from dagsynth.core.dataset import generate_batch_iter, generate_one
 from dagsynth.core.shift import resolve_shift_runtime_params
 from dagsynth.diagnostics import (
@@ -73,8 +78,6 @@ from dagsynth.diagnostics import (
     write_coverage_summary_json,
     write_coverage_summary_markdown,
 )
-from dagsynth.hardware import HardwareInfo, detect_hardware
-from dagsynth.hardware_policy import apply_hardware_policy
 from dagsynth.meta_targets import (
     build_coverage_aggregation_config,
 )
@@ -95,12 +98,6 @@ class ProfileRunSpec:
     key: str
     config: GeneratorConfig
     device: str | None = None
-
-
-def _clone_config(config: GeneratorConfig) -> GeneratorConfig:
-    """Clone nested benchmark config state to avoid in-place cross-profile mutations."""
-
-    return GeneratorConfig.from_dict(config.to_dict())
 
 
 def _copy_runtime_config(config: GeneratorConfig) -> GeneratorConfig:
@@ -192,31 +189,6 @@ def _collect_reproducibility(
         "reproducibility_signature": sig_a,
         "reproducibility_match": bool(sig_a == sig_b),
     }
-
-
-def _prepare_config_for_profile(
-    spec: ProfileRunSpec,
-    *,
-    suite: str,
-    hardware_policy: str,
-) -> tuple[GeneratorConfig, str, HardwareInfo]:
-    """Clone and apply explicit hardware policy to a profile config."""
-
-    cfg = _clone_config(spec.config)
-
-    requested_device = spec.device or cfg.runtime.device
-    hw = detect_hardware(requested_device)
-    cfg = apply_hardware_policy(cfg, hw, policy_name=hardware_policy)
-
-    if suite == "smoke":
-        cfg.dataset.n_train = min(cfg.dataset.n_train, SMOKE_N_TRAIN_CAP)
-        cfg.dataset.n_test = min(cfg.dataset.n_test, SMOKE_N_TEST_CAP)
-        cfg.dataset.n_features_min = min(cfg.dataset.n_features_min, SMOKE_N_FEATURES_CAP)
-        cfg.dataset.n_features_max = min(cfg.dataset.n_features_max, SMOKE_N_FEATURES_CAP)
-        cfg.graph.n_nodes_min = min(cfg.graph.n_nodes_min, SMOKE_N_NODES_CAP)
-        cfg.graph.n_nodes_max = min(cfg.graph.n_nodes_max, SMOKE_N_NODES_CAP)
-
-    return cfg, requested_device, hw
 
 
 def _sanitize_profile_key(profile_key: str) -> str:
@@ -338,11 +310,22 @@ def run_profile_benchmark(
 ) -> dict[str, Any]:
     """Run one benchmark profile and collect throughput, latency, and optional diagnostics."""
 
-    config, requested_device, hw = _prepare_config_for_profile(
-        spec,
+    resolved_profile = resolve_benchmark_profile_config(
+        profile_key=spec.key,
+        config=spec.config,
+        profile_device=spec.device,
         suite=suite,
         hardware_policy=hardware_policy,
+        smoke_caps=BenchmarkSmokeCaps(
+            n_train=SMOKE_N_TRAIN_CAP,
+            n_test=SMOKE_N_TEST_CAP,
+            n_features=SMOKE_N_FEATURES_CAP,
+            n_nodes=SMOKE_N_NODES_CAP,
+        ),
     )
+    config = resolved_profile.config
+    requested_device = resolved_profile.requested_device
+    hw = resolved_profile.hardware
 
     num_datasets, warmup = _profile_counts(
         config,
@@ -401,6 +384,7 @@ def run_profile_benchmark(
     result["hardware_profile"] = hw.profile
     result["hardware_policy"] = str(hardware_policy)
     result["effective_config"] = config.to_dict()
+    result["effective_config_trace"] = serialize_resolution_events(resolved_profile.trace_events)
     result["diagnostics_enabled"] = diagnostics_enabled
     result["diagnostics_artifacts"] = None
     result["missingness_guardrails"] = {"enabled": False}

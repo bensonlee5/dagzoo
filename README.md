@@ -25,7 +25,8 @@ Generate a default batch from the repo:
 dagsynth generate --config configs/default.yaml --num-datasets 10 --out data/run1
 ```
 
-Each generate run writes `effective_config.yaml` in the resolved output directory.
+Each generate run writes `effective_config.yaml` and `effective_config_trace.yaml`
+in the resolved output directory.
 
 Run a smoke benchmark:
 
@@ -59,6 +60,7 @@ dagsynth benchmark --help
 ## Documentation (End Users)
 
 - [docs/usage-guide.md](docs/usage-guide.md): Primary workflow hub.
+- [docs/config-resolution.md](docs/config-resolution.md): Effective config precedence and trace artifacts.
 - [docs/how-it-works.md](docs/how-it-works.md): System flow and terminology.
 - [docs/output-format.md](docs/output-format.md): Output schema and artifacts.
 - Feature guides:

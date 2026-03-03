@@ -89,6 +89,8 @@ flowchart LR
   assignment surfaces.
 - `sample_dag` builds an upper-triangular DAG using latent variable
   edge sampling.
+- Adjacency orientation is `adjacency[src, dst]`: rows are sources, columns are sinks.
+  Parents of node `j` are resolved from column `adjacency[:, j]`.
 
 ### 3. Node execution and tensor assembly
 
@@ -183,6 +185,7 @@ sections such as `missingness_guardrails`, `lineage_guardrails`, and
 - **DAG (directed acyclic graph)**: causal computation graph used to generate
   each dataset.
 - **adjacency matrix**: binary parent-child matrix; upper triangle only.
+  Convention: `adjacency[i, j] = 1` means directed edge `i -> j`.
 - **topological order**: node order where every parent precedes its children.
 - **edge logit bias**: global shift on edge logits controlling graph density.
 
@@ -245,6 +248,7 @@ sections such as `missingness_guardrails`, `lineage_guardrails`, and
 ## Where to go next
 
 - Output contract: [output-format.md](output-format.md)
+- Config precedence and trace artifacts: [config-resolution.md](config-resolution.md)
 - Design rationale and evolution policy: [design-decisions.md](design-decisions.md)
 - End-user command workflows: [usage-guide.md](usage-guide.md)
 - Feature deep dives:

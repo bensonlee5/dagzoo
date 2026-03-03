@@ -299,8 +299,8 @@ class DatasetConfig:
     n_features_max: int = 64
     n_classes_min: int = 2
     n_classes_max: int = 10
-    categorical_ratio_min: float = -0.5
-    categorical_ratio_max: float = 1.2
+    categorical_ratio_min: float = 0.0
+    categorical_ratio_max: float = 1.0
     max_categorical_cardinality: int = 9
     missing_rate: float = 0.0
     missing_mechanism: MissingnessMechanism = MISSINGNESS_MECHANISM_NONE
@@ -350,20 +350,20 @@ class DatasetConfig:
         self.categorical_ratio_min = _validate_finite_float_field(
             field_name="dataset.categorical_ratio_min",
             value=self.categorical_ratio_min,
-            lo=-math.inf,
-            hi=math.inf,
+            lo=0.0,
+            hi=1.0,
             lo_inclusive=True,
             hi_inclusive=True,
-            expectation="a finite value",
+            expectation="a finite value in [0, 1]",
         )
         self.categorical_ratio_max = _validate_finite_float_field(
             field_name="dataset.categorical_ratio_max",
             value=self.categorical_ratio_max,
-            lo=-math.inf,
-            hi=math.inf,
+            lo=0.0,
+            hi=1.0,
             lo_inclusive=True,
             hi_inclusive=True,
-            expectation="a finite value",
+            expectation="a finite value in [0, 1]",
         )
         if self.categorical_ratio_min > self.categorical_ratio_max:
             raise ValueError(

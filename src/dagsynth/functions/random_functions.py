@@ -6,6 +6,7 @@ import math
 
 import torch
 
+from dagsynth.core.layout_types import MechanismFamily
 from dagsynth.core.shift import MECHANISM_FAMILY_ORDER, mechanism_family_probabilities
 from dagsynth.core.trees import compute_odt_leaf_indices, sample_odt_splits
 from dagsynth.functions.activations import apply_random_activation
@@ -311,7 +312,13 @@ def _apply_product(
     noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply product function in torch."""
-    allowed = ["tree", "discretization", "gp", "linear", "quadratic"]
+    allowed: tuple[MechanismFamily, ...] = (
+        "tree",
+        "discretization",
+        "gp",
+        "linear",
+        "quadratic",
+    )
     idx_f = torch.randint(0, len(allowed), (1,), generator=generator).item()
     idx_g = torch.randint(0, len(allowed), (1,), generator=generator).item()
 
@@ -336,7 +343,9 @@ def _apply_product(
     return fx * gx
 
 
-def _sample_function_family(generator: torch.Generator, *, mechanism_logit_tilt: float) -> str:
+def _sample_function_family(
+    generator: torch.Generator, *, mechanism_logit_tilt: float
+) -> MechanismFamily:
     """Sample one function family with optional logit tilt."""
 
     if mechanism_logit_tilt <= 0.0:
@@ -361,7 +370,7 @@ def apply_random_function(
     generator: torch.Generator,
     *,
     out_dim: int | None = None,
-    function_type: str | None = None,
+    function_type: MechanismFamily | None = None,
     mechanism_logit_tilt: float = 0.0,
     noise_sigma_multiplier: float = 1.0,
     noise_spec: NoiseSamplingSpec | None = None,
