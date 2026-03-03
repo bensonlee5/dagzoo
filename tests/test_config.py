@@ -99,20 +99,21 @@ def test_classification_rejects_impossible_class_split_bounds() -> None:
         )
 
 
-def test_classification_allows_partial_class_range_when_lower_bound_is_feasible() -> None:
-    cfg = GeneratorConfig.from_dict(
-        {
-            "dataset": {
-                "task": "classification",
-                "n_train": 32,
-                "n_test": 8,
-                "n_classes_min": 2,
-                "n_classes_max": 10,
+def test_classification_rejects_partial_class_range_when_upper_bound_is_infeasible() -> None:
+    with pytest.raises(
+        ValueError, match=r"dataset classification split constraints for n_classes_max"
+    ):
+        GeneratorConfig.from_dict(
+            {
+                "dataset": {
+                    "task": "classification",
+                    "n_train": 32,
+                    "n_test": 8,
+                    "n_classes_min": 2,
+                    "n_classes_max": 10,
+                }
             }
-        }
-    )
-    assert cfg.dataset.n_classes_min == 2
-    assert cfg.dataset.n_classes_max == 10
+        )
 
 
 def test_regression_allows_class_fields_without_split_feasibility_check() -> None:
@@ -270,6 +271,27 @@ def test_filter_n_jobs_accepts_minus_one_and_positive_values() -> None:
 def test_filter_n_jobs_rejects_invalid_values(value: int | bool) -> None:
     with pytest.raises(ValueError, match=r"filter\.n_jobs must"):
         GeneratorConfig.from_dict({"filter": {"n_jobs": value}})
+
+
+def test_validate_generation_constraints_revalidates_mutated_missingness_state() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.dataset.missing_rate = 0.2
+    cfg.dataset.missing_mechanism = "none"
+
+    with pytest.raises(
+        ValueError,
+        match="dataset.missing_mechanism must be mcar, mar, or mnar when dataset.missing_rate > 0",
+    ):
+        cfg.validate_generation_constraints()
+
+
+def test_validate_generation_constraints_normalizes_mutated_runtime_device_null_to_auto() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.device = None  # type: ignore[assignment]
+
+    cfg.validate_generation_constraints()
+
+    assert cfg.runtime.device == "auto"
 
 
 def test_missingness_mechanism_normalization_is_case_insensitive() -> None:
