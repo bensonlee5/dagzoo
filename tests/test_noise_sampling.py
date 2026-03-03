@@ -7,6 +7,7 @@ from cauchy_generator.sampling.noise import (
     sample_noise,
     sample_noise_from_spec,
 )
+from cauchy_generator.telemetry import PerfTelemetry
 from conftest import make_generator as _make_generator
 import cauchy_generator.sampling.noise as noise_mod
 
@@ -273,3 +274,25 @@ def test_sample_noise_mixture_student_t_falls_back_when_standard_gamma_is_unavai
     )
     assert samples.shape == (128,)
     assert torch.all(torch.isfinite(samples))
+
+
+def test_sample_noise_from_spec_populates_perf_telemetry() -> None:
+    telemetry = PerfTelemetry(enabled=True)
+    _ = sample_noise_from_spec(
+        (32, 4),
+        generator=_make_generator(123),
+        device="cpu",
+        noise_spec=NoiseSamplingSpec(family="laplace", scale=1.5),
+        telemetry=telemetry,
+        tag="unit_test",
+    )
+    snapshot = telemetry.snapshot()
+    counters = snapshot["counters"]
+    timers = snapshot["timers_ms"]
+
+    assert counters["noise.calls_total"] == pytest.approx(1.0)
+    assert counters["noise.calls_family.laplace"] == pytest.approx(1.0)
+    assert counters["noise.calls_tag.unit_test"] == pytest.approx(1.0)
+    assert counters["noise.numel_total"] == pytest.approx(128.0)
+    assert timers["noise.sample_total"] >= 0.0
+    assert timers["noise.sample_family.laplace"] >= 0.0

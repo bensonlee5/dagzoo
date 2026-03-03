@@ -14,6 +14,7 @@ from cauchy_generator.bench.constants import (
 from cauchy_generator.config import GeneratorConfig
 from cauchy_generator.core.dataset import generate_batch_iter
 from cauchy_generator.rng import offset_seed32
+from cauchy_generator.telemetry import PerfTelemetry
 from cauchy_generator.types import DatasetBundle
 
 
@@ -24,6 +25,7 @@ def _consume_generation(
     seed: int,
     device: str | None,
     on_bundle: Callable[[DatasetBundle], object] | None = None,
+    telemetry: PerfTelemetry | None = None,
 ) -> None:
     """Run generation for ``num_datasets`` items while discarding outputs."""
 
@@ -32,6 +34,7 @@ def _consume_generation(
         num_datasets=num_datasets,
         seed=seed,
         device=device,
+        telemetry=telemetry,
     ):
         if on_bundle is not None:
             on_bundle(bundle)
@@ -44,6 +47,7 @@ def run_throughput_benchmark(
     warmup_datasets: int = 10,
     device: str | None = None,
     on_bundle: Callable[[DatasetBundle], object] | None = None,
+    telemetry: PerfTelemetry | None = None,
 ) -> dict[str, Any]:
     """Measure end-to-end generation throughput for a benchmark profile."""
 
@@ -62,11 +66,12 @@ def run_throughput_benchmark(
         seed=offset_seed32(config.seed, THROUGHPUT_MEASURE_SEED_OFFSET),
         device=device,
         on_bundle=on_bundle,
+        telemetry=telemetry,
     )
     elapsed = time.perf_counter() - start
     dps = num_datasets / elapsed if elapsed > 0 else 0.0
     dpm = dps * SECONDS_PER_MINUTE
-    return {
+    payload: dict[str, Any] = {
         "profile": config.benchmark.profile_name,
         "num_datasets": num_datasets,
         "warmup_datasets": warmup_datasets,
@@ -75,3 +80,6 @@ def run_throughput_benchmark(
         "datasets_per_minute": dpm,
         "slo_pass_100_datasets_per_min": dpm >= THROUGHPUT_SLO_DATASETS_PER_MINUTE,
     }
+    if telemetry is not None:
+        payload["performance_telemetry"] = telemetry.snapshot()
+    return payload

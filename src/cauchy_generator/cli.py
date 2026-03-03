@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import math
 import sys
 from collections.abc import Iterator
@@ -40,11 +41,13 @@ from cauchy_generator.hardware import (
     detect_hardware,
 )
 from cauchy_generator.io.parquet_writer import write_packed_parquet_shards_stream
+from cauchy_generator.math_utils import sanitize_json as _sanitize_json
 from cauchy_generator.meta_targets import (
     coerce_quantiles,
     merge_target_bands,
 )
 from cauchy_generator.rng import SEED32_MAX, SEED32_MIN
+from cauchy_generator.telemetry import PerfTelemetry
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
 MISSINGNESS_MECHANISM_CLI_CHOICES = (
@@ -276,6 +279,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override MNAR logit scale (> 0).",
     )
+    g.add_argument(
+        "--telemetry-json",
+        default=None,
+        help="Optional path to write performance telemetry JSON for this generate run.",
+    )
     b = sub.add_parser("benchmark", help="Run benchmark suite across one or more profiles.")
     b.add_argument("--config", default=None, help="Optional YAML config for profile 'custom'.")
     b.add_argument(
@@ -422,6 +430,28 @@ def _apply_missingness_cli_overrides(config: GeneratorConfig, args: argparse.Nam
         _raise_usage_error(str(exc))
 
 
+def _write_perf_telemetry_json(
+    telemetry: PerfTelemetry,
+    *,
+    out_path: str | Path,
+    command: str,
+    num_datasets: int,
+) -> Path:
+    """Write one performance telemetry payload JSON."""
+
+    path = Path(out_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "command": str(command),
+        "num_datasets": int(num_datasets),
+        "generated_at": dt.datetime.now(dt.UTC).isoformat(),
+        "performance_telemetry": telemetry.snapshot(),
+    }
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(_sanitize_json(payload), f, indent=2, sort_keys=True)
+    return path
+
+
 def _run_generate(args: argparse.Namespace) -> int:
     """Execute the ``generate`` command."""
 
@@ -460,12 +490,16 @@ def _run_generate(args: argparse.Namespace) -> int:
         f"Hardware backend={hw.backend} device='{hw.device_name}' "
         f"memory_gb={hw.total_memory_gb} peak_flops={hw.peak_flops:.3e} profile={hw.profile}"
     )
+    perf_telemetry: PerfTelemetry | None = None
+    if args.telemetry_json:
+        perf_telemetry = PerfTelemetry(enabled=True)
 
     stream: Iterator[Any] = generate_batch_iter(
         config,
         num_datasets=args.num_datasets,
         seed=seed,
         device=args.device,
+        telemetry=perf_telemetry,
     )
     if diagnostics_aggregator is not None:
         base_stream = stream
@@ -489,6 +523,14 @@ def _run_generate(args: argparse.Namespace) -> int:
                 summary, diagnostics_out_dir / "coverage_summary.md"
             )
             print(f"Wrote diagnostics artifacts: {json_path} and {md_path}")
+        if perf_telemetry is not None and args.telemetry_json:
+            perf_path = _write_perf_telemetry_json(
+                perf_telemetry,
+                out_path=args.telemetry_json,
+                command="generate",
+                num_datasets=generated,
+            )
+            print(f"Wrote performance telemetry: {perf_path}")
         print(f"Generated {generated} datasets (no-write mode).")
         return 0
 
@@ -497,6 +539,7 @@ def _run_generate(args: argparse.Namespace) -> int:
         out_dir=out_dir,
         shard_size=config.output.shard_size,
         compression=config.output.compression,
+        telemetry=perf_telemetry,
     )
     if diagnostics_aggregator is not None:
         assert diagnostics_out_dir is not None
@@ -508,6 +551,14 @@ def _run_generate(args: argparse.Namespace) -> int:
             summary, diagnostics_out_dir / "coverage_summary.md"
         )
         print(f"Wrote diagnostics artifacts: {json_path} and {md_path}")
+    if perf_telemetry is not None and args.telemetry_json:
+        perf_path = _write_perf_telemetry_json(
+            perf_telemetry,
+            out_path=args.telemetry_json,
+            command="generate",
+            num_datasets=written,
+        )
+        print(f"Wrote performance telemetry: {perf_path}")
     print(f"Wrote {written} datasets to: {Path(out_dir)}")
     return 0
 

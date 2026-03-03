@@ -83,6 +83,7 @@ from cauchy_generator.meta_targets import (
     merge_target_bands,
 )
 from cauchy_generator.rng import SeedManager, offset_seed32
+from cauchy_generator.telemetry import PerfTelemetry
 
 
 DEFAULT_PROFILE_CONFIGS: dict[str, str] = {
@@ -406,6 +407,7 @@ def run_profile_benchmark(
         shift_guardrails=shift_guardrails,
         noise_guardrails=noise_guardrails,
     )
+    perf_telemetry = PerfTelemetry(enabled=True)
 
     result = run_throughput_benchmark(
         config,
@@ -413,6 +415,7 @@ def run_profile_benchmark(
         warmup_datasets=warmup,
         device=requested_device,
         on_bundle=on_bundle_callback,
+        telemetry=perf_telemetry,
     )
     result["profile_key"] = spec.key
     result["suite"] = suite

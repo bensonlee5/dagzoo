@@ -6,10 +6,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import math
 import operator
+import time
 
 import torch
 
 from cauchy_generator.math_utils import normalize_positive_weights
+from cauchy_generator.telemetry import PerfTelemetry, get_active_perf_telemetry
 from cauchy_generator.config import (
     NOISE_FAMILY_GAUSSIAN,
     NOISE_FAMILY_LAPLACE,
@@ -308,30 +310,51 @@ def sample_noise_from_spec(
     device: str,
     noise_spec: NoiseSamplingSpec | None = None,
     scale_multiplier: float = 1.0,
+    telemetry: PerfTelemetry | None = None,
+    tag: str | None = None,
 ) -> torch.Tensor:
     """Sample noise using an optional runtime selection spec."""
+
+    resolved_telemetry = telemetry if telemetry is not None else get_active_perf_telemetry()
+    family = noise_spec.family if noise_spec is not None else NOISE_FAMILY_LEGACY
+
+    start = 0.0
+    if resolved_telemetry is not None and resolved_telemetry.enabled:
+        start = time.perf_counter()
 
     parsed_multiplier = _validate_positive_finite(
         "scale_multiplier", scale_multiplier, lower_bound=0.0
     )
     if noise_spec is None:
-        return sample_noise(
+        samples = sample_noise(
             shape,
             generator=generator,
             device=device,
             family=NOISE_FAMILY_LEGACY,
             scale=parsed_multiplier,
         )
+    else:
+        samples = sample_noise(
+            shape,
+            generator=generator,
+            device=device,
+            family=noise_spec.family,
+            scale=float(noise_spec.scale) * float(parsed_multiplier),
+            student_t_df=float(noise_spec.student_t_df),
+            mixture_weights=noise_spec.mixture_weights,
+        )
 
-    return sample_noise(
-        shape,
-        generator=generator,
-        device=device,
-        family=noise_spec.family,
-        scale=float(noise_spec.scale) * float(parsed_multiplier),
-        student_t_df=float(noise_spec.student_t_df),
-        mixture_weights=noise_spec.mixture_weights,
-    )
+    if resolved_telemetry is not None and resolved_telemetry.enabled:
+        elapsed = time.perf_counter() - start
+        resolved_telemetry.add_time("noise.sample_total", elapsed)
+        resolved_telemetry.add_time(f"noise.sample_family.{family}", elapsed)
+        resolved_telemetry.increment("noise.calls_total", 1.0)
+        resolved_telemetry.increment(f"noise.calls_family.{family}", 1.0)
+        resolved_telemetry.increment("noise.numel_total", float(samples.numel()))
+        if tag:
+            resolved_telemetry.increment(f"noise.calls_tag.{tag}", 1.0)
+
+    return samples
 
 
 __all__ = [

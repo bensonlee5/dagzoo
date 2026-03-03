@@ -93,9 +93,14 @@ def test_run_benchmark_suite_smoke_single_profile() -> None:
     assert result["profile_key"] == "cpu_test"
     assert result["datasets_per_minute"] > 0
     assert result["latency_p95_ms"] >= 0
+    perf = result["performance_telemetry"]
+    assert perf["enabled"] is True
+    assert "noise.calls_total" in perf["counters"]
     lineage_guardrails = result["lineage_guardrails"]
     assert lineage_guardrails["enabled"] is True
     assert lineage_guardrails["status"] in {"pass", "warn", "fail"}
+    assert "performance_telemetry_baseline" in lineage_guardrails
+    assert "performance_telemetry_with_lineage" in lineage_guardrails
 
 
 def test_run_benchmark_suite_missingness_guardrails_emit_metrics() -> None:
@@ -144,9 +149,11 @@ def test_run_benchmark_suite_missingness_runtime_guardrail_updates_regression_st
         warmup_datasets: int = 10,
         device: str | None = None,
         on_bundle=None,
+        telemetry=None,
     ):
         _ = warmup_datasets
         _ = device
+        _ = telemetry
         missing_enabled = float(config.dataset.missing_rate) > 0.0
         calls.append(
             {
@@ -273,9 +280,11 @@ def test_run_benchmark_suite_shift_runtime_guardrail_updates_regression_status(
         warmup_datasets: int = 10,
         device: str | None = None,
         on_bundle=None,
+        telemetry=None,
     ):
         _ = warmup_datasets
         _ = device
+        _ = telemetry
         shift_enabled = bool(config.shift.enabled)
         calls.append(
             {
@@ -384,9 +393,11 @@ def test_run_benchmark_suite_shift_directional_guardrail_failure_updates_status(
         warmup_datasets: int = 10,
         device: str | None = None,
         on_bundle=None,
+        telemetry=None,
     ):
         _ = warmup_datasets
         _ = device
+        _ = telemetry
         shift_enabled = bool(config.shift.enabled)
         dpm = 100.0
         dps = dpm / 60.0
@@ -517,9 +528,11 @@ def test_run_benchmark_suite_noise_runtime_guardrail_updates_regression_status(
         warmup_datasets: int = 10,
         device: str | None = None,
         on_bundle=None,
+        telemetry=None,
     ):
         _ = warmup_datasets
         _ = device
+        _ = telemetry
         nonlegacy_noise = str(config.noise.family) != "legacy"
         dpm = 70.0 if nonlegacy_noise else 100.0
         dps = dpm / 60.0
@@ -619,9 +632,11 @@ def test_run_benchmark_suite_noise_metadata_coverage_failure_updates_status(
         warmup_datasets: int = 10,
         device: str | None = None,
         on_bundle=None,
+        telemetry=None,
     ):
         _ = warmup_datasets
         _ = device
+        _ = telemetry
         dpm = 100.0
         dps = dpm / 60.0
         elapsed = (float(num_datasets) / dps) if dps > 0 else 0.0
@@ -819,9 +834,11 @@ def test_collect_lineage_guardrails_uses_median_of_three_trials_with_runtime_gat
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         _ = seed
         _ = device
+        _ = telemetry
         for i in range(num_datasets):
             yield DatasetBundle(
                 X_train=np.zeros((3, 4), dtype=np.float32),
@@ -843,8 +860,10 @@ def test_collect_lineage_guardrails_uses_median_of_three_trials_with_runtime_gat
         *,
         config: GeneratorConfig,
         num_bundles: int,
+        telemetry=None,
     ) -> float:
         _ = config
+        _ = telemetry
         assert not isinstance(_bundles, list)
         assert num_bundles > 0
         return float(next(trial_values))
@@ -895,9 +914,11 @@ def test_collect_lineage_guardrails_emits_runtime_issue_when_sample_is_sufficien
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         _ = seed
         _ = device
+        _ = telemetry
         for i in range(num_datasets):
             yield DatasetBundle(
                 X_train=np.zeros((3, 4), dtype=np.float32),
@@ -919,8 +940,10 @@ def test_collect_lineage_guardrails_emits_runtime_issue_when_sample_is_sufficien
         *,
         config: GeneratorConfig,
         num_bundles: int,
+        telemetry=None,
     ) -> float:
         _ = config
+        _ = telemetry
         assert not isinstance(_bundles, list)
         assert num_bundles > 0
         return float(next(trial_values))
@@ -965,9 +988,11 @@ def test_collect_lineage_guardrails_reports_unavailable_for_non_runtime_persiste
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         _ = seed
         _ = device
+        _ = telemetry
         for i in range(num_datasets):
             yield DatasetBundle(
                 X_train=np.zeros((3, 4), dtype=np.float32),
@@ -989,12 +1014,16 @@ def test_collect_lineage_guardrails_reports_unavailable_for_non_runtime_persiste
         num_bundles: int,
         config: GeneratorConfig,
         trials: int,
+        baseline_telemetry=None,
+        current_telemetry=None,
     ) -> tuple[list[float], list[float]]:
         _ = baseline_stage_dir
         _ = current_stage_dir
         _ = num_bundles
         _ = config
         _ = trials
+        _ = baseline_telemetry
+        _ = current_telemetry
         raise ValueError("codec unavailable")
 
     monkeypatch.setattr(
@@ -1052,8 +1081,10 @@ def test_measure_lineage_persistence_trials_replays_staged_bundles_without_gener
         *,
         config: GeneratorConfig,
         num_bundles: int,
+        telemetry=None,
     ) -> float:
         _ = config
+        _ = telemetry
         seen = sum(1 for _ in bundles)
         call_counts.append(seen)
         assert num_bundles == 2
@@ -1115,7 +1146,9 @@ def test_collect_reproducibility_uses_streaming_generation(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
+        _ = telemetry
         calls.append((num_datasets, int(seed or 0), device))
         for i in range(num_datasets):
             yield _bundle(int(seed or 0) + i)

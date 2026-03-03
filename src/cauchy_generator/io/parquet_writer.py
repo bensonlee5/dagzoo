@@ -24,6 +24,7 @@ from cauchy_generator.io.lineage_schema import (
     validate_lineage_payload,
 )
 from cauchy_generator.math_utils import sanitize_json as _sanitize_json, to_numpy as _to_numpy
+from cauchy_generator.telemetry import PerfTelemetry
 from cauchy_generator.types import DatasetBundle
 
 try:
@@ -240,6 +241,7 @@ def _persist_lineage_artifact_for_dataset(
     shard_id: int,
     shard_dir: Path,
     lineage_states: dict[int, _ShardLineageState],
+    telemetry: PerfTelemetry | None = None,
 ) -> dict[str, Any]:
     """Convert dense lineage payload to compact shard artifact pointers for one dataset."""
 
@@ -247,7 +249,11 @@ def _persist_lineage_artifact_for_dataset(
     if not isinstance(lineage_raw, Mapping):
         return metadata
     lineage = cast(Mapping[str, Any], lineage_raw)
-    validate_lineage_payload(lineage)
+    if telemetry is not None:
+        with telemetry.timer("lineage.validate_dense"):
+            validate_lineage_payload(lineage)
+    else:
+        validate_lineage_payload(lineage)
 
     schema_version = cast(str, lineage["schema_version"])
     if schema_version != LINEAGE_SCHEMA_VERSION_DENSE:
@@ -255,7 +261,11 @@ def _persist_lineage_artifact_for_dataset(
 
     graph = cast(Mapping[str, Any], lineage["graph"])
     adjacency_raw = graph["adjacency"]
-    n_nodes, edge_count, packed = pack_upper_triangle_adjacency(adjacency_raw)
+    if telemetry is not None:
+        with telemetry.timer("lineage.pack_adjacency"):
+            n_nodes, edge_count, packed = pack_upper_triangle_adjacency(adjacency_raw)
+    else:
+        n_nodes, edge_count, packed = pack_upper_triangle_adjacency(adjacency_raw)
     bit_length = upper_triangle_bit_length(n_nodes)
 
     state = _lineage_state_for_shard(
@@ -267,7 +277,12 @@ def _persist_lineage_artifact_for_dataset(
     state.byte_offset += len(packed)
 
     blob_file = _ensure_shard_blob_open(state)
-    blob_file.write(packed)
+    if telemetry is not None:
+        with telemetry.timer("lineage.blob_write"):
+            blob_file.write(packed)
+        telemetry.increment("lineage.adjacency_bytes_written", float(len(packed)))
+    else:
+        blob_file.write(packed)
     checksum = sha256_hex(packed)
 
     blob_path = str(Path("lineage") / state.blob_path.name)
@@ -283,8 +298,14 @@ def _persist_lineage_artifact_for_dataset(
         index_path=index_path,
         n_nodes=n_nodes,
     )
-    validate_lineage_payload(compact_lineage)
+    if telemetry is not None:
+        with telemetry.timer("lineage.validate_compact"):
+            validate_lineage_payload(compact_lineage)
+    else:
+        validate_lineage_payload(compact_lineage)
     metadata["lineage"] = compact_lineage
+    if telemetry is not None:
+        telemetry.increment("lineage.datasets_with_lineage", 1.0)
 
     state.records.append(
         {
@@ -299,7 +320,11 @@ def _persist_lineage_artifact_for_dataset(
     return metadata
 
 
-def _write_shard_lineage_indexes(lineage_states: Mapping[int, _ShardLineageState]) -> None:
+def _write_shard_lineage_indexes(
+    lineage_states: Mapping[int, _ShardLineageState],
+    *,
+    telemetry: PerfTelemetry | None = None,
+) -> None:
     """Write shard-level lineage index files after all datasets are persisted."""
 
     for state in lineage_states.values():
@@ -311,20 +336,33 @@ def _write_shard_lineage_indexes(lineage_states: Mapping[int, _ShardLineageState
             "encoding": LINEAGE_ADJACENCY_ENCODING,
             "records": state.records,
         }
-        with state.index_path.open("w", encoding="utf-8") as f:
-            json.dump(
-                _sanitize_json(payload),
-                f,
-                indent=2,
-                sort_keys=True,
-                allow_nan=False,
-            )
+        if telemetry is not None:
+            with telemetry.timer("lineage.index_write"):
+                with state.index_path.open("w", encoding="utf-8") as f:
+                    json.dump(
+                        _sanitize_json(payload),
+                        f,
+                        indent=2,
+                        sort_keys=True,
+                        allow_nan=False,
+                    )
+            telemetry.increment("lineage.index_records_written", float(len(state.records)))
+        else:
+            with state.index_path.open("w", encoding="utf-8") as f:
+                json.dump(
+                    _sanitize_json(payload),
+                    f,
+                    indent=2,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
 
 
 def _finalize_lineage_states(
     lineage_states: Mapping[int, _ShardLineageState],
     *,
     strict_index_write: bool,
+    telemetry: PerfTelemetry | None = None,
 ) -> None:
     """Close handles and flush lineage indexes.
 
@@ -334,15 +372,21 @@ def _finalize_lineage_states(
 
     _close_shard_lineage_files(lineage_states)
     if strict_index_write:
-        _write_shard_lineage_indexes(lineage_states)
+        _write_shard_lineage_indexes(lineage_states, telemetry=telemetry)
         return
     try:
-        _write_shard_lineage_indexes(lineage_states)
+        _write_shard_lineage_indexes(lineage_states, telemetry=telemetry)
     except Exception:
         return
 
 
-def _build_split_table(*, dataset_index: int, x: np.ndarray, y: np.ndarray) -> Any:
+def _build_split_table(
+    *,
+    dataset_index: int,
+    x: np.ndarray,
+    y: np.ndarray,
+    telemetry: PerfTelemetry | None = None,
+) -> Any:
     """Build packed row-wise table for one split of one dataset."""
 
     if pa is None:
@@ -360,6 +404,32 @@ def _build_split_table(*, dataset_index: int, x: np.ndarray, y: np.ndarray) -> A
         raise ValueError(
             f"Mismatched split sizes: features rows={n_rows} targets rows={y.shape[0]}."
         )
+
+    if telemetry is not None:
+        telemetry.increment("io.split_rows_total", float(n_rows))
+        telemetry.increment("io.split_features_total", float(n_features))
+        with telemetry.timer("io.build_split_table"):
+            x_item_type = pa.float64() if x.dtype == np.float64 else pa.float32()
+            x_contig = np.ascontiguousarray(x)
+            y_contig = np.ascontiguousarray(y)
+
+            x_values = pa.array(x_contig.reshape(-1), type=x_item_type)
+            if n_features > 0:
+                offsets_np = np.arange(0, (n_rows + 1) * n_features, n_features, dtype=np.int64)
+            else:
+                offsets_np = np.zeros(n_rows + 1, dtype=np.int64)
+            x_column = pa.ListArray.from_arrays(
+                pa.array(offsets_np),
+                x_values,
+                type=pa.list_(x_item_type),
+            )
+            data = {
+                "dataset_index": pa.array(np.full(n_rows, dataset_index, dtype=np.int64)),
+                "row_index": pa.array(np.arange(n_rows, dtype=np.int64)),
+                "x": x_column,
+                "y": pa.array(y_contig),
+            }
+            return pa.table(data)
 
     x_item_type = pa.float64() if x.dtype == np.float64 else pa.float32()
     x_contig = np.ascontiguousarray(x)
@@ -422,10 +492,11 @@ def _write_packed_split(
     x: np.ndarray,
     y: np.ndarray,
     compression: str,
+    telemetry: PerfTelemetry | None = None,
 ) -> None:
     """Append one dataset split into shard-level packed parquet."""
 
-    table = _build_split_table(dataset_index=dataset_index, x=x, y=y)
+    table = _build_split_table(dataset_index=dataset_index, x=x, y=y, telemetry=telemetry)
     writer = _ensure_split_writer(
         state=state,
         split=split,
@@ -441,7 +512,12 @@ def _write_packed_split(
             f"(dataset_index={dataset_index}). "
             "Mixed feature/target dtypes within one shard are not supported."
         )
-    writer.write_table(table)
+    if telemetry is not None:
+        with telemetry.timer("io.parquet_write_table"):
+            writer.write_table(table)
+        telemetry.increment(f"io.split_count.{split}", 1.0)
+    else:
+        writer.write_table(table)
 
 
 def _write_metadata_record(
@@ -453,26 +529,47 @@ def _write_metadata_record(
     n_train: int,
     n_test: int,
     n_features: int,
+    telemetry: PerfTelemetry | None = None,
 ) -> None:
     """Append one dataset metadata record to shard metadata stream."""
 
     metadata_file = _ensure_metadata_file_open(state)
-    payload = {
-        "dataset_index": int(dataset_index),
-        "n_train": int(n_train),
-        "n_test": int(n_test),
-        "n_features": int(n_features),
-        "feature_types": list(feature_types),
-        "metadata": dict(metadata),
-    }
-    metadata_file.write(
-        json.dumps(
-            _sanitize_json(payload),
-            sort_keys=True,
-            allow_nan=False,
+    if telemetry is not None:
+        with telemetry.timer("io.metadata_json_write"):
+            payload = {
+                "dataset_index": int(dataset_index),
+                "n_train": int(n_train),
+                "n_test": int(n_test),
+                "n_features": int(n_features),
+                "feature_types": list(feature_types),
+                "metadata": dict(metadata),
+            }
+            metadata_file.write(
+                json.dumps(
+                    _sanitize_json(payload),
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+            )
+            metadata_file.write("\n")
+        telemetry.increment("io.metadata_records_written", 1.0)
+    else:
+        payload = {
+            "dataset_index": int(dataset_index),
+            "n_train": int(n_train),
+            "n_test": int(n_test),
+            "n_features": int(n_features),
+            "feature_types": list(feature_types),
+            "metadata": dict(metadata),
+        }
+        metadata_file.write(
+            json.dumps(
+                _sanitize_json(payload),
+                sort_keys=True,
+                allow_nan=False,
+            )
         )
-    )
-    metadata_file.write("\n")
+        metadata_file.write("\n")
 
 
 def _write_bundle_to_shard(
@@ -484,6 +581,7 @@ def _write_bundle_to_shard(
     compression: str,
     shard_states: dict[int, _PackedShardState],
     lineage_states: dict[int, _ShardLineageState],
+    telemetry: PerfTelemetry | None = None,
 ) -> None:
     """Write one dataset bundle into packed shard artifacts."""
 
@@ -494,10 +592,18 @@ def _write_bundle_to_shard(
         shard_states=shard_states,
     )
 
-    x_train = _to_numpy(bundle.X_train)
-    y_train = _to_numpy(bundle.y_train)
-    x_test = _to_numpy(bundle.X_test)
-    y_test = _to_numpy(bundle.y_test)
+    if telemetry is not None:
+        with telemetry.timer("io.to_numpy"):
+            x_train = _to_numpy(bundle.X_train)
+            y_train = _to_numpy(bundle.y_train)
+            x_test = _to_numpy(bundle.X_test)
+            y_test = _to_numpy(bundle.y_test)
+        telemetry.increment("io.datasets_written", 1.0)
+    else:
+        x_train = _to_numpy(bundle.X_train)
+        y_train = _to_numpy(bundle.y_train)
+        x_test = _to_numpy(bundle.X_test)
+        y_test = _to_numpy(bundle.y_test)
 
     _write_packed_split(
         state=shard_state,
@@ -506,6 +612,7 @@ def _write_bundle_to_shard(
         x=x_train,
         y=y_train,
         compression=compression,
+        telemetry=telemetry,
     )
     _write_packed_split(
         state=shard_state,
@@ -514,6 +621,7 @@ def _write_bundle_to_shard(
         x=x_test,
         y=y_test,
         compression=compression,
+        telemetry=telemetry,
     )
 
     metadata = deepcopy(bundle.metadata)
@@ -523,6 +631,7 @@ def _write_bundle_to_shard(
         shard_id=shard_id,
         shard_dir=shard_state.shard_dir,
         lineage_states=lineage_states,
+        telemetry=telemetry,
     )
     _write_metadata_record(
         state=shard_state,
@@ -532,6 +641,7 @@ def _write_bundle_to_shard(
         n_train=int(x_train.shape[0]),
         n_test=int(x_test.shape[0]),
         n_features=int(x_train.shape[1]),
+        telemetry=telemetry,
     )
 
 
@@ -541,6 +651,7 @@ def write_packed_parquet_shards_stream(
     *,
     shard_size: int = 128,
     compression: str = "zstd",
+    telemetry: PerfTelemetry | None = None,
 ) -> int:
     """Write bundles into packed shard outputs and return dataset count."""
 
@@ -572,10 +683,11 @@ def write_packed_parquet_shards_stream(
                 compression=compression,
                 shard_states=shard_states,
                 lineage_states=lineage_states,
+                telemetry=telemetry,
             )
             written = idx + 1
         success = True
         return written
     finally:
         _close_packed_shard_files(shard_states)
-        _finalize_lineage_states(lineage_states, strict_index_write=success)
+        _finalize_lineage_states(lineage_states, strict_index_write=success, telemetry=telemetry)

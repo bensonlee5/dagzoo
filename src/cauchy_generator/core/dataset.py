@@ -37,6 +37,7 @@ from cauchy_generator.sampling.noise import (
     sample_mixture_component_family,
     sample_noise_from_spec,
 )
+from cauchy_generator.telemetry import PerfTelemetry, activate_perf_telemetry
 from cauchy_generator.types import DatasetBundle
 
 
@@ -709,18 +710,20 @@ def generate_one(
     *,
     seed: int | None = None,
     device: str | None = None,
+    telemetry: PerfTelemetry | None = None,
 ) -> DatasetBundle:
     """Generate one dataset bundle with deterministic per-dataset randomness."""
 
     run_seed = _resolve_run_seed(config, seed)
     requested_device = (device or config.runtime.device or "auto").lower()
     resolved_device = _resolve_device(config, device)
-    return _generate_one_seeded(
-        config,
-        seed=run_seed,
-        requested_device=requested_device,
-        resolved_device=resolved_device,
-    )
+    with activate_perf_telemetry(telemetry):
+        return _generate_one_seeded(
+            config,
+            seed=run_seed,
+            requested_device=requested_device,
+            resolved_device=resolved_device,
+        )
 
 
 def generate_batch(
@@ -729,6 +732,7 @@ def generate_batch(
     num_datasets: int,
     seed: int | None = None,
     device: str | None = None,
+    telemetry: PerfTelemetry | None = None,
 ) -> list[DatasetBundle]:
     """Generate a batch of datasets using deterministic per-dataset child seeds."""
 
@@ -738,6 +742,7 @@ def generate_batch(
             num_datasets=num_datasets,
             seed=seed,
             device=device,
+            telemetry=telemetry,
         )
     )
 
@@ -748,6 +753,7 @@ def generate_batch_iter(
     num_datasets: int,
     seed: int | None = None,
     device: str | None = None,
+    telemetry: PerfTelemetry | None = None,
 ) -> Iterator[DatasetBundle]:
     """Yield datasets lazily using deterministic per-dataset child seeds."""
 
@@ -760,14 +766,15 @@ def generate_batch_iter(
     resolved_device = _resolve_device(config, device)
     run_seed = _resolve_run_seed(config, seed)
     manager = SeedManager(run_seed)
-    for i in range(num_datasets):
-        dataset_seed = manager.child("dataset", i)
-        yield _generate_one_seeded(
-            config,
-            seed=dataset_seed,
-            requested_device=requested_device,
-            resolved_device=resolved_device,
-        )
+    with activate_perf_telemetry(telemetry):
+        for i in range(num_datasets):
+            dataset_seed = manager.child("dataset", i)
+            yield _generate_one_seeded(
+                config,
+                seed=dataset_seed,
+                requested_device=requested_device,
+                resolved_device=resolved_device,
+            )
 
 
 def _annotate_fixed_layout_metadata(bundle: DatasetBundle, *, plan: FixedLayoutPlan) -> None:
@@ -889,6 +896,7 @@ def generate_batch_fixed_layout_iter(
     plan: FixedLayoutPlan,
     num_datasets: int,
     seed: int | None = None,
+    telemetry: PerfTelemetry | None = None,
 ) -> Iterator[DatasetBundle]:
     """Yield datasets that share one pre-sampled fixed layout and split shape."""
 
@@ -901,28 +909,29 @@ def generate_batch_fixed_layout_iter(
     run_seed = _resolve_run_seed(config, seed)
     manager = SeedManager(run_seed)
     expected_schema: tuple[int, tuple[str, ...], tuple[int, ...]] | None = None
-    for i in range(num_datasets):
-        dataset_seed = manager.child("dataset", i)
-        bundle = _generate_one_with_resolved_layout(
-            config,
-            seed=dataset_seed,
-            requested_device=plan.requested_device,
-            resolved_device=validated_resolved_device,
-            n_train=int(plan.n_train),
-            n_test=int(plan.n_test),
-            layout=plan.layout,
-            preserve_feature_schema=True,
-        )
-        _annotate_fixed_layout_metadata(bundle, plan=plan)
-        schema = _extract_emitted_schema_signature(bundle)
-        if expected_schema is None:
-            expected_schema = schema
-        elif schema != expected_schema:
-            raise ValueError(
-                "Fixed-layout schema mismatch: emitted dataset does not match "
-                "the first fixed-layout bundle schema."
+    with activate_perf_telemetry(telemetry):
+        for i in range(num_datasets):
+            dataset_seed = manager.child("dataset", i)
+            bundle = _generate_one_with_resolved_layout(
+                config,
+                seed=dataset_seed,
+                requested_device=plan.requested_device,
+                resolved_device=validated_resolved_device,
+                n_train=int(plan.n_train),
+                n_test=int(plan.n_test),
+                layout=plan.layout,
+                preserve_feature_schema=True,
             )
-        yield bundle
+            _annotate_fixed_layout_metadata(bundle, plan=plan)
+            schema = _extract_emitted_schema_signature(bundle)
+            if expected_schema is None:
+                expected_schema = schema
+            elif schema != expected_schema:
+                raise ValueError(
+                    "Fixed-layout schema mismatch: emitted dataset does not match "
+                    "the first fixed-layout bundle schema."
+                )
+            yield bundle
 
 
 def generate_batch_fixed_layout(
@@ -931,6 +940,7 @@ def generate_batch_fixed_layout(
     plan: FixedLayoutPlan,
     num_datasets: int,
     seed: int | None = None,
+    telemetry: PerfTelemetry | None = None,
 ) -> list[DatasetBundle]:
     """Generate a materialized fixed-layout batch using a reusable plan."""
 
@@ -940,5 +950,6 @@ def generate_batch_fixed_layout(
             plan=plan,
             num_datasets=num_datasets,
             seed=seed,
+            telemetry=telemetry,
         )
     )

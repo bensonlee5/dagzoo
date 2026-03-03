@@ -16,7 +16,9 @@ def test_run_throughput_benchmark_uses_streaming_generation(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
+        _ = telemetry
         calls.append((num_datasets, int(seed or 0), device))
         for _ in range(num_datasets):
             yield None
@@ -55,9 +57,11 @@ def test_run_throughput_benchmark_updates_callback_on_measured_generation(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         _ = seed
         _ = device
+        _ = telemetry
         for idx in range(num_datasets):
             yield idx
 

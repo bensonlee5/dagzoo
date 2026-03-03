@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import yaml
 
@@ -82,10 +84,12 @@ def test_generate_cli_uses_default_config_without_legacy_overrides(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         _ = config
         _ = seed
         _ = device
+        _ = telemetry
         _ = num_datasets
         captured["called"] = True
         yield object()
@@ -123,12 +127,14 @@ def test_generate_cli_many_class_preset_end_to_end_no_write(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         for bundle in original_generate_batch_iter(
             config,
             num_datasets=num_datasets,
             seed=seed,
             device=device,
+            telemetry=telemetry,
         ):
             captured_metadata.append(bundle.metadata)
             yield bundle
@@ -189,12 +195,14 @@ def test_generate_cli_shift_presets_emit_shift_metadata_no_write(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         for bundle in original_generate_batch_iter(
             config,
             num_datasets=num_datasets,
             seed=seed,
             device=device,
+            telemetry=telemetry,
         ):
             payload = bundle.metadata["shift"]
             assert isinstance(payload, dict)
@@ -252,12 +260,14 @@ def test_generate_cli_noise_presets_emit_noise_metadata_no_write(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         for bundle in original_generate_batch_iter(
             config,
             num_datasets=num_datasets,
             seed=seed,
             device=device,
+            telemetry=telemetry,
         ):
             payload = bundle.metadata["noise"]
             assert isinstance(payload, dict)
@@ -336,9 +346,11 @@ def test_generate_cli_coverage_tolerates_null_quantiles_and_targets(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         _ = seed
         _ = device
+        _ = telemetry
         for _ in range(num_datasets):
             yield object()
 
@@ -383,9 +395,11 @@ def test_generate_cli_no_write_allows_null_output_dir_when_coverage_disabled(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         _ = seed
         _ = device
+        _ = telemetry
         for _ in range(num_datasets):
             yield object()
 
@@ -418,10 +432,12 @@ def test_generate_cli_enables_diagnostics_flag(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         captured["diagnostics_enabled"] = config.diagnostics.enabled
         _ = seed
         _ = device
+        _ = telemetry
         for _ in range(num_datasets):
             yield object()
 
@@ -459,6 +475,7 @@ def test_generate_cli_applies_missingness_overrides_no_write(
         num_datasets: int,
         seed: int | None = None,
         device: str | None = None,
+        telemetry=None,
     ):
         captured["missing_rate"] = config.dataset.missing_rate
         captured["missing_mechanism"] = config.dataset.missing_mechanism
@@ -467,6 +484,7 @@ def test_generate_cli_applies_missingness_overrides_no_write(
         captured["missing_mnar_logit_scale"] = config.dataset.missing_mnar_logit_scale
         _ = seed
         _ = device
+        _ = telemetry
         for _ in range(num_datasets):
             yield object()
 
@@ -607,3 +625,28 @@ def test_generate_cli_missingness_no_write_end_to_end(tmp_path) -> None:
         ]
     )
     assert code == 0
+
+
+def test_generate_cli_writes_perf_telemetry_json_no_write(tmp_path) -> None:
+    telemetry_path = tmp_path / "perf_telemetry.json"
+    code = main(
+        [
+            "generate",
+            "--config",
+            "configs/default.yaml",
+            "--num-datasets",
+            "1",
+            "--device",
+            "cpu",
+            "--no-hardware-aware",
+            "--no-write",
+            "--telemetry-json",
+            str(telemetry_path),
+        ]
+    )
+    assert code == 0
+    assert telemetry_path.exists()
+    payload = json.loads(telemetry_path.read_text(encoding="utf-8"))
+    perf = payload["performance_telemetry"]
+    assert perf["enabled"] is True
+    assert "noise.calls_total" in perf["counters"]

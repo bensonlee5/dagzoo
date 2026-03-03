@@ -17,6 +17,7 @@ from cauchy_generator.io.lineage_schema import (
     validate_lineage_payload,
 )
 from cauchy_generator.io.parquet_writer import _sanitize_json, write_packed_parquet_shards_stream
+from cauchy_generator.telemetry import PerfTelemetry
 from cauchy_generator.types import DatasetBundle
 
 
@@ -89,10 +90,13 @@ def _generate_one_with_retries(
     raise AssertionError("unreachable")
 
 
-def _stub_write_packed_split(*, state, split, dataset_index, x, y, compression) -> None:
+def _stub_write_packed_split(
+    *, state, split, dataset_index, x, y, compression, telemetry=None
+) -> None:
     _ = x
     _ = y
     _ = compression
+    _ = telemetry
     split_path = state.train_path if split == "train" else state.test_path
     with split_path.open("a", encoding="utf-8") as f:
         f.write(f"{dataset_index}\n")
@@ -150,6 +154,31 @@ def test_write_packed_parquet_shards_stream_writes_real_parquet_tables(tmp_path)
     train_x = train_table.column("x").to_pylist()
     assert len(train_x[0]) == 2
     assert train_x[0] == [1.0, 1.0]
+
+
+def test_write_packed_parquet_shards_stream_populates_perf_telemetry(tmp_path) -> None:
+    pytest.importorskip("pyarrow.parquet")
+    telemetry = PerfTelemetry(enabled=True)
+    written = write_packed_parquet_shards_stream(
+        [_bundle_with_dense_lineage(5)],
+        tmp_path,
+        shard_size=1,
+        compression="zstd",
+        telemetry=telemetry,
+    )
+    assert written == 1
+
+    snapshot = telemetry.snapshot()
+    counters = snapshot["counters"]
+    timers = snapshot["timers_ms"]
+    assert counters["io.datasets_written"] == pytest.approx(1.0)
+    assert counters["io.metadata_records_written"] == pytest.approx(1.0)
+    assert counters["lineage.datasets_with_lineage"] == pytest.approx(1.0)
+    assert counters["lineage.adjacency_bytes_written"] >= 1.0
+    assert timers["io.to_numpy"] >= 0.0
+    assert timers["io.build_split_table"] >= 0.0
+    assert timers["io.parquet_write_table"] >= 0.0
+    assert timers["lineage.pack_adjacency"] >= 0.0
 
 
 def test_write_packed_parquet_shards_stream_preserves_float_targets(tmp_path) -> None:
@@ -410,13 +439,16 @@ def test_write_packed_parquet_shards_stream_closes_lineage_blob_on_failure(
 ) -> None:
     split_calls = {"count": 0}
 
-    def _failing_write_packed_split(*, state, split, dataset_index, x, y, compression):
+    def _failing_write_packed_split(
+        *, state, split, dataset_index, x, y, compression, telemetry=None
+    ):
         _ = state
         _ = split
         _ = dataset_index
         _ = x
         _ = y
         _ = compression
+        _ = telemetry
         split_calls["count"] += 1
         if split_calls["count"] >= 3:
             raise RuntimeError("forced split failure")
@@ -463,13 +495,16 @@ def test_write_packed_parquet_shards_stream_writes_lineage_index_on_failure(
 ) -> None:
     split_calls = {"count": 0}
 
-    def _failing_write_packed_split(*, state, split, dataset_index, x, y, compression):
+    def _failing_write_packed_split(
+        *, state, split, dataset_index, x, y, compression, telemetry=None
+    ):
         _ = state
         _ = split
         _ = dataset_index
         _ = x
         _ = y
         _ = compression
+        _ = telemetry
         split_calls["count"] += 1
         if split_calls["count"] >= 3:
             raise RuntimeError("forced split failure")

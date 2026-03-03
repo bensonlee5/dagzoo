@@ -24,6 +24,7 @@ from cauchy_generator.core.dataset import generate_batch_iter
 from cauchy_generator.io.parquet_writer import write_packed_parquet_shards_stream
 from cauchy_generator.math_utils import to_numpy as _to_numpy
 from cauchy_generator.rng import offset_seed32
+from cauchy_generator.telemetry import PerfTelemetry
 from cauchy_generator.types import DatasetBundle
 
 
@@ -56,6 +57,7 @@ def _measure_persistence_datasets_per_minute(
     *,
     config: GeneratorConfig,
     num_bundles: int,
+    telemetry: PerfTelemetry | None = None,
 ) -> float:
     """Measure write-path throughput for a fixed number of streamed bundles."""
 
@@ -70,6 +72,7 @@ def _measure_persistence_datasets_per_minute(
             out_dir=out_dir,
             shard_size=max(1, int(config.output.shard_size)),
             compression=str(config.output.compression),
+            telemetry=telemetry,
         )
     elapsed = time.perf_counter() - start
     if elapsed <= 0.0:
@@ -163,6 +166,8 @@ def _measure_lineage_persistence_trials(
     num_bundles: int,
     config: GeneratorConfig,
     trials: int,
+    baseline_telemetry: PerfTelemetry | None = None,
+    current_telemetry: PerfTelemetry | None = None,
 ) -> tuple[list[float], list[float]]:
     """Collect paired baseline/lineage persistence throughput trials."""
 
@@ -176,6 +181,7 @@ def _measure_lineage_persistence_trials(
                 baseline_bundles,
                 config=config,
                 num_bundles=num_bundles,
+                telemetry=baseline_telemetry,
             )
         )
         current_bundles = _iter_staged_bundles(current_stage_dir, num_bundles=num_bundles)
@@ -184,6 +190,7 @@ def _measure_lineage_persistence_trials(
                 current_bundles,
                 config=config,
                 num_bundles=num_bundles,
+                telemetry=current_telemetry,
             )
         )
     return baseline_trials, current_trials
@@ -317,6 +324,8 @@ def _collect_lineage_guardrails(
 
         lineage_coverage_rate = float(bundles_with_lineage) / float(bundles_seen)
 
+        baseline_perf_telemetry = PerfTelemetry(enabled=True)
+        current_perf_telemetry = PerfTelemetry(enabled=True)
         try:
             baseline_trials, current_trials = _measure_lineage_persistence_trials(
                 baseline_stage_dir=baseline_stage_dir,
@@ -324,6 +333,8 @@ def _collect_lineage_guardrails(
                 num_bundles=bundles_seen,
                 config=config,
                 trials=LINEAGE_GUARDRAIL_RUNTIME_TRIALS,
+                baseline_telemetry=baseline_perf_telemetry,
+                current_telemetry=current_perf_telemetry,
             )
         except Exception as exc:
             return {
@@ -391,6 +402,8 @@ def _collect_lineage_guardrails(
         ),
         "runtime_warn_threshold_pct": float(warn_threshold_pct),
         "runtime_fail_threshold_pct": float(fail_threshold_pct),
+        "performance_telemetry_baseline": baseline_perf_telemetry.snapshot(),
+        "performance_telemetry_with_lineage": current_perf_telemetry.snapshot(),
         "issues": issues,
         "status": _status_from_issues(issues),
     }
