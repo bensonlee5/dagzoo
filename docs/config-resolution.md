@@ -25,7 +25,7 @@ ______________________________________________________________________
    - `--missing-mnar-logit-scale`
 1. Diagnostics CLI switch (`--diagnostics`) -> `diagnostics.enabled=true`
 
-After overrides are applied, typed config validation runs. Invalid combinations fail fast.
+After overrides are applied, staged generation validation runs. Invalid combinations fail fast.
 
 ______________________________________________________________________
 
@@ -48,6 +48,18 @@ Each profile in `dagsynth benchmark` resolves independently in this order:
 
 Runtime count overrides (`--num-datasets`, `--warmup`) are benchmark execution controls and do
 not mutate the profile effective config payload.
+
+______________________________________________________________________
+
+## Validation stages
+
+`GeneratorConfig` validation is explicit and runs in three stages:
+
+1. Stage 1: field-level normalization and typing per section (`dataset`, `graph`, `shift`, `noise`, `runtime`, `output`, `diagnostics`, `benchmark`, `filter`)
+1. Stage 2: cross-field constraints (for example shift profile compatibility, missingness constraints, and min/max envelopes)
+1. Stage 3: post-override revalidation by re-running stage 1 + stage 2 through `GeneratorConfig.validate_generation_constraints()`
+
+`resolve_generate_config()` and `resolve_benchmark_profile_config()` both call stage 3 after applying all runtime overrides/caps.
 
 ______________________________________________________________________
 

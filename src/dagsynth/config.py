@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import yaml
 
@@ -74,6 +74,7 @@ _NOISE_MIXTURE_COMPONENT_VALUE_MAP: dict[str, NoiseMixtureComponent] = {
 }
 
 MAX_SUPPORTED_CLASS_COUNT = 32
+_SectionT = TypeVar("_SectionT")
 
 
 def normalize_missing_mechanism(value: str) -> MissingnessMechanism:
@@ -290,6 +291,420 @@ def validate_class_split_feasibility(
         )
 
 
+def _normalize_dataset_fields(dataset: DatasetConfig) -> None:
+    """Stage 1: normalize individual dataset fields and scalar bounds."""
+
+    normalized_task = str(dataset.task).strip().lower()
+    if normalized_task not in {"classification", "regression"}:
+        raise ValueError(
+            f"dataset.task must be 'classification' or 'regression', got {dataset.task!r}."
+        )
+    dataset.task = normalized_task
+
+    dataset.n_train = _validate_int_field(
+        field_name="dataset.n_train",
+        value=dataset.n_train,
+        minimum=1,
+    )
+    dataset.n_test = _validate_int_field(
+        field_name="dataset.n_test",
+        value=dataset.n_test,
+        minimum=1,
+    )
+    dataset.n_features_min = _validate_int_field(
+        field_name="dataset.n_features_min",
+        value=dataset.n_features_min,
+        minimum=1,
+    )
+    dataset.n_features_max = _validate_int_field(
+        field_name="dataset.n_features_max",
+        value=dataset.n_features_max,
+        minimum=1,
+    )
+    dataset.max_categorical_cardinality = _validate_int_field(
+        field_name="dataset.max_categorical_cardinality",
+        value=dataset.max_categorical_cardinality,
+        minimum=2,
+    )
+
+    dataset.categorical_ratio_min = _validate_finite_float_field(
+        field_name="dataset.categorical_ratio_min",
+        value=dataset.categorical_ratio_min,
+        lo=0.0,
+        hi=1.0,
+        lo_inclusive=True,
+        hi_inclusive=True,
+        expectation="a finite value in [0, 1]",
+    )
+    dataset.categorical_ratio_max = _validate_finite_float_field(
+        field_name="dataset.categorical_ratio_max",
+        value=dataset.categorical_ratio_max,
+        lo=0.0,
+        hi=1.0,
+        lo_inclusive=True,
+        hi_inclusive=True,
+        expectation="a finite value in [0, 1]",
+    )
+
+    dataset.n_classes_min = _validate_int_field(
+        field_name="dataset.n_classes_min",
+        value=dataset.n_classes_min,
+        minimum=2,
+        maximum=MAX_SUPPORTED_CLASS_COUNT,
+    )
+    dataset.n_classes_max = _validate_int_field(
+        field_name="dataset.n_classes_max",
+        value=dataset.n_classes_max,
+        minimum=2,
+        maximum=MAX_SUPPORTED_CLASS_COUNT,
+    )
+
+    dataset.missing_rate = _validate_finite_float_field(
+        field_name="dataset.missing_rate",
+        value=dataset.missing_rate,
+        lo=0.0,
+        hi=1.0,
+        lo_inclusive=True,
+        hi_inclusive=True,
+        expectation="a finite value in [0, 1]",
+    )
+    dataset.missing_mechanism = normalize_missing_mechanism(dataset.missing_mechanism)
+    dataset.missing_mar_observed_fraction = _validate_finite_float_field(
+        field_name="dataset.missing_mar_observed_fraction",
+        value=dataset.missing_mar_observed_fraction,
+        lo=0.0,
+        hi=1.0,
+        lo_inclusive=False,
+        hi_inclusive=True,
+        expectation="in (0, 1]",
+    )
+    dataset.missing_mar_logit_scale = _validate_finite_float_field(
+        field_name="dataset.missing_mar_logit_scale",
+        value=dataset.missing_mar_logit_scale,
+        lo=0.0,
+        hi=None,
+        lo_inclusive=False,
+        hi_inclusive=False,
+        expectation="a finite value > 0",
+    )
+    dataset.missing_mnar_logit_scale = _validate_finite_float_field(
+        field_name="dataset.missing_mnar_logit_scale",
+        value=dataset.missing_mnar_logit_scale,
+        lo=0.0,
+        hi=None,
+        lo_inclusive=False,
+        hi_inclusive=False,
+        expectation="a finite value > 0",
+    )
+
+
+def _normalize_graph_fields(graph: GraphConfig) -> None:
+    """Stage 1: normalize graph scalar fields."""
+
+    graph.n_nodes_min = _validate_int_field(
+        field_name="graph.n_nodes_min",
+        value=graph.n_nodes_min,
+        minimum=2,
+    )
+    graph.n_nodes_max = _validate_int_field(
+        field_name="graph.n_nodes_max",
+        value=graph.n_nodes_max,
+        minimum=2,
+    )
+
+
+def _normalize_shift_fields(shift: ShiftConfig) -> None:
+    """Stage 1: normalize shift fields."""
+
+    if not isinstance(shift.enabled, bool):
+        raise ValueError(f"shift.enabled must be a boolean, got {shift.enabled!r}.")
+    shift.profile = normalize_shift_profile(shift.profile)
+    shift.graph_scale = _validate_optional_finite_float_field(
+        field_name="shift.graph_scale",
+        value=shift.graph_scale,
+        lo=0.0,
+        hi=1.0,
+        lo_inclusive=True,
+        hi_inclusive=True,
+        expectation="a finite value in [0, 1]",
+    )
+    shift.mechanism_scale = _validate_optional_finite_float_field(
+        field_name="shift.mechanism_scale",
+        value=shift.mechanism_scale,
+        lo=0.0,
+        hi=1.0,
+        lo_inclusive=True,
+        hi_inclusive=True,
+        expectation="a finite value in [0, 1]",
+    )
+    shift.noise_scale = _validate_optional_finite_float_field(
+        field_name="shift.noise_scale",
+        value=shift.noise_scale,
+        lo=0.0,
+        hi=1.0,
+        lo_inclusive=True,
+        hi_inclusive=True,
+        expectation="a finite value in [0, 1]",
+    )
+
+
+def _normalize_noise_fields(noise: NoiseConfig) -> None:
+    """Stage 1: normalize noise family and scalar fields."""
+
+    noise.family = normalize_noise_family(noise.family)
+    noise.scale = _validate_finite_float_field(
+        field_name="noise.scale",
+        value=noise.scale,
+        lo=0.0,
+        hi=None,
+        lo_inclusive=False,
+        hi_inclusive=False,
+        expectation="a finite value > 0",
+    )
+    noise.student_t_df = _validate_finite_float_field(
+        field_name="noise.student_t_df",
+        value=noise.student_t_df,
+        lo=2.0,
+        hi=None,
+        lo_inclusive=False,
+        hi_inclusive=False,
+        expectation="a finite value > 2",
+    )
+    noise.mixture_weights = _normalize_noise_mixture_weights(noise.mixture_weights)
+
+
+def _normalize_runtime_fields(runtime: RuntimeConfig) -> None:
+    """Stage 1: normalize runtime selector fields."""
+
+    if runtime.device is None:
+        runtime.device = "auto"
+    elif isinstance(runtime.device, bool):
+        raise ValueError(f"runtime.device must be a string or null, got {runtime.device!r}.")
+    else:
+        runtime.device = str(runtime.device).strip().lower() or "auto"
+
+    if isinstance(runtime.torch_dtype, bool):
+        raise ValueError(f"runtime.torch_dtype must be a string, got {runtime.torch_dtype!r}.")
+    runtime.torch_dtype = str(runtime.torch_dtype).strip().lower()
+    if not runtime.torch_dtype:
+        raise ValueError("runtime.torch_dtype must be a non-empty string.")
+
+
+def _normalize_output_fields(_output: OutputConfig) -> None:
+    """Stage 1: output section has no additional field normalization."""
+
+
+def _normalize_diagnostics_fields(_diagnostics: DiagnosticsConfig) -> None:
+    """Stage 1: diagnostics section has no additional field normalization."""
+
+
+def _normalize_benchmark_fields(_benchmark: BenchmarkConfig) -> None:
+    """Stage 1: benchmark section has no additional field normalization."""
+
+
+def _normalize_filter_fields(filter_cfg: FilterConfig) -> None:
+    """Stage 1: normalize filter scalar fields."""
+
+    filter_cfg.n_jobs = _validate_int_field(
+        field_name="filter.n_jobs",
+        value=filter_cfg.n_jobs,
+        minimum=-1,
+    )
+    if filter_cfg.n_jobs == 0:
+        raise ValueError("filter.n_jobs must be -1 or an integer >= 1, got 0.")
+
+
+def _coerce_section(
+    *,
+    section_name: str,
+    value: object,
+    section_type: type[_SectionT],
+) -> _SectionT:
+    """Coerce one top-level section into its canonical dataclass type."""
+
+    if isinstance(value, section_type):
+        return value
+    if isinstance(value, dict):
+        return section_type(**value)
+    if is_dataclass(value) and not isinstance(value, type):
+        payload = asdict(value)
+        if isinstance(payload, dict):
+            return section_type(**payload)
+    raise TypeError(
+        f"{section_name} must be a {section_type.__name__} or mapping, got {type(value).__name__}."
+    )
+
+
+def _stage1_normalize_generation_sections(config: GeneratorConfig) -> None:
+    """Stage 1: field-level normalization/typing for all config sections."""
+
+    config.dataset = _coerce_section(
+        section_name="dataset",
+        value=config.dataset,
+        section_type=DatasetConfig,
+    )
+    config.graph = _coerce_section(
+        section_name="graph",
+        value=config.graph,
+        section_type=GraphConfig,
+    )
+    config.shift = _coerce_section(
+        section_name="shift",
+        value=config.shift,
+        section_type=ShiftConfig,
+    )
+    config.noise = _coerce_section(
+        section_name="noise",
+        value=config.noise,
+        section_type=NoiseConfig,
+    )
+    config.runtime = _coerce_section(
+        section_name="runtime",
+        value=config.runtime,
+        section_type=RuntimeConfig,
+    )
+    config.output = _coerce_section(
+        section_name="output",
+        value=config.output,
+        section_type=OutputConfig,
+    )
+    config.diagnostics = _coerce_section(
+        section_name="diagnostics",
+        value=config.diagnostics,
+        section_type=DiagnosticsConfig,
+    )
+    config.benchmark = _coerce_section(
+        section_name="benchmark",
+        value=config.benchmark,
+        section_type=BenchmarkConfig,
+    )
+    config.filter = _coerce_section(
+        section_name="filter",
+        value=config.filter,
+        section_type=FilterConfig,
+    )
+
+    _normalize_dataset_fields(config.dataset)
+    _normalize_graph_fields(config.graph)
+    _normalize_shift_fields(config.shift)
+    _normalize_noise_fields(config.noise)
+    _normalize_runtime_fields(config.runtime)
+    _normalize_output_fields(config.output)
+    _normalize_diagnostics_fields(config.diagnostics)
+    _normalize_benchmark_fields(config.benchmark)
+    _normalize_filter_fields(config.filter)
+
+
+def _stage2_validate_dataset_constraints(dataset: DatasetConfig) -> None:
+    """Stage 2: validate dataset cross-field constraints."""
+
+    _validate_min_max_pair(
+        name="dataset.n_features_min",
+        min_value=dataset.n_features_min,
+        max_value=dataset.n_features_max,
+        max_label="n_features_max",
+    )
+    if dataset.categorical_ratio_min > dataset.categorical_ratio_max:
+        raise ValueError(
+            "dataset.categorical_ratio_min must be <= categorical_ratio_max, "
+            f"got {dataset.categorical_ratio_min} > {dataset.categorical_ratio_max}."
+        )
+    _validate_min_max_pair(
+        name="dataset.n_classes_min",
+        min_value=dataset.n_classes_min,
+        max_value=dataset.n_classes_max,
+        max_label="n_classes_max",
+    )
+
+    if dataset.task == "classification":
+        validate_class_split_feasibility(
+            n_classes=int(dataset.n_classes_min),
+            n_train=int(dataset.n_train),
+            n_test=int(dataset.n_test),
+            context="dataset classification split constraints for n_classes_min",
+        )
+        validate_class_split_feasibility(
+            n_classes=int(dataset.n_classes_max),
+            n_train=int(dataset.n_train),
+            n_test=int(dataset.n_test),
+            context="dataset classification split constraints for n_classes_max",
+        )
+
+    if dataset.missing_rate > 0.0 and dataset.missing_mechanism == MISSINGNESS_MECHANISM_NONE:
+        raise ValueError(
+            "dataset.missing_mechanism must be mcar, mar, or mnar when dataset.missing_rate > 0."
+        )
+
+
+def _stage2_validate_graph_constraints(graph: GraphConfig) -> None:
+    """Stage 2: validate graph cross-field constraints."""
+
+    _validate_min_max_pair(
+        name="graph.n_nodes_min",
+        min_value=graph.n_nodes_min,
+        max_value=graph.n_nodes_max,
+        max_label="n_nodes_max",
+    )
+
+
+def _stage2_validate_shift_constraints(shift: ShiftConfig) -> None:
+    """Stage 2: validate shift profile and override compatibility."""
+
+    has_overrides = any(
+        scale is not None for scale in (shift.graph_scale, shift.mechanism_scale, shift.noise_scale)
+    )
+    if not shift.enabled:
+        if shift.profile != SHIFT_PROFILE_OFF:
+            raise ValueError("shift.profile must be 'off' when shift.enabled is false.")
+        if has_overrides:
+            raise ValueError("shift override scales must be unset when shift.enabled is false.")
+        return
+
+    if shift.profile == SHIFT_PROFILE_OFF:
+        raise ValueError("shift.profile must not be 'off' when shift.enabled is true.")
+
+    if shift.profile == SHIFT_PROFILE_CUSTOM and not has_overrides:
+        raise ValueError("shift.profile 'custom' requires at least one override scale.")
+
+    if shift.profile == SHIFT_PROFILE_GRAPH_DRIFT and (
+        shift.mechanism_scale is not None or shift.noise_scale is not None
+    ):
+        raise ValueError("shift.profile 'graph_drift' only allows shift.graph_scale override.")
+    if shift.profile == SHIFT_PROFILE_MECHANISM_DRIFT and (
+        shift.graph_scale is not None or shift.noise_scale is not None
+    ):
+        raise ValueError(
+            "shift.profile 'mechanism_drift' only allows shift.mechanism_scale override."
+        )
+    if shift.profile == SHIFT_PROFILE_NOISE_DRIFT and (
+        shift.graph_scale is not None or shift.mechanism_scale is not None
+    ):
+        raise ValueError("shift.profile 'noise_drift' only allows shift.noise_scale override.")
+
+
+def _stage2_validate_noise_constraints(noise: NoiseConfig) -> None:
+    """Stage 2: validate noise-family dependent relationships."""
+
+    if noise.family != NOISE_FAMILY_MIXTURE and noise.mixture_weights is not None:
+        raise ValueError("noise.mixture_weights is only allowed when noise.family is 'mixture'.")
+
+
+def _stage2_validate_generation_constraints(config: GeneratorConfig) -> None:
+    """Stage 2: validate cross-field constraints after section normalization."""
+
+    _stage2_validate_dataset_constraints(config.dataset)
+    _stage2_validate_graph_constraints(config.graph)
+    _stage2_validate_shift_constraints(config.shift)
+    _stage2_validate_noise_constraints(config.noise)
+
+
+def _run_generation_validation_stages(config: GeneratorConfig) -> None:
+    """Run staged generation validation (stage1 normalize -> stage2 cross-field)."""
+
+    _stage1_normalize_generation_sections(config)
+    _stage2_validate_generation_constraints(config)
+
+
 @dataclass(slots=True)
 class DatasetConfig:
     task: str = "classification"
@@ -309,137 +724,7 @@ class DatasetConfig:
     missing_mnar_logit_scale: float = 1.0
 
     def __post_init__(self) -> None:
-        normalized_task = str(self.task).strip().lower()
-        if normalized_task not in {"classification", "regression"}:
-            raise ValueError(
-                f"dataset.task must be 'classification' or 'regression', got {self.task!r}."
-            )
-        self.task = normalized_task
-
-        self.n_train = _validate_int_field(
-            field_name="dataset.n_train",
-            value=self.n_train,
-            minimum=1,
-        )
-        self.n_test = _validate_int_field(
-            field_name="dataset.n_test",
-            value=self.n_test,
-            minimum=1,
-        )
-        self.n_features_min = _validate_int_field(
-            field_name="dataset.n_features_min",
-            value=self.n_features_min,
-            minimum=1,
-        )
-        self.n_features_max = _validate_int_field(
-            field_name="dataset.n_features_max",
-            value=self.n_features_max,
-            minimum=1,
-        )
-        _validate_min_max_pair(
-            name="dataset.n_features_min",
-            min_value=self.n_features_min,
-            max_value=self.n_features_max,
-            max_label="n_features_max",
-        )
-        self.max_categorical_cardinality = _validate_int_field(
-            field_name="dataset.max_categorical_cardinality",
-            value=self.max_categorical_cardinality,
-            minimum=2,
-        )
-        self.categorical_ratio_min = _validate_finite_float_field(
-            field_name="dataset.categorical_ratio_min",
-            value=self.categorical_ratio_min,
-            lo=0.0,
-            hi=1.0,
-            lo_inclusive=True,
-            hi_inclusive=True,
-            expectation="a finite value in [0, 1]",
-        )
-        self.categorical_ratio_max = _validate_finite_float_field(
-            field_name="dataset.categorical_ratio_max",
-            value=self.categorical_ratio_max,
-            lo=0.0,
-            hi=1.0,
-            lo_inclusive=True,
-            hi_inclusive=True,
-            expectation="a finite value in [0, 1]",
-        )
-        if self.categorical_ratio_min > self.categorical_ratio_max:
-            raise ValueError(
-                "dataset.categorical_ratio_min must be <= categorical_ratio_max, "
-                f"got {self.categorical_ratio_min} > {self.categorical_ratio_max}."
-            )
-
-        self.n_classes_min = _validate_int_field(
-            field_name="dataset.n_classes_min",
-            value=self.n_classes_min,
-            minimum=2,
-            maximum=MAX_SUPPORTED_CLASS_COUNT,
-        )
-        self.n_classes_max = _validate_int_field(
-            field_name="dataset.n_classes_max",
-            value=self.n_classes_max,
-            minimum=2,
-            maximum=MAX_SUPPORTED_CLASS_COUNT,
-        )
-        _validate_min_max_pair(
-            name="dataset.n_classes_min",
-            min_value=self.n_classes_min,
-            max_value=self.n_classes_max,
-            max_label="n_classes_max",
-        )
-        if self.task == "classification":
-            validate_class_split_feasibility(
-                n_classes=int(self.n_classes_min),
-                n_train=int(self.n_train),
-                n_test=int(self.n_test),
-                context="dataset classification split constraints for n_classes_min",
-            )
-
-        self.missing_rate = _validate_finite_float_field(
-            field_name="dataset.missing_rate",
-            value=self.missing_rate,
-            lo=0.0,
-            hi=1.0,
-            lo_inclusive=True,
-            hi_inclusive=True,
-            expectation="a finite value in [0, 1]",
-        )
-
-        self.missing_mechanism = normalize_missing_mechanism(self.missing_mechanism)
-        if self.missing_rate > 0.0 and self.missing_mechanism == MISSINGNESS_MECHANISM_NONE:
-            raise ValueError(
-                "dataset.missing_mechanism must be mcar, mar, or mnar when dataset.missing_rate > 0."
-            )
-
-        self.missing_mar_observed_fraction = _validate_finite_float_field(
-            field_name="dataset.missing_mar_observed_fraction",
-            value=self.missing_mar_observed_fraction,
-            lo=0.0,
-            hi=1.0,
-            lo_inclusive=False,
-            hi_inclusive=True,
-            expectation="in (0, 1]",
-        )
-        self.missing_mar_logit_scale = _validate_finite_float_field(
-            field_name="dataset.missing_mar_logit_scale",
-            value=self.missing_mar_logit_scale,
-            lo=0.0,
-            hi=None,
-            lo_inclusive=False,
-            hi_inclusive=False,
-            expectation="a finite value > 0",
-        )
-        self.missing_mnar_logit_scale = _validate_finite_float_field(
-            field_name="dataset.missing_mnar_logit_scale",
-            value=self.missing_mnar_logit_scale,
-            lo=0.0,
-            hi=None,
-            lo_inclusive=False,
-            hi_inclusive=False,
-            expectation="a finite value > 0",
-        )
+        _normalize_dataset_fields(self)
 
 
 @dataclass(slots=True)
@@ -448,22 +733,7 @@ class GraphConfig:
     n_nodes_max: int = 32
 
     def __post_init__(self) -> None:
-        self.n_nodes_min = _validate_int_field(
-            field_name="graph.n_nodes_min",
-            value=self.n_nodes_min,
-            minimum=2,
-        )
-        self.n_nodes_max = _validate_int_field(
-            field_name="graph.n_nodes_max",
-            value=self.n_nodes_max,
-            minimum=2,
-        )
-        _validate_min_max_pair(
-            name="graph.n_nodes_min",
-            min_value=self.n_nodes_min,
-            max_value=self.n_nodes_max,
-            max_label="n_nodes_max",
-        )
+        _normalize_graph_fields(self)
 
 
 def _validate_min_max_pair(
@@ -490,68 +760,7 @@ class ShiftConfig:
     noise_scale: float | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.enabled, bool):
-            raise ValueError(f"shift.enabled must be a boolean, got {self.enabled!r}.")
-        self.profile = normalize_shift_profile(self.profile)
-        self.graph_scale = _validate_optional_finite_float_field(
-            field_name="shift.graph_scale",
-            value=self.graph_scale,
-            lo=0.0,
-            hi=1.0,
-            lo_inclusive=True,
-            hi_inclusive=True,
-            expectation="a finite value in [0, 1]",
-        )
-        self.mechanism_scale = _validate_optional_finite_float_field(
-            field_name="shift.mechanism_scale",
-            value=self.mechanism_scale,
-            lo=0.0,
-            hi=1.0,
-            lo_inclusive=True,
-            hi_inclusive=True,
-            expectation="a finite value in [0, 1]",
-        )
-        self.noise_scale = _validate_optional_finite_float_field(
-            field_name="shift.noise_scale",
-            value=self.noise_scale,
-            lo=0.0,
-            hi=1.0,
-            lo_inclusive=True,
-            hi_inclusive=True,
-            expectation="a finite value in [0, 1]",
-        )
-
-        has_overrides = any(
-            scale is not None
-            for scale in (self.graph_scale, self.mechanism_scale, self.noise_scale)
-        )
-        if not self.enabled:
-            if self.profile != SHIFT_PROFILE_OFF:
-                raise ValueError("shift.profile must be 'off' when shift.enabled is false.")
-            if has_overrides:
-                raise ValueError("shift override scales must be unset when shift.enabled is false.")
-            return
-
-        if self.profile == SHIFT_PROFILE_OFF:
-            raise ValueError("shift.profile must not be 'off' when shift.enabled is true.")
-
-        if self.profile == SHIFT_PROFILE_CUSTOM and not has_overrides:
-            raise ValueError("shift.profile 'custom' requires at least one override scale.")
-
-        if self.profile == SHIFT_PROFILE_GRAPH_DRIFT and (
-            self.mechanism_scale is not None or self.noise_scale is not None
-        ):
-            raise ValueError("shift.profile 'graph_drift' only allows shift.graph_scale override.")
-        if self.profile == SHIFT_PROFILE_MECHANISM_DRIFT and (
-            self.graph_scale is not None or self.noise_scale is not None
-        ):
-            raise ValueError(
-                "shift.profile 'mechanism_drift' only allows shift.mechanism_scale override."
-            )
-        if self.profile == SHIFT_PROFILE_NOISE_DRIFT and (
-            self.graph_scale is not None or self.mechanism_scale is not None
-        ):
-            raise ValueError("shift.profile 'noise_drift' only allows shift.noise_scale override.")
+        _normalize_shift_fields(self)
 
 
 @dataclass(slots=True)
@@ -562,30 +771,7 @@ class NoiseConfig:
     mixture_weights: dict[NoiseMixtureComponent, float] | None = None
 
     def __post_init__(self) -> None:
-        self.family = normalize_noise_family(self.family)
-        self.scale = _validate_finite_float_field(
-            field_name="noise.scale",
-            value=self.scale,
-            lo=0.0,
-            hi=None,
-            lo_inclusive=False,
-            hi_inclusive=False,
-            expectation="a finite value > 0",
-        )
-        self.student_t_df = _validate_finite_float_field(
-            field_name="noise.student_t_df",
-            value=self.student_t_df,
-            lo=2.0,
-            hi=None,
-            lo_inclusive=False,
-            hi_inclusive=False,
-            expectation="a finite value > 2",
-        )
-        self.mixture_weights = _normalize_noise_mixture_weights(self.mixture_weights)
-        if self.family != NOISE_FAMILY_MIXTURE and self.mixture_weights is not None:
-            raise ValueError(
-                "noise.mixture_weights is only allowed when noise.family is 'mixture'."
-            )
+        _normalize_noise_fields(self)
 
 
 @dataclass(slots=True)
@@ -656,13 +842,7 @@ class FilterConfig:
     n_jobs: int = -1
 
     def __post_init__(self) -> None:
-        self.n_jobs = _validate_int_field(
-            field_name="filter.n_jobs",
-            value=self.n_jobs,
-            minimum=-1,
-        )
-        if self.n_jobs == 0:
-            raise ValueError("filter.n_jobs must be -1 or an integer >= 1, got 0.")
+        _normalize_filter_fields(self)
 
 
 @dataclass(slots=True)
@@ -685,19 +865,12 @@ class GeneratorConfig:
             minimum=SEED32_MIN,
             maximum=SEED32_MAX,
         )
+        _run_generation_validation_stages(self)
 
     def validate_generation_constraints(self) -> None:
-        """Re-validate nested generation config after runtime overrides."""
+        """Stage 3: re-run staged validation after runtime/CLI overrides."""
 
-        self.dataset = DatasetConfig(**asdict(self.dataset))
-        self.graph = GraphConfig(**asdict(self.graph))
-        self.shift = ShiftConfig(**asdict(self.shift))
-        self.noise = NoiseConfig(**asdict(self.noise))
-        self.runtime = RuntimeConfig(**asdict(self.runtime))
-        self.output = OutputConfig(**asdict(self.output))
-        self.diagnostics = DiagnosticsConfig(**asdict(self.diagnostics))
-        self.benchmark = BenchmarkConfig(**asdict(self.benchmark))
-        self.filter = FilterConfig(**asdict(self.filter))
+        _run_generation_validation_stages(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> GeneratorConfig:

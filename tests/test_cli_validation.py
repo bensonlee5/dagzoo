@@ -633,6 +633,8 @@ def test_generate_cli_missingness_no_write_end_to_end(tmp_path) -> None:
     cfg.dataset.task = "classification"
     cfg.dataset.n_train = 32
     cfg.dataset.n_test = 8
+    cfg.dataset.n_classes_min = 2
+    cfg.dataset.n_classes_max = 8
     cfg.dataset.n_features_min = 8
     cfg.dataset.n_features_max = 8
     cfg.graph.n_nodes_min = 2

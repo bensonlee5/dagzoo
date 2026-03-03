@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-03-03
+
+### Changed
+
+- Refactored generation config validation into explicit staged validators in `src/dagsynth/config.py`:
+  stage 1 field normalization/typing, stage 2 cross-field constraints, and stage 3 post-override revalidation.
+- `resolve_generate_config()` and `resolve_benchmark_profile_config()` now rely on `GeneratorConfig.validate_generation_constraints()` as the single post-override revalidation pass.
+- Classification configs now enforce split feasibility for both `dataset.n_classes_min` and `dataset.n_classes_max` (previously only `n_classes_min` was checked).
+- `runtime.device: null` is normalized to `auto` during staged validation.
+- Added/updated tests for ordering-sensitive constraints and override-driven revalidation behavior.
+- Documented validation stages in `docs/config-resolution.md`.
+
 ## [0.3.2] - 2026-03-03
 
 ### Changed

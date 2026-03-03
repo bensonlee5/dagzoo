@@ -126,6 +126,38 @@ def test_resolve_benchmark_profile_config_applies_smoke_caps() -> None:
     )
 
 
+def test_resolve_benchmark_profile_config_revalidates_after_smoke_caps() -> None:
+    cfg = GeneratorConfig.from_dict(
+        {
+            "dataset": {
+                "task": "classification",
+                "n_train": 32,
+                "n_test": 32,
+                "n_classes_min": 2,
+                "n_classes_max": 16,
+            }
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"dataset classification split constraints for n_classes_max",
+    ):
+        resolve_benchmark_profile_config(
+            profile_key="cpu",
+            config=cfg,
+            profile_device="cpu",
+            suite="smoke",
+            hardware_policy="none",
+            smoke_caps=BenchmarkSmokeCaps(
+                n_train=8,
+                n_test=8,
+                n_features=SMOKE_N_FEATURES_CAP,
+                n_nodes=SMOKE_N_NODES_CAP,
+            ),
+        )
+
+
 def test_resolve_benchmark_profile_config_treats_null_runtime_device_as_auto() -> None:
     cfg = GeneratorConfig.from_yaml("configs/benchmark_cpu.yaml")
     cfg.runtime.device = None  # type: ignore[assignment]

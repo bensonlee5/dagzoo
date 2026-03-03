@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from dagsynth.config import DatasetConfig, GeneratorConfig
+from dagsynth.config import GeneratorConfig
 from dagsynth.hardware import HardwareInfo, detect_hardware
 from dagsynth.hardware_policy import apply_hardware_policy
 
@@ -164,7 +164,7 @@ def _apply_missingness_overrides(
     missing_mnar_logit_scale: float | None,
     events: list[ResolutionEvent],
 ) -> None:
-    """Apply generate missingness overrides and revalidate dataset schema."""
+    """Apply generate missingness overrides."""
 
     overrides = (
         ("dataset.missing_rate", missing_rate),
@@ -187,9 +187,6 @@ def _apply_missingness_overrides(
             source="cli.missingness_override",
             events=events,
         )
-
-    # Rebuild typed dataset config so all cross-field constraints are re-checked.
-    config.dataset = DatasetConfig(**asdict(config.dataset))
 
 
 def _apply_smoke_caps(
