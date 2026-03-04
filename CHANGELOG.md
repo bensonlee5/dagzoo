@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-03-04
+
+### Fixed
+
+- Corrected mechanism-family sampling to iterate only across positive-probability
+  families so `mechanism.function_family_mix` remains a strict hard mask even
+  when RNG draws are exactly zero.
+
+## [0.4.2] - 2026-03-03
+
+### Changed
+
+- Added `mechanism.function_family_mix` config support with strict
+  normalization/validation and active runtime enforcement:
+  unspecified families are excluded from sampling, and shift
+  `mechanism_scale` reweights only within enabled families.
+- Added `swiglu` to the global random activation pool as a shape-preserving
+  variant (`x * silu(x)`).
+
+### Breaking
+
+- Generated bundle `metadata.config` now includes the top-level `mechanism`
+  section (persisted config-schema extension). Consumers with strict
+  schema expectations must allow this new section.
+
 ## [0.4.1] - 2026-03-03
 
 ### Changed

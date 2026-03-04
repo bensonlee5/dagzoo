@@ -135,6 +135,20 @@ Notable runtime behavior:
 - `auto` + resolved `mps` has a guarded fallback path to CPU on runtime failure.
 - Split/postprocess control RNG runs on CPU to avoid tiny-op accelerator overhead.
 
+## Mathematical Foundations
+
+Formal equations are canonicalized in [development/transforms.md](development/transforms.md).
+
+- Canonical equations + implementation map: [development/transforms.md](development/transforms.md)
+- Shared notation and symbol definitions: [development/transforms.md#notation-and-symbols](development/transforms.md#notation-and-symbols)
+
+Quick index to the formal sections:
+
+1. **DAG sampling**: strict upper-triangular Bernoulli sampling with Cauchy latent logits and shift-adjusted edge bias.
+1. **Mechanism-family sampling**: family-mix weights plus mechanism logit tilt produce runtime family probabilities.
+1. **Node pipeline**: root/parent composition, latent sanitization and weighting, converter slicing, and final scaling.
+1. **Converters and noise**: numeric/categorical converter equations and dataset-level noise runtime selection (including mixture-mode behavior).
+
 ## End-to-end flow
 
 This diagram shows command-level orchestration and where generation,
@@ -324,6 +338,7 @@ These are related but distinct runtime surfaces.
 
 ## Where to go next
 
+- Canonical transform equations and symbol definitions: `docs/development/transforms.md`
 - Output schema and metadata contract: `docs/output-format.md`
 - Config precedence and trace details: `docs/config-resolution.md`
 - CLI workflow examples: `docs/usage-guide.md`

@@ -12,6 +12,17 @@ import yaml
 from dagsynth.math_utils import normalize_positive_weights
 from dagsynth.rng import SEED32_MAX, SEED32_MIN
 
+MechanismFamily = Literal[
+    "nn",
+    "tree",
+    "discretization",
+    "gp",
+    "linear",
+    "quadratic",
+    "em",
+    "product",
+]
+
 MissingnessMechanism = Literal["none", "mcar", "mar", "mnar"]
 MISSINGNESS_MECHANISM_NONE: Literal["none"] = "none"
 MISSINGNESS_MECHANISM_MCAR: Literal["mcar"] = "mcar"
@@ -72,6 +83,20 @@ _NOISE_MIXTURE_COMPONENT_VALUE_MAP: dict[str, NoiseMixtureComponent] = {
     NOISE_MIXTURE_COMPONENT_LAPLACE: NOISE_MIXTURE_COMPONENT_LAPLACE,
     NOISE_MIXTURE_COMPONENT_STUDENT_T: NOISE_MIXTURE_COMPONENT_STUDENT_T,
 }
+
+_MECHANISM_FAMILY_VALUE_MAP: dict[str, MechanismFamily] = {
+    "nn": "nn",
+    "tree": "tree",
+    "discretization": "discretization",
+    "gp": "gp",
+    "linear": "linear",
+    "quadratic": "quadratic",
+    "em": "em",
+    "product": "product",
+}
+_PRODUCT_COMPONENT_FAMILIES: frozenset[MechanismFamily] = frozenset(
+    {"tree", "discretization", "gp", "linear", "quadratic"}
+)
 
 MAX_SUPPORTED_CLASS_COUNT = 32
 _SectionT = TypeVar("_SectionT")
@@ -172,6 +197,54 @@ def _normalize_noise_mixture_weights(
         weights[component] = float(weight)
 
     return normalize_positive_weights(weights, field_name="noise.mixture_weights")
+
+
+def _normalize_function_family_mix(
+    value: object | None,
+) -> dict[MechanismFamily, float] | None:
+    """Normalize optional mechanism family-mix weights mapping."""
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("mechanism.function_family_mix must be a mapping.")
+    if not value:
+        raise ValueError(
+            "mechanism.function_family_mix must include at least one supported family."
+        )
+
+    weights: dict[MechanismFamily, float] = {}
+    for raw_key, raw_weight in value.items():
+        if isinstance(raw_key, bool) or not isinstance(raw_key, str):
+            raise ValueError(
+                "mechanism.function_family_mix keys must be mechanism family names."
+            )
+        normalized_key = raw_key.strip().lower()
+        family = _MECHANISM_FAMILY_VALUE_MAP.get(normalized_key)
+        if family is None:
+            supported = ", ".join(sorted(_MECHANISM_FAMILY_VALUE_MAP))
+            raise ValueError(
+                "Unsupported mechanism.function_family_mix key "
+                f"'{raw_key}'. Expected one of: {supported}."
+            )
+        if family in weights:
+            raise ValueError(
+                f"Duplicate mechanism.function_family_mix key '{raw_key}' after normalization."
+            )
+        weight = _validate_finite_float_field(
+            field_name=f"mechanism.function_family_mix.{family}",
+            value=raw_weight,
+            lo=0.0,
+            hi=None,
+            lo_inclusive=True,
+            hi_inclusive=False,
+            expectation="a finite value >= 0",
+        )
+        weights[family] = float(weight)
+    return normalize_positive_weights(
+        weights,
+        field_name="mechanism.function_family_mix",
+    )
 
 
 def _validate_finite_float_field(
@@ -413,6 +486,14 @@ def _normalize_graph_fields(graph: GraphConfig) -> None:
     )
 
 
+def _normalize_mechanism_fields(mechanism: MechanismConfig) -> None:
+    """Stage 1: normalize mechanism section fields."""
+
+    mechanism.function_family_mix = _normalize_function_family_mix(
+        mechanism.function_family_mix
+    )
+
+
 def _normalize_shift_fields(shift: ShiftConfig) -> None:
     """Stage 1: normalize shift fields."""
 
@@ -548,6 +629,11 @@ def _stage1_normalize_generation_sections(config: GeneratorConfig) -> None:
         value=config.graph,
         section_type=GraphConfig,
     )
+    config.mechanism = _coerce_section(
+        section_name="mechanism",
+        value=config.mechanism,
+        section_type=MechanismConfig,
+    )
     config.shift = _coerce_section(
         section_name="shift",
         value=config.shift,
@@ -586,6 +672,7 @@ def _stage1_normalize_generation_sections(config: GeneratorConfig) -> None:
 
     _normalize_dataset_fields(config.dataset)
     _normalize_graph_fields(config.graph)
+    _normalize_mechanism_fields(config.mechanism)
     _normalize_shift_fields(config.shift)
     _normalize_noise_fields(config.noise)
     _normalize_runtime_fields(config.runtime)
@@ -647,6 +734,25 @@ def _stage2_validate_graph_constraints(graph: GraphConfig) -> None:
     )
 
 
+def _stage2_validate_mechanism_constraints(mechanism: MechanismConfig) -> None:
+    """Stage 2: validate mechanism-family dependent relationships."""
+
+    family_mix = mechanism.function_family_mix
+    if family_mix is None:
+        return
+    if "product" not in family_mix:
+        return
+    has_product_component = any(
+        family in family_mix for family in _PRODUCT_COMPONENT_FAMILIES
+    )
+    if not has_product_component:
+        supported = ", ".join(sorted(_PRODUCT_COMPONENT_FAMILIES))
+        raise ValueError(
+            "mechanism.function_family_mix assigns positive weight to 'product' but none of its "
+            f"component families are enabled. Add one of: {supported}."
+        )
+
+
 def _stage2_validate_shift_constraints(shift: ShiftConfig) -> None:
     """Stage 2: validate shift mode and override compatibility."""
 
@@ -693,6 +799,7 @@ def _stage2_validate_generation_constraints(config: GeneratorConfig) -> None:
 
     _stage2_validate_dataset_constraints(config.dataset)
     _stage2_validate_graph_constraints(config.graph)
+    _stage2_validate_mechanism_constraints(config.mechanism)
     _stage2_validate_shift_constraints(config.shift)
     _stage2_validate_noise_constraints(config.noise)
 
@@ -733,6 +840,14 @@ class GraphConfig:
 
     def __post_init__(self) -> None:
         _normalize_graph_fields(self)
+
+
+@dataclass(slots=True)
+class MechanismConfig:
+    function_family_mix: dict[MechanismFamily, float] | None = None
+
+    def __post_init__(self) -> None:
+        _normalize_mechanism_fields(self)
 
 
 def _validate_min_max_pair(
@@ -849,6 +964,7 @@ class GeneratorConfig:
     seed: int = 1
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     graph: GraphConfig = field(default_factory=GraphConfig)
+    mechanism: MechanismConfig = field(default_factory=MechanismConfig)
     shift: ShiftConfig = field(default_factory=ShiftConfig)
     noise: NoiseConfig = field(default_factory=NoiseConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
@@ -878,6 +994,7 @@ class GeneratorConfig:
         data = data or {}
         dataset = DatasetConfig(**(data.get("dataset") or {}))
         graph = GraphConfig(**(data.get("graph") or {}))
+        mechanism = MechanismConfig(**(data.get("mechanism") or {}))
         shift = ShiftConfig(**(data.get("shift") or {}))
         noise = NoiseConfig(**(data.get("noise") or {}))
         runtime = RuntimeConfig(**(data.get("runtime") or {}))
@@ -890,6 +1007,7 @@ class GeneratorConfig:
             seed=seed,
             dataset=dataset,
             graph=graph,
+            mechanism=mechanism,
             shift=shift,
             noise=noise,
             runtime=runtime,

@@ -9,7 +9,7 @@ import torch
 
 from dagsynth.converters.categorical import apply_categorical_converter
 from dagsynth.converters.numeric import apply_numeric_converter
-from dagsynth.core.layout_types import ConverterKind
+from dagsynth.core.layout_types import ConverterKind, MechanismFamily
 from dagsynth.functions.multi import apply_multi_function
 from dagsynth.math_utils import (
     log_uniform as _log_uniform,
@@ -83,6 +83,7 @@ def apply_node_pipeline(
     device: str,
     *,
     mechanism_logit_tilt: float = 0.0,
+    function_family_mix: dict[MechanismFamily, float] | None = None,
     noise_sigma_multiplier: float = 1.0,
     noise_spec: NoiseSamplingSpec | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
@@ -99,6 +100,7 @@ def apply_node_pipeline(
             generator,
             out_dim=total_dim,
             mechanism_logit_tilt=mechanism_logit_tilt,
+            function_family_mix=function_family_mix,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )
@@ -109,6 +111,7 @@ def apply_node_pipeline(
             generator,
             device,
             mechanism_logit_tilt=mechanism_logit_tilt,
+            function_family_mix=function_family_mix,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )
@@ -145,7 +148,10 @@ def apply_node_pipeline(
             if spec.cardinality is None:
                 raise ValueError(f"Missing cardinality for categorical spec: {spec.key}")
             x_prime, v = apply_categorical_converter(
-                view, generator, n_categories=int(spec.cardinality)
+                view,
+                generator,
+                n_categories=int(spec.cardinality),
+                function_family_mix=function_family_mix,
             )
             extracted[spec.key] = v
         elif spec.kind == "num":
@@ -153,7 +159,12 @@ def apply_node_pipeline(
             extracted[spec.key] = v
         elif spec.kind == "target_cls":
             cls = max(2, int(spec.cardinality or 2))
-            x_prime, v = apply_categorical_converter(view, generator, n_categories=cls)
+            x_prime, v = apply_categorical_converter(
+                view,
+                generator,
+                n_categories=cls,
+                function_family_mix=function_family_mix,
+            )
             extracted[spec.key] = v
         elif spec.kind == "target_reg":
             x_prime, v = apply_numeric_converter(view[:, :1], generator)

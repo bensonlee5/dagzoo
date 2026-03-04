@@ -3,6 +3,7 @@ import torch
 
 from dagsynth.functions.random_functions import (
     MechanismFamily,
+    _sample_function_family,
     _apply_tree,
     apply_random_function,
 )
@@ -79,3 +80,75 @@ def test_invalid_type_raises() -> None:
     x = torch.randn(32, 4, generator=g)
     with pytest.raises(ValueError, match="Unknown random function family"):
         apply_random_function(x, g, out_dim=2, function_type="bogus")  # type: ignore[arg-type]
+
+
+def test_sampled_family_respects_family_mix_allowlist() -> None:
+    g = _make_generator(3)
+    mix = {"linear": 1.0}
+    for _ in range(16):
+        sampled = _sample_function_family(
+            g,
+            mechanism_logit_tilt=0.9,
+            function_family_mix=mix,  # type: ignore[arg-type]
+        )
+        assert sampled == "linear"
+
+
+def test_sampled_family_skips_zero_probability_families_on_zero_draw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    g = _make_generator(33)
+    mix = {"linear": 1.0}
+    monkeypatch.setattr(torch, "rand", lambda *args, **kwargs: torch.tensor([0.0]))
+    sampled = _sample_function_family(
+        g,
+        mechanism_logit_tilt=0.9,
+        function_family_mix=mix,  # type: ignore[arg-type]
+    )
+    assert sampled == "linear"
+
+
+def test_disallowed_explicit_family_raises_when_mix_is_present() -> None:
+    g = _make_generator(4)
+    x = torch.randn(32, 4, generator=g)
+    with pytest.raises(ValueError, match="is not enabled by mechanism.function_family_mix"):
+        apply_random_function(
+            x,
+            g,
+            out_dim=2,
+            function_type="gp",
+            function_family_mix={"linear": 1.0},  # type: ignore[arg-type]
+        )
+
+
+def test_product_family_without_enabled_component_raises_when_mix_is_present() -> None:
+    g = _make_generator(5)
+    x = torch.randn(32, 4, generator=g)
+    with pytest.raises(ValueError, match="enables 'product' but disables all product component"):
+        apply_random_function(
+            x,
+            g,
+            out_dim=2,
+            function_type="product",
+            function_family_mix={"product": 1.0},  # type: ignore[arg-type]
+        )
+
+
+def test_deterministic_with_family_mix() -> None:
+    x = torch.randn(32, 4)
+    mix = {"nn": 0.5, "linear": 0.5}
+    y1 = apply_random_function(
+        x.clone(),
+        _make_generator(6),
+        out_dim=3,
+        mechanism_logit_tilt=0.7,
+        function_family_mix=mix,  # type: ignore[arg-type]
+    )
+    y2 = apply_random_function(
+        x.clone(),
+        _make_generator(6),
+        out_dim=3,
+        mechanism_logit_tilt=0.7,
+        function_family_mix=mix,  # type: ignore[arg-type]
+    )
+    torch.testing.assert_close(y1, y2)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 
+from dagsynth.core.layout_types import MechanismFamily
 from dagsynth.functions.random_functions import apply_random_function
 from dagsynth.math_utils import (
     log_uniform as _log_uniform,
@@ -28,6 +29,7 @@ def apply_categorical_converter(
     *,
     n_categories: int,
     method: str | None = None,
+    function_family_mix: dict[MechanismFamily, float] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Categorical converter in torch."""
     y = x.to(torch.float32)
@@ -88,9 +90,19 @@ def apply_categorical_converter(
     elif variant == "center_random_fn":
         if centers is not None:
             cvec = centers[labels % centers.shape[0]]
-            out = apply_random_function(cvec, generator, out_dim=d)
+            out = apply_random_function(
+                cvec,
+                generator,
+                out_dim=d,
+                function_family_mix=function_family_mix,
+            )
         else:
-            out = apply_random_function(y, generator, out_dim=d)
+            out = apply_random_function(
+                y,
+                generator,
+                out_dim=d,
+                function_family_mix=function_family_mix,
+            )
     elif variant == "softmax_points":
         z = torch.randn(c, d, generator=generator, device=device)
         out = z[labels % c]

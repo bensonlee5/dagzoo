@@ -55,7 +55,7 @@ ______________________________________________________________________
 
 `GeneratorConfig` validation is explicit and runs in three stages:
 
-1. Stage 1: field-level normalization and typing per section (`dataset`, `graph`, `shift`, `noise`, `runtime`, `output`, `diagnostics`, `benchmark`, `filter`)
+1. Stage 1: field-level normalization and typing per section (`dataset`, `graph`, `mechanism`, `shift`, `noise`, `runtime`, `output`, `diagnostics`, `benchmark`, `filter`)
 1. Stage 2: cross-field constraints (for example shift mode compatibility, missingness constraints, and min/max envelopes)
 1. Stage 3: post-override revalidation by re-running stage 1 + stage 2 through `GeneratorConfig.validate_generation_constraints()`
 

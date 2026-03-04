@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from dagsynth.core.layout_types import AggregationKind
+from dagsynth.core.layout_types import AggregationKind, MechanismFamily
 from dagsynth.functions.random_functions import apply_random_function
 from dagsynth.sampling.noise import NoiseSamplingSpec
 
@@ -36,6 +36,7 @@ def apply_multi_function(
     out_dim: int,
     aggregation_kind: AggregationKind | None = None,
     mechanism_logit_tilt: float = 0.0,
+    function_family_mix: dict[MechanismFamily, float] | None = None,
     noise_sigma_multiplier: float = 1.0,
     noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
@@ -54,6 +55,7 @@ def apply_multi_function(
             generator,
             out_dim=out_dim,
             mechanism_logit_tilt=mechanism_logit_tilt,
+            function_family_mix=function_family_mix,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )
@@ -65,6 +67,7 @@ def apply_multi_function(
             generator,
             out_dim=out_dim,
             mechanism_logit_tilt=mechanism_logit_tilt,
+            function_family_mix=function_family_mix,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )
@@ -75,6 +78,7 @@ def apply_multi_function(
             generator,
             out_dim=out_dim,
             mechanism_logit_tilt=mechanism_logit_tilt,
+            function_family_mix=function_family_mix,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )

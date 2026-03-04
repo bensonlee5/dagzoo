@@ -88,22 +88,57 @@ def mechanism_family_probabilities(
     *,
     mechanism_logit_tilt: float,
     families: tuple[MechanismFamily, ...] = MECHANISM_FAMILY_ORDER,
+    family_weights: dict[MechanismFamily, float] | None = None,
 ) -> dict[MechanismFamily, float]:
     """Resolve mechanism family probabilities for a given tilt value."""
 
     if not families:
         return {}
+
+    if family_weights is None:
+        base_weights = {family: 1.0 for family in families}
+    else:
+        base_weights = {}
+        for family in families:
+            raw = family_weights.get(family, 0.0)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise ValueError(
+                    f"mechanism family weight for '{family}' must be a finite number, got {raw!r}."
+                )
+            parsed = float(raw)
+            if not math.isfinite(parsed) or parsed < 0.0:
+                raise ValueError(
+                    f"mechanism family weight for '{family}' must be finite and >= 0, got {raw!r}."
+                )
+            base_weights[family] = parsed
+
+    positive_weights = {family: weight for family, weight in base_weights.items() if weight > 0.0}
+    if not positive_weights:
+        raise ValueError("mechanism family weights must include at least one positive family weight.")
+
+    total_base = float(sum(positive_weights.values()))
+    normalized_base = {
+        family: (positive_weights.get(family, 0.0) / total_base) for family in families
+    }
     if mechanism_logit_tilt <= 0.0:
-        uniform = 1.0 / float(len(families))
-        return {family: uniform for family in families}
+        return normalized_base
 
     centered_logits = centered_mechanism_family_logits(families)
-    scaled = [float(mechanism_logit_tilt * logit) for logit in centered_logits]
+    scaled = []
+    for family, centered in zip(families, centered_logits, strict=True):
+        weight = float(normalized_base[family])
+        if weight <= 0.0:
+            scaled.append(float("-inf"))
+        else:
+            scaled.append(float(math.log(weight) + (mechanism_logit_tilt * centered)))
+
     max_logit = max(scaled)
-    exp_vals = [math.exp(logit - max_logit) for logit in scaled]
+    exp_vals = [math.exp(logit - max_logit) if math.isfinite(logit) else 0.0 for logit in scaled]
     denom = sum(exp_vals)
+    if denom <= 0.0:
+        raise ValueError("mechanism family probabilities are ill-defined for the provided weights.")
     return {
-        family: (exp_val / denom if denom > 0.0 else 1.0 / float(len(families)))
+        family: (exp_val / denom)
         for family, exp_val in zip(families, exp_vals, strict=True)
     }
 
@@ -113,6 +148,7 @@ def mechanism_nonlinear_mass(
     mechanism_logit_tilt: float,
     families: tuple[MechanismFamily, ...] = MECHANISM_FAMILY_ORDER,
     nonlinear_families: tuple[MechanismFamily, ...] = NONLINEAR_MECHANISM_FAMILIES,
+    family_weights: dict[MechanismFamily, float] | None = None,
 ) -> float:
     """Return probability mass over nonlinear mechanism families."""
 
@@ -121,6 +157,7 @@ def mechanism_nonlinear_mass(
     probs = mechanism_family_probabilities(
         mechanism_logit_tilt=mechanism_logit_tilt,
         families=families,
+        family_weights=family_weights,
     )
     nonlinear_set = set(nonlinear_families)
     return float(sum(prob for family, prob in probs.items() if family in nonlinear_set))

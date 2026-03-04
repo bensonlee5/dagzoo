@@ -17,7 +17,7 @@ from dagsynth.core.generation_context import (
     _validate_class_split_for_layout,
 )
 from dagsynth.core.layout import _build_node_specs, _sample_layout
-from dagsynth.core.layout_types import LayoutPlan
+from dagsynth.core.layout_types import LayoutPlan, MechanismFamily
 from dagsynth.core.metadata import (
     _build_lineage_metadata,
     _build_shift_metadata,
@@ -85,6 +85,7 @@ def _generate_graph_dataset_torch(
     *,
     n_rows: int,
     mechanism_logit_tilt: float = 0.0,
+    function_family_mix: dict[MechanismFamily, float] | None = None,
     noise_sigma_multiplier: float = 1.0,
     noise_spec: NoiseSamplingSpec | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
@@ -125,6 +126,7 @@ def _generate_graph_dataset_torch(
             generator,
             device,
             mechanism_logit_tilt=mechanism_logit_tilt,
+            function_family_mix=function_family_mix,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )
@@ -223,6 +225,7 @@ def _generate_torch(
                 device,
                 n_rows=n_rows,
                 mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
+                function_family_mix=config.mechanism.function_family_mix,
                 noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
                 noise_spec=noise_spec,
             )
@@ -306,7 +309,10 @@ def _generate_torch(
                 n_classes_sampled=int(layout.n_classes),
             )
             n_classes = int(class_structure["n_classes_realized"])
-        shift_metadata = _build_shift_metadata(shift_params=shift_params)
+        shift_metadata = _build_shift_metadata(
+            shift_params=shift_params,
+            function_family_mix=config.mechanism.function_family_mix,
+        )
 
         metadata = {
             "backend": "torch",

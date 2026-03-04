@@ -17,6 +17,7 @@ from dagsynth.core.metric_constants import (
     resolve_task_from_metadata,
     validate_metric_shapes,
 )
+from dagsynth.core.layout_types import MechanismFamily
 from dagsynth.core.shift import mechanism_nonlinear_mass
 from dagsynth.filtering import apply_extra_trees_filter
 from dagsynth.math_utils import (
@@ -212,8 +213,28 @@ def _extract_shift_observability(metadata: dict[str, Any]) -> dict[str, float | 
             shift_payload.get("mechanism_logit_tilt"),
             default=shift_mechanism_scale,
         )
+        family_weights: dict[str, float] | None = None
+        config_payload = metadata.get("config")
+        if isinstance(config_payload, dict):
+            mechanism_payload = config_payload.get("mechanism")
+            if isinstance(mechanism_payload, dict):
+                raw_mix = mechanism_payload.get("function_family_mix")
+                if isinstance(raw_mix, dict):
+                    parsed_mix: dict[str, float] = {}
+                    for raw_key, raw_weight in raw_mix.items():
+                        if isinstance(raw_key, bool) or not isinstance(raw_key, str):
+                            continue
+                        if isinstance(raw_weight, bool) or not isinstance(raw_weight, (int, float)):
+                            continue
+                        weight = float(raw_weight)
+                        if not math.isfinite(weight) or weight <= 0.0:
+                            continue
+                        parsed_mix[raw_key.strip().lower()] = weight
+                    if parsed_mix:
+                        family_weights = parsed_mix
         shift_mechanism_nonlinear_mass = mechanism_nonlinear_mass(
-            mechanism_logit_tilt=mechanism_logit_tilt
+            mechanism_logit_tilt=mechanism_logit_tilt,
+            family_weights=cast(dict[MechanismFamily, float] | None, family_weights),
         )
     shift_mechanism_nonlinear_mass = min(1.0, max(0.0, shift_mechanism_nonlinear_mass))
 

@@ -2,6 +2,7 @@
 
 import torch
 
+from dagsynth.core.layout_types import MechanismFamily
 from dagsynth.functions.random_functions import apply_random_function
 from dagsynth.sampling.noise import NoiseSamplingSpec, sample_noise_from_spec
 from dagsynth.sampling.random_weights import sample_random_weights
@@ -62,6 +63,7 @@ def sample_random_points(
     device: str,
     *,
     mechanism_logit_tilt: float = 0.0,
+    function_family_mix: dict[MechanismFamily, float] | None = None,
     noise_sigma_multiplier: float = 1.0,
     noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
@@ -99,6 +101,7 @@ def sample_random_points(
         generator,
         out_dim=dim,
         mechanism_logit_tilt=mechanism_logit_tilt,
+        function_family_mix=function_family_mix,
         noise_sigma_multiplier=noise_sigma_multiplier,
         noise_spec=noise_spec,
     )

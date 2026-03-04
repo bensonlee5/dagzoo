@@ -74,8 +74,10 @@ flowchart LR
 - Operationally scalable: fixed-layout generation and benchmark guardrails
   support repeatable high-throughput workflows.
 
-For the precise runtime model and module-level walkthrough, see
-[docs/how-it-works.md](docs/how-it-works.md).
+Recommended first reads after this README:
+
+- [docs/how-it-works.md](docs/how-it-works.md): End-to-end runtime model and terminology.
+- [docs/development/transforms.md](docs/development/transforms.md): Formal transform math, notation, and operator definitions.
 
 ## Quick Start
 
@@ -132,9 +134,15 @@ dagsynth benchmark --help
 
 ## Documentation (End Users)
 
+Next reads for end users:
+
+- [docs/how-it-works.md](docs/how-it-works.md): System flow and terminology.
+- [docs/development/transforms.md](docs/development/transforms.md): Formal mathematical specification of transforms.
+
+Then explore features and workflows in the usage guide and feature docs:
+
 - [docs/usage-guide.md](docs/usage-guide.md): Primary workflow hub.
 - [docs/config-resolution.md](docs/config-resolution.md): Effective config precedence and trace artifacts.
-- [docs/how-it-works.md](docs/how-it-works.md): System flow and terminology.
 - [docs/output-format.md](docs/output-format.md): Output schema and artifacts.
 - Feature guides:
   [diagnostics](docs/features/diagnostics.md),

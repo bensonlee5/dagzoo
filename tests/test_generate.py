@@ -275,6 +275,19 @@ def test_generate_one_shift_metadata_matches_resolved_runtime_params() -> None:
     )
 
 
+def test_generate_one_shift_metadata_respects_mechanism_family_mix() -> None:
+    cfg = _tiny_regression_config()
+    cfg.shift.enabled = True
+    cfg.shift.mode = "mechanism_drift"
+    cfg.shift.mechanism_scale = 1.0
+    cfg.mechanism.function_family_mix = {"linear": 1.0}
+
+    bundle = generate_one(cfg, seed=18835, device="cpu")
+    shift_metadata = bundle.metadata["shift"]
+    assert shift_metadata["mechanism_nonlinear_mass"] == pytest.approx(0.0)
+    assert bundle.metadata["config"]["mechanism"]["function_family_mix"] == {"linear": 1.0}
+
+
 def test_generate_one_noise_metadata_emits_gaussian_defaults() -> None:
     cfg = _tiny_regression_config()
     cfg.noise.family = "gaussian"
@@ -370,8 +383,14 @@ def test_generate_one_shift_profiles_change_outputs_for_same_seed(
 
     bundle_base = generate_one(baseline, seed=2204, device="cpu")
     bundle_shifted = generate_one(shifted, seed=2204, device="cpu")
-    assert not torch.allclose(bundle_base.X_train, bundle_shifted.X_train)
-    assert not torch.allclose(bundle_base.X_test, bundle_shifted.X_test)
+    if bundle_base.X_train.shape == bundle_shifted.X_train.shape:
+        assert not torch.allclose(bundle_base.X_train, bundle_shifted.X_train)
+    else:
+        assert bundle_base.X_train.shape != bundle_shifted.X_train.shape
+    if bundle_base.X_test.shape == bundle_shifted.X_test.shape:
+        assert not torch.allclose(bundle_base.X_test, bundle_shifted.X_test)
+    else:
+        assert bundle_base.X_test.shape != bundle_shifted.X_test.shape
 
 
 @pytest.mark.parametrize(

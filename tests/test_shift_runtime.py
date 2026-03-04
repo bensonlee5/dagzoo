@@ -120,3 +120,45 @@ def test_mechanism_nonlinear_mass_matches_probability_sum() -> None:
     assert mechanism_nonlinear_mass(mechanism_logit_tilt=tilt) == pytest.approx(
         _nonlinear_mass(probs)
     )
+
+
+def test_mechanism_family_probabilities_respect_family_mix_hard_mask() -> None:
+    probs = mechanism_family_probabilities(
+        mechanism_logit_tilt=0.0,
+        family_weights={"nn": 0.7, "linear": 0.3},
+    )
+    assert probs["nn"] == pytest.approx(0.7)
+    assert probs["linear"] == pytest.approx(0.3)
+    for family in MECHANISM_FAMILY_ORDER:
+        if family not in {"nn", "linear"}:
+            assert probs[family] == pytest.approx(0.0)
+
+
+def test_mechanism_family_probabilities_tilt_reweights_within_mixed_support() -> None:
+    probs = mechanism_family_probabilities(
+        mechanism_logit_tilt=1.0,
+        family_weights={"nn": 0.5, "linear": 0.5},
+    )
+    assert probs["nn"] > probs["linear"]
+    for family in MECHANISM_FAMILY_ORDER:
+        if family not in {"nn", "linear"}:
+            assert probs[family] == pytest.approx(0.0)
+
+
+def test_mechanism_family_probabilities_reject_nonpositive_weight_support() -> None:
+    with pytest.raises(ValueError, match="must include at least one positive family weight"):
+        mechanism_family_probabilities(
+            mechanism_logit_tilt=0.0,
+            family_weights={"nn": 0.0},
+        )
+
+
+def test_mechanism_nonlinear_mass_respects_family_mix() -> None:
+    assert mechanism_nonlinear_mass(
+        mechanism_logit_tilt=1.0,
+        family_weights={"linear": 1.0},
+    ) == pytest.approx(0.0)
+    assert mechanism_nonlinear_mass(
+        mechanism_logit_tilt=1.0,
+        family_weights={"nn": 1.0},
+    ) == pytest.approx(1.0)

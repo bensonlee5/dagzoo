@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from dagsynth.core.layout_types import LayoutPlan
+from dagsynth.core.layout_types import LayoutPlan, MechanismFamily
 from dagsynth.core.shift import ShiftRuntimeParams, mechanism_nonlinear_mass
 from dagsynth.io.lineage_schema import (
     LINEAGE_SCHEMA_NAME,
@@ -51,11 +51,16 @@ def _build_lineage_metadata(
     return payload
 
 
-def _build_shift_metadata(*, shift_params: ShiftRuntimeParams) -> dict[str, Any]:
+def _build_shift_metadata(
+    *,
+    shift_params: ShiftRuntimeParams,
+    function_family_mix: dict[MechanismFamily, float] | None = None,
+) -> dict[str, Any]:
     """Build resolved shift metadata for one emitted dataset bundle."""
 
     nonlinear_mass = mechanism_nonlinear_mass(
-        mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt)
+        mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
+        family_weights=function_family_mix,
     )
     edge_odds_multiplier = float(math.exp(shift_params.edge_logit_bias_shift))
     noise_variance_multiplier = float(shift_params.variance_sigma_multiplier**2)

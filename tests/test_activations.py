@@ -41,3 +41,10 @@ def test_fixed_relu_sq_matches_relu_squared() -> None:
     expected = torch.square(torch.relu(x))
     torch.testing.assert_close(out, expected)
     assert torch.all(out >= 0.0)
+
+
+def test_fixed_swiglu_matches_identity_projection_definition() -> None:
+    x = torch.tensor([[-2.0, -0.5, 0.0, 1.5, 3.0]], dtype=torch.float32)
+    out = _fixed_activation(x, "swiglu")
+    expected = x * torch.nn.functional.silu(x)
+    torch.testing.assert_close(out, expected)

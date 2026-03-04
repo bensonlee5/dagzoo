@@ -18,6 +18,8 @@ dataset:
 graph:
   n_nodes_min: 2
   n_nodes_max: 32
+mechanism:
+  function_family_mix: null
 runtime:
   device: auto
   torch_dtype: float32

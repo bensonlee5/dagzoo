@@ -308,6 +308,7 @@ def _apply_product(
     generator: torch.Generator,
     *,
     mechanism_logit_tilt: float = 0.0,
+    function_family_mix: dict[MechanismFamily, float] | None = None,
     noise_sigma_multiplier: float = 1.0,
     noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
@@ -319,15 +320,24 @@ def _apply_product(
         "linear",
         "quadratic",
     )
-    idx_f = torch.randint(0, len(allowed), (1,), generator=generator).item()
-    idx_g = torch.randint(0, len(allowed), (1,), generator=generator).item()
+    eligible = list(allowed)
+    if function_family_mix is not None:
+        eligible = [family for family in allowed if float(function_family_mix.get(family, 0.0)) > 0.0]
+    if not eligible:
+        raise ValueError(
+            "mechanism.function_family_mix enables 'product' but disables all product component "
+            "families (tree, discretization, gp, linear, quadratic)."
+        )
+    idx_f = torch.randint(0, len(eligible), (1,), generator=generator).item()
+    idx_g = torch.randint(0, len(eligible), (1,), generator=generator).item()
 
     fx = apply_random_function(
         x,
         generator,
         out_dim=out_dim,
-        function_type=allowed[int(idx_f)],
+        function_type=eligible[int(idx_f)],
         mechanism_logit_tilt=mechanism_logit_tilt,
+        function_family_mix=function_family_mix,
         noise_sigma_multiplier=noise_sigma_multiplier,
         noise_spec=noise_spec,
     )
@@ -335,8 +345,9 @@ def _apply_product(
         x,
         generator,
         out_dim=out_dim,
-        function_type=allowed[int(idx_g)],
+        function_type=eligible[int(idx_g)],
         mechanism_logit_tilt=mechanism_logit_tilt,
+        function_family_mix=function_family_mix,
         noise_sigma_multiplier=noise_sigma_multiplier,
         noise_spec=noise_spec,
     )
@@ -344,25 +355,34 @@ def _apply_product(
 
 
 def _sample_function_family(
-    generator: torch.Generator, *, mechanism_logit_tilt: float
+    generator: torch.Generator,
+    *,
+    mechanism_logit_tilt: float,
+    function_family_mix: dict[MechanismFamily, float] | None = None,
 ) -> MechanismFamily:
     """Sample one function family with optional logit tilt."""
 
-    if mechanism_logit_tilt <= 0.0:
+    if mechanism_logit_tilt <= 0.0 and function_family_mix is None:
         idx = torch.randint(0, len(MECHANISM_FAMILY_ORDER), (1,), generator=generator).item()
         return MECHANISM_FAMILY_ORDER[int(idx)]
 
     probs_by_family = mechanism_family_probabilities(
         mechanism_logit_tilt=mechanism_logit_tilt,
         families=MECHANISM_FAMILY_ORDER,
+        family_weights=function_family_mix,
     )
+    positive_families = [
+        family for family in MECHANISM_FAMILY_ORDER if float(probs_by_family.get(family, 0.0)) > 0.0
+    ]
+    if not positive_families:
+        raise ValueError("No eligible mechanism families are available for sampling.")
     draw = float(torch.rand(1, generator=generator).item())
     cumulative = 0.0
-    for family in MECHANISM_FAMILY_ORDER:
+    for family in positive_families:
         cumulative += float(probs_by_family[family])
         if draw <= cumulative:
             return family
-    return MECHANISM_FAMILY_ORDER[-1]
+    return positive_families[-1]
 
 
 def apply_random_function(
@@ -372,6 +392,7 @@ def apply_random_function(
     out_dim: int | None = None,
     function_type: MechanismFamily | None = None,
     mechanism_logit_tilt: float = 0.0,
+    function_family_mix: dict[MechanismFamily, float] | None = None,
     noise_sigma_multiplier: float = 1.0,
     noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
@@ -387,6 +408,11 @@ def apply_random_function(
         function_type = _sample_function_family(
             generator,
             mechanism_logit_tilt=mechanism_logit_tilt,
+            function_family_mix=function_family_mix,
+        )
+    elif function_family_mix is not None and function_type not in function_family_mix:
+        raise ValueError(
+            f"Mechanism family '{function_type}' is not enabled by mechanism.function_family_mix."
         )
 
     if function_type == "nn":
@@ -445,6 +471,7 @@ def apply_random_function(
             dout,
             generator,
             mechanism_logit_tilt=mechanism_logit_tilt,
+            function_family_mix=function_family_mix,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )
