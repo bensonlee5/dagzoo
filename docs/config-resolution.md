@@ -17,6 +17,7 @@ ______________________________________________________________________
 1. Base YAML (`--config`)
 1. CLI device override (`--device`) -> `runtime.device`
 1. Hardware policy transforms (`--hardware-policy`)
+1. CLI rows override (`--rows`) -> `dataset.rows`
 1. Missingness CLI overrides:
    - `--missing-rate`
    - `--missing-mechanism`
@@ -26,6 +27,8 @@ ______________________________________________________________________
 1. Diagnostics CLI switch (`--diagnostics`) -> `diagnostics.enabled=true`
 
 After overrides are applied, staged generation validation runs. Invalid combinations fail fast.
+
+`dataset.rows` accepts fixed total rows (`1024`), ranges (`400..60000`), and CSV choices (`1024,2048,4096`).
 
 ______________________________________________________________________
 
@@ -48,6 +51,8 @@ Each preset in `dagzoo benchmark` resolves independently in this order:
 
 Runtime count overrides (`--num-datasets`, `--warmup`) are benchmark execution controls and do
 not mutate the preset effective config payload.
+
+`dagzoo benchmark` currently rejects configs that set `dataset.rows`; benchmark paths still require explicit split sizing (`dataset.n_train`/`dataset.n_test`).
 
 ______________________________________________________________________
 

@@ -110,6 +110,48 @@ def test_generate_cli_uses_default_config_without_noise_overrides(
     assert captured["called"] is True
 
 
+def test_generate_cli_applies_rows_override_no_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _stub_generate_batch_iter(
+        config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        captured["rows_spec"] = config.dataset.rows
+        _ = seed
+        _ = device
+        for _ in range(num_datasets):
+            yield object()
+
+    monkeypatch.setattr("dagzoo.cli.generate_batch_iter", _stub_generate_batch_iter)
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            "configs/default.yaml",
+            "--rows",
+            "400..60000",
+            "--num-datasets",
+            "1",
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
+            "--no-dataset-write",
+        ]
+    )
+    assert code == 0
+    rows_spec = captured["rows_spec"]
+    assert rows_spec is not None
+    assert rows_spec.mode == "range"
+    assert rows_spec.start == 400
+    assert rows_spec.stop == 60000
+
+
 def test_generate_cli_writes_resolution_trace_artifact_no_write(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -572,6 +614,28 @@ def test_generate_cli_rejects_invalid_missingness_combination() -> None:
                 "0.2",
                 "--missing-mechanism",
                 "none",
+                "--hardware-policy",
+                "none",
+                "--no-dataset-write",
+            ]
+        )
+    assert int(exc.value.code) == 2
+
+
+@pytest.mark.parametrize("rows_value", ["399", "60001", "2000..300", "1024,1024", "abc"])
+def test_generate_cli_rejects_invalid_rows_spec(rows_value: str) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                "configs/default.yaml",
+                "--rows",
+                rows_value,
+                "--num-datasets",
+                "1",
+                "--device",
+                "cpu",
                 "--hardware-policy",
                 "none",
                 "--no-dataset-write",
