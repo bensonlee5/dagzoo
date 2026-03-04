@@ -1,12 +1,17 @@
 {
-  "version": 1,
-  "suite": "smoke",
   "metrics": [
-    "datasets_per_minute"
+    "datasets_per_minute",
+    "generation_datasets_per_minute",
+    "write_datasets_per_minute",
+    "filter_datasets_per_minute"
   ],
   "presets": {
     "cpu": {
-      "datasets_per_minute": 200.0
+      "datasets_per_minute": 2635.101083048862,
+      "generation_datasets_per_minute": 2635.101083048862,
+      "write_datasets_per_minute": 10211.85337721164
     }
-  }
+  },
+  "suite": "smoke",
+  "version": 1
 }
