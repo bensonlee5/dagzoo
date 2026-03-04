@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 
+from dagzoo.functions._rng_helpers import rand_scalar, randint_scalar
 from dagzoo.math_utils import (
     log_uniform as _log_uniform,
     standardize as _standardize,
@@ -112,7 +113,7 @@ def _fixed_activation(x: torch.Tensor, name: str) -> torch.Tensor:
 def _param_activation(x: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
     """Apply one randomly parameterized activation family in torch."""
     choices = ["relu_pow", "signed_pow", "inv_pow", "poly"]
-    idx = torch.randint(0, len(choices), (1,), generator=generator).item()
+    idx = randint_scalar(0, len(choices), generator)
     choice = choices[int(idx)]
 
     if choice == "relu_pow":
@@ -125,7 +126,7 @@ def _param_activation(x: torch.Tensor, generator: torch.Generator) -> torch.Tens
         q = _log_uniform(generator, 0.1, 10.0, str(x.device))
         return torch.pow(torch.abs(x) + 1e-3, -q)
 
-    m = torch.randint(2, 6, (1,), generator=generator).item()
+    m = randint_scalar(2, 6, generator)
     return torch.pow(x, float(m))
 
 
@@ -146,15 +147,15 @@ def apply_random_activation(
     if with_standardize:
         y = _standardize(y)
         a = _log_uniform(generator, 1.0, 10.0, device)
-        row_idx = torch.randint(0, y.shape[0], (1,), generator=generator).item()
+        row_idx = randint_scalar(0, y.shape[0], generator)
         b = y[int(row_idx) : int(row_idx) + 1]
         y = a * (y - b)
 
-    if torch.rand(1, generator=generator).item() < parametric_prob:
+    if rand_scalar(generator) < parametric_prob:
         y = _param_activation(y, generator)
     else:
         fixed = fixed_activation_names()
-        idx = torch.randint(0, len(fixed), (1,), generator=generator).item()
+        idx = randint_scalar(0, len(fixed), generator)
         y = _fixed_activation(y, fixed[int(idx)])
 
     y = torch.nan_to_num(y, nan=0.0, posinf=1e6, neginf=-1e6)

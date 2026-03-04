@@ -234,7 +234,7 @@ def _generate_torch(
                 noise_spec=noise_spec,
             )
         except Exception as exc:
-            last_reason = f"generation_exception:{exc.__class__.__name__}"
+            last_reason = f"generation_exception:{exc.__class__.__name__}:{exc}"
             continue
 
         filter_meta = aux_meta.get("filter", {})
@@ -325,6 +325,12 @@ def _generate_torch(
             function_family_mix=config.mechanism.function_family_mix,
         )
 
+        config_payload = asdict(config)
+        dataset_payload = config_payload.get("dataset")
+        if isinstance(dataset_payload, dict):
+            dataset_payload["n_train"] = int(n_train)
+            dataset_payload["n_test"] = int(n_test)
+
         metadata = {
             "backend": "torch",
             "device": device,
@@ -356,7 +362,7 @@ def _generate_torch(
                     else None
                 ),
             },
-            "config": asdict(config),
+            "config": config_payload,
         }
         if missingness_summary is not None:
             metadata["missingness"] = missingness_summary
@@ -420,7 +426,7 @@ def _generate_one_seeded(
     manager = SeedManager(seed)
     layout_gen = manager.torch_rng("layout")
     layout = _sample_layout(config, layout_gen, "cpu")
-    n_train, n_test = _resolve_split_sizes(config)
+    n_train, n_test = _resolve_split_sizes(config, dataset_seed=seed)
     return _generate_one_with_resolved_layout(
         config,
         seed=seed,

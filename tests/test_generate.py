@@ -123,6 +123,36 @@ def test_generate_one_shapes() -> None:
     assert len(bundle.feature_types) == bundle.X_train.shape[1]
 
 
+def test_generate_one_uses_fixed_dataset_rows_and_updates_metadata_config_split() -> None:
+    cfg = _tiny_config()
+    cfg.dataset.rows = 1024  # type: ignore[assignment]
+    cfg.dataset.n_test = 256
+    cfg.dataset.n_train = 32
+
+    bundle = generate_one(cfg, seed=8, device="cpu")
+    assert int(bundle.X_train.shape[0]) == 768
+    assert int(bundle.X_test.shape[0]) == 256
+    assert int(bundle.metadata["config"]["dataset"]["n_train"]) == 768
+    assert int(bundle.metadata["config"]["dataset"]["n_test"]) == 256
+
+
+def test_generate_batch_rows_choices_are_seed_reproducible() -> None:
+    cfg = _tiny_config()
+    cfg.dataset.rows = [1024, 2048, 4096]  # type: ignore[assignment]
+    cfg.dataset.n_test = 256
+
+    batch_a = generate_batch(cfg, num_datasets=5, seed=19, device="cpu")
+    batch_b = generate_batch(cfg, num_datasets=5, seed=19, device="cpu")
+
+    allowed_train_sizes = {768, 1792, 3840}
+    for bundle_a, bundle_b in zip(batch_a, batch_b, strict=True):
+        assert int(bundle_a.X_train.shape[0]) in allowed_train_sizes
+        assert int(bundle_b.X_train.shape[0]) in allowed_train_sizes
+        assert int(bundle_a.X_train.shape[0]) == int(bundle_b.X_train.shape[0])
+        assert int(bundle_a.X_test.shape[0]) == 256
+        assert int(bundle_b.X_test.shape[0]) == 256
+
+
 def test_generate_one_emits_lineage_metadata_schema_fields() -> None:
     cfg = _tiny_config()
     bundle = generate_one(cfg, seed=11, device="cpu")
@@ -747,6 +777,25 @@ def test_generate_batch_iter_matches_batch_ordering() -> None:
     for a, b in zip(batch, streamed, strict=True):
         np.testing.assert_allclose(np.asarray(a.X_train), np.asarray(b.X_train), atol=1e-6)
         assert a.metadata["seed"] == b.metadata["seed"]
+
+
+def test_sample_fixed_layout_rejects_variable_rows_spec() -> None:
+    cfg = _tiny_regression_config()
+    cfg.dataset.rows = "400..60000"  # type: ignore[assignment]
+
+    with pytest.raises(ValueError, match=r"variable dataset\.rows"):
+        sample_fixed_layout(cfg, seed=90209, device="cpu")
+
+
+def test_sample_fixed_layout_accepts_fixed_rows_spec() -> None:
+    cfg = _tiny_regression_config()
+    cfg.dataset.rows = 1024  # type: ignore[assignment]
+    cfg.dataset.n_test = 256
+    cfg.dataset.n_train = 64
+
+    plan = sample_fixed_layout(cfg, seed=90208, device="cpu")
+    assert plan.n_train == 768
+    assert plan.n_test == 256
 
 
 def test_sample_fixed_layout_is_deterministic_for_seed() -> None:

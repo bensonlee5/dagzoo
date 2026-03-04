@@ -13,6 +13,7 @@ from dagzoo.core.config_resolution import (
     resolve_generate_config,
     serialize_resolution_events,
 )
+from dagzoo.hardware import HardwareInfo
 
 
 def test_resolve_generate_config_applies_cli_overrides() -> None:
@@ -20,6 +21,7 @@ def test_resolve_generate_config_applies_cli_overrides() -> None:
     resolved = resolve_generate_config(
         cfg,
         device_override="cpu",
+        rows=None,
         hardware_policy="none",
         missing_rate=0.2,
         missing_mechanism="mnar",
@@ -52,6 +54,29 @@ def test_resolve_generate_config_applies_cli_overrides() -> None:
     )
 
 
+def test_resolve_generate_config_applies_rows_override() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    resolved = resolve_generate_config(
+        cfg,
+        device_override="cpu",
+        rows="400..60000",
+        hardware_policy="none",
+        missing_rate=None,
+        missing_mechanism=None,
+        missing_mar_observed_fraction=None,
+        missing_mar_logit_scale=None,
+        missing_mnar_logit_scale=None,
+        diagnostics_enabled=False,
+    )
+    assert resolved.config.dataset.rows is not None
+    assert resolved.config.dataset.rows.mode == "range"
+    assert resolved.config.dataset.rows.start == 400
+    assert resolved.config.dataset.rows.stop == 60000
+
+    trace = serialize_resolution_events(resolved.trace_events)
+    assert any(event["path"] == "dataset.rows" and event["source"] == "cli.rows" for event in trace)
+
+
 def test_resolve_generate_config_rejects_invalid_missingness_combination() -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     with pytest.raises(
@@ -61,6 +86,7 @@ def test_resolve_generate_config_rejects_invalid_missingness_combination() -> No
         resolve_generate_config(
             cfg,
             device_override="cpu",
+            rows=None,
             hardware_policy="none",
             missing_rate=0.2,
             missing_mechanism="none",
@@ -78,6 +104,7 @@ def test_resolve_generate_config_treats_null_runtime_device_as_auto() -> None:
     resolved = resolve_generate_config(
         cfg,
         device_override=None,
+        rows=None,
         hardware_policy="none",
         missing_rate=None,
         missing_mechanism=None,
@@ -89,6 +116,43 @@ def test_resolve_generate_config_treats_null_runtime_device_as_auto() -> None:
 
     assert resolved.requested_device == "auto"
     assert resolved.config.runtime.device == "auto"
+
+
+def test_resolve_generate_config_applies_rows_override_after_policy_revalidation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "dagzoo.core.config_resolution.detect_hardware",
+        lambda _requested_device: HardwareInfo(
+            backend="cuda",
+            requested_device="cuda",
+            device_name="NVIDIA H100 SXM",
+            total_memory_gb=80.0,
+            peak_flops=989e12,
+            tier="cuda_h100",
+        ),
+    )
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.dataset.rows = "400..60000"  # type: ignore[assignment]
+
+    resolved = resolve_generate_config(
+        cfg,
+        device_override="cuda",
+        rows="2000..60000",
+        hardware_policy="cuda_tiered_v1",
+        missing_rate=None,
+        missing_mechanism=None,
+        missing_mar_observed_fraction=None,
+        missing_mar_logit_scale=None,
+        missing_mnar_logit_scale=None,
+        diagnostics_enabled=False,
+    )
+
+    assert resolved.config.dataset.rows is not None
+    assert resolved.config.dataset.rows.mode == "range"
+    assert resolved.config.dataset.rows.start == 2000
+    assert resolved.config.dataset.rows.stop == 60000
+    assert resolved.config.dataset.n_test == 1024
 
 
 def test_resolve_benchmark_preset_config_applies_smoke_caps() -> None:
@@ -186,5 +250,48 @@ def test_resolve_benchmark_preset_config_requires_smoke_caps_for_smoke_suite() -
             preset_device="cpu",
             suite="smoke",
             hardware_policy="none",
+            smoke_caps=None,
+        )
+
+
+def test_resolve_benchmark_preset_config_rejects_dataset_rows() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/benchmark_cpu.yaml")
+    cfg.dataset.rows = "400..60000"  # type: ignore[assignment]
+
+    with pytest.raises(ValueError, match=r"does not support dataset\.rows"):
+        resolve_benchmark_preset_config(
+            preset_key="cpu",
+            config=cfg,
+            preset_device="cpu",
+            suite="standard",
+            hardware_policy="none",
+            smoke_caps=None,
+        )
+
+
+def test_resolve_benchmark_preset_config_rejects_dataset_rows_before_policy_transform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "dagzoo.core.config_resolution.detect_hardware",
+        lambda _requested_device: HardwareInfo(
+            backend="cuda",
+            requested_device="cuda",
+            device_name="NVIDIA H100 SXM",
+            total_memory_gb=80.0,
+            peak_flops=989e12,
+            tier="cuda_h100",
+        ),
+    )
+    cfg = GeneratorConfig.from_yaml("configs/benchmark_cpu.yaml")
+    cfg.dataset.rows = "400..60000"  # type: ignore[assignment]
+
+    with pytest.raises(ValueError, match=r"does not support dataset\.rows"):
+        resolve_benchmark_preset_config(
+            preset_key="cpu",
+            config=cfg,
+            preset_device="cuda",
+            suite="standard",
+            hardware_policy="cuda_tiered_v1",
             smoke_caps=None,
         )

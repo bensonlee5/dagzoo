@@ -5,6 +5,7 @@ from __future__ import annotations
 import torch
 
 from dagzoo.core.layout_types import AggregationKind, MechanismFamily
+from dagzoo.functions._rng_helpers import rand_scalar, randint_scalar
 from dagzoo.functions.random_functions import apply_random_function
 from dagzoo.sampling.noise import NoiseSamplingSpec
 
@@ -60,7 +61,7 @@ def apply_multi_function(
             noise_spec=noise_spec,
         )
 
-    if torch.rand(1, generator=generator).item() < 0.5:
+    if rand_scalar(generator) < 0.5:
         concat = torch.cat(inputs, dim=1)
         return apply_random_function(
             concat,
@@ -88,6 +89,6 @@ def apply_multi_function(
 
     resolved_aggregation_kind = aggregation_kind
     if resolved_aggregation_kind is None:
-        idx = torch.randint(0, len(_AGGREGATION_KIND_ORDER), (1,), generator=generator).item()
+        idx = randint_scalar(0, len(_AGGREGATION_KIND_ORDER), generator)
         resolved_aggregation_kind = _AGGREGATION_KIND_ORDER[int(idx)]
     return _aggregate_parent_outputs(stacked, aggregation_kind=resolved_aggregation_kind)

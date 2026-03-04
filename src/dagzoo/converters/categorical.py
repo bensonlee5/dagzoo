@@ -5,6 +5,7 @@ from __future__ import annotations
 import torch
 
 from dagzoo.core.layout_types import MechanismFamily
+from dagzoo.functions._rng_helpers import randint_scalar
 from dagzoo.functions.random_functions import apply_random_function
 from dagzoo.math_utils import (
     log_uniform as _log_uniform,
@@ -40,7 +41,7 @@ def apply_categorical_converter(
     c = max(2, int(n_categories))
 
     # Sample joint variant
-    idx_joint = torch.randint(0, len(_JOINT_VARIANTS), (1,), generator=generator).item()
+    idx_joint = randint_scalar(0, len(_JOINT_VARIANTS), generator)
     selected_method, variant = _JOINT_VARIANTS[int(idx_joint)]
     if method is not None:
         selected_method = str(method).strip().lower()

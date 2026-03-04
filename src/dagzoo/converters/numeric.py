@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 
+from dagzoo.functions._rng_helpers import rand_scalar
 from dagzoo.math_utils import log_uniform as _log_uniform
 
 
@@ -24,7 +25,7 @@ def apply_numeric_converter(
         y = y.unsqueeze(1)
 
     v = y[:, 0].clone()
-    if torch.rand(1, generator=generator).item() < 0.5:
+    if rand_scalar(generator) < 0.5:
         return y, v
 
     device = str(y.device)

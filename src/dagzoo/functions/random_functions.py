@@ -9,6 +9,7 @@ import torch
 from dagzoo.core.layout_types import MechanismFamily
 from dagzoo.core.shift import MECHANISM_FAMILY_ORDER, mechanism_family_probabilities
 from dagzoo.core.trees import compute_odt_leaf_indices, sample_odt_splits
+from dagzoo.functions._rng_helpers import rand_scalar, randint_scalar
 from dagzoo.functions.activations import apply_random_activation
 from dagzoo.linalg.random_matrices import sample_random_matrix
 from dagzoo.math_utils import (
@@ -86,7 +87,7 @@ def _apply_nn(
     noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
     """Apply a shallow random NN in torch."""
-    n_layers = torch.randint(1, 4, (1,), generator=generator).item()
+    n_layers = randint_scalar(1, 4, generator)
     hidden = int(_log_uniform(generator, 1.0, 127.0, str(x.device)))
     widths = [x.shape[1]]
     for _ in range(max(0, int(n_layers) - 1)):
@@ -94,7 +95,7 @@ def _apply_nn(
     widths.append(out_dim)
 
     y = x
-    if torch.rand(1, generator=generator).item() < 0.5:
+    if rand_scalar(generator) < 0.5:
         y = apply_random_activation(y, generator)
 
     for din, dout in zip(widths[:-1], widths[1:], strict=True):
@@ -110,7 +111,7 @@ def _apply_nn(
         if dout != out_dim:
             y = apply_random_activation(y, generator)
 
-    if torch.rand(1, generator=generator).item() < 0.5:
+    if rand_scalar(generator) < 0.5:
         y = apply_random_activation(y, generator)
     return y
 
@@ -137,7 +138,7 @@ def _apply_tree(
             probs = torch.ones_like(std) / max(1, len(std))
 
     for _ in range(max(1, n_trees)):
-        depth = int(torch.randint(1, 8, (1,), generator=generator).item())
+        depth = int(randint_scalar(1, 8, generator))
         split_dims, thresholds = sample_odt_splits(x, depth, generator, feature_probs=probs)
         leaf_idx = compute_odt_leaf_indices(x, split_dims, thresholds)
 
@@ -207,7 +208,7 @@ def _apply_gp(
     device = str(x.device)
     a = _log_uniform(generator, 2.0, 20.0, device)
 
-    if torch.rand(1, generator=generator).item() < 0.5:
+    if rand_scalar(generator) < 0.5:
         r = _sample_radial_ha(p * din, generator, device, a=a).view(p, din)
         s = torch.where(
             torch.empty(p, din, device=device).uniform_(0, 1, generator=generator) < 0.5,
@@ -330,8 +331,8 @@ def _apply_product(
             "mechanism.function_family_mix enables 'product' but disables all product component "
             "families (tree, discretization, gp, linear, quadratic)."
         )
-    idx_f = torch.randint(0, len(eligible), (1,), generator=generator).item()
-    idx_g = torch.randint(0, len(eligible), (1,), generator=generator).item()
+    idx_f = randint_scalar(0, len(eligible), generator)
+    idx_g = randint_scalar(0, len(eligible), generator)
 
     fx = apply_random_function(
         x,
@@ -365,7 +366,7 @@ def _sample_function_family(
     """Sample one function family with optional logit tilt."""
 
     if mechanism_logit_tilt <= 0.0 and function_family_mix is None:
-        idx = torch.randint(0, len(MECHANISM_FAMILY_ORDER), (1,), generator=generator).item()
+        idx = randint_scalar(0, len(MECHANISM_FAMILY_ORDER), generator)
         return MECHANISM_FAMILY_ORDER[int(idx)]
 
     probs_by_family = mechanism_family_probabilities(
@@ -378,7 +379,7 @@ def _sample_function_family(
     ]
     if not positive_families:
         raise ValueError("No eligible mechanism families are available for sampling.")
-    draw = float(torch.rand(1, generator=generator).item())
+    draw = float(rand_scalar(generator))
     cumulative = 0.0
     for family in positive_families:
         cumulative += float(probs_by_family[family])

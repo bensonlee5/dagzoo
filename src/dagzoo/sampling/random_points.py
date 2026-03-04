@@ -3,6 +3,7 @@
 import torch
 
 from dagzoo.core.layout_types import MechanismFamily
+from dagzoo.functions._rng_helpers import randint_scalar
 from dagzoo.functions.random_functions import apply_random_function
 from dagzoo.sampling.noise import NoiseSamplingSpec, sample_noise_from_spec
 from dagzoo.sampling.random_weights import sample_random_weights
@@ -72,7 +73,7 @@ def sample_random_points(
         raise ValueError(f"n_rows and dim must be > 0. Got n_rows={n_rows}, dim={dim}")
 
     kinds = ["normal", "uniform", "unit_ball", "normal_cov"]
-    idx = torch.randint(0, len(kinds), (1,), generator=generator).item()
+    idx = randint_scalar(0, len(kinds), generator)
     base_kind = kinds[int(idx)]
 
     if base_kind == "normal":

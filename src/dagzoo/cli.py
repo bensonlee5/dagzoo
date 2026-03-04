@@ -223,6 +223,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Optional override for run seed in [{SEED32_MIN}, {SEED32_MAX}].",
     )
     g.add_argument(
+        "--rows",
+        default=None,
+        help=(
+            "Optional total-row spec override for generation. "
+            "Supports fixed int (e.g. 1024), range (e.g. 400..60000), "
+            "or CSV choices (e.g. 1024,2048,4096)."
+        ),
+    )
+    g.add_argument(
         "--device",
         default=None,
         choices=DEVICE_CHOICES,
@@ -602,6 +611,7 @@ def _run_generate(args: argparse.Namespace) -> int:
         resolved = resolve_generate_config(
             config,
             device_override=args.device,
+            rows=args.rows,
             hardware_policy=str(args.hardware_policy),
             missing_rate=args.missing_rate,
             missing_mechanism=args.missing_mechanism,

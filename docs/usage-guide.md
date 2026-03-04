@@ -37,7 +37,27 @@ under the resolved output directory.
 
 ______________________________________________________________________
 
-## 2. Diagnostics
+## 2. Total-row control (`dataset.rows` / `--rows`)
+
+Use `dataset.rows` (or CLI `--rows`) to control total rows with one field:
+
+```bash
+dagzoo generate --config configs/default.yaml --rows 1024 --num-datasets 10 --out data/run_rows_fixed
+dagzoo generate --config configs/default.yaml --rows 400..60000 --num-datasets 25 --no-dataset-write
+dagzoo generate --config configs/default.yaml --rows 1024,2048,4096 --num-datasets 25 --no-dataset-write
+```
+
+When rows mode is active, `dataset.n_test` stays fixed and `n_train` is derived as:
+`n_train = total_rows - n_test`.
+
+Historical curriculum shell workflows are retired. To migrate prior train-row stages:
+
+- old train range `A..B` with fixed `n_test=T` -> new total-row range `(A+T)..(B+T)`
+- old train choices `a,b,c` with fixed `n_test=T` -> new total-row choices `(a+T),(b+T),(c+T)`
+
+______________________________________________________________________
+
+## 3. Diagnostics
 
 Use diagnostics to emit per-dataset observability artifacts.
 
@@ -55,7 +75,7 @@ Detailed guides:
 
 ______________________________________________________________________
 
-## 3. Fixed-layout batch generation (Python API)
+## 4. Fixed-layout batch generation (Python API)
 
 Use a fixed layout plan when you want many datasets with consistent structure
 and aligned emitted columns across the batch.
@@ -78,7 +98,7 @@ raises and asks you to resample the plan.
 
 ______________________________________________________________________
 
-## 4. Missingness workflows
+## 5. Missingness workflows
 
 Use missingness workflows for MCAR/MAR/MNAR robustness regimes:
 
@@ -90,7 +110,7 @@ Detailed guide: [Missingness](features/missingness.md)
 
 ______________________________________________________________________
 
-## 5. Many-class workflows
+## 6. Many-class workflows
 
 Use many-class workflows to exercise the rollout envelope (`n_classes_max <= 32`).
 
@@ -109,7 +129,7 @@ Detailed guide: [Many-class](features/many-class.md)
 
 ______________________________________________________________________
 
-## 6. Shift workflows
+## 7. Shift workflows
 
 Use shift profiles for controlled graph/mechanism/noise drift:
 
@@ -121,7 +141,7 @@ Detailed guide: [Shift / Drift](features/shift.md)
 
 ______________________________________________________________________
 
-## 7. Noise workflows
+## 8. Noise workflows
 
 Use noise workflows for explicit Gaussian/Laplace/Student-t/mixture regimes:
 
@@ -133,7 +153,7 @@ Detailed guide: [Noise Diversification](features/noise.md)
 
 ______________________________________________________________________
 
-## 8. Benchmark workflows and guardrails
+## 9. Benchmark workflows and guardrails
 
 Use benchmark workflows for smoke checks, feature guardrails, and regression
 gating.
