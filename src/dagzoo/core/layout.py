@@ -7,6 +7,7 @@ import math
 import torch
 
 from dagzoo.config import GeneratorConfig
+from dagzoo.functions._rng_helpers import randint_scalar
 from dagzoo.core.layout_types import FeatureType, LayoutPlan
 from dagzoo.core.node_pipeline import ConverterSpec
 from dagzoo.graph import dag_edge_density, dag_longest_path_nodes, sample_dag
@@ -44,7 +45,7 @@ def _sample_assignments(
 ) -> list[int]:
     """Assign columns to a random eligible subset of graph nodes."""
 
-    eligible_count = int(torch.randint(1, n_nodes + 1, (1,), generator=generator).item())
+    eligible_count = int(randint_scalar(1, n_nodes + 1, generator))
     all_nodes = torch.randperm(n_nodes, generator=generator, device=device)
     eligible_nodes = all_nodes[:eligible_count]
     # Sample with replacement from eligible nodes
@@ -182,7 +183,7 @@ def _build_node_specs(
         if feature_types[feature_index] == "cat":
             cardinality = int(card_by_feature[feature_index])
             if cardinality > 2 and torch.empty(1).uniform_(0, 1, generator=generator).item() >= 0.5:
-                output_dim = int(torch.randint(1, cardinality, (1,), generator=generator).item())
+                output_dim = int(randint_scalar(1, cardinality, generator))
             else:
                 output_dim = cardinality
             specs.append(

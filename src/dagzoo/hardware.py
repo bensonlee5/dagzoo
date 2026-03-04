@@ -55,6 +55,7 @@ def get_peak_flops(device_name: str) -> float:
         (["5090"], 209.5e12),
         (["4090"], 165.2e12),
         (["3090"], 71e12),
+        (["3060"], 25.4e12),
     )
     for patterns, flops in peak_flops_table:
         if all(p in name for p in patterns):

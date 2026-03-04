@@ -230,7 +230,7 @@ def _generate_torch(
                 noise_spec=noise_spec,
             )
         except Exception as exc:
-            last_reason = f"generation_exception:{exc.__class__.__name__}"
+            last_reason = f"generation_exception:{exc.__class__.__name__}:{exc}"
             continue
         if not bool(aux_meta.get("accepted", True)):
             last_reason = "filtered_out"

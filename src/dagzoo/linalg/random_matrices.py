@@ -6,6 +6,7 @@ import math
 
 import torch
 
+from dagzoo.functions._rng_helpers import randint_scalar
 from dagzoo.functions.activations import apply_random_activation
 from dagzoo.math_utils import log_uniform as _log_uniform
 from dagzoo.sampling.noise import NoiseSamplingSpec, sample_noise_from_spec
@@ -148,7 +149,7 @@ def sample_random_matrix(
 
     kinds = ["gaussian", "weights", "singular_values", "kernel", "activation"]
     if kind is None:
-        idx = torch.randint(0, len(kinds), (1,), generator=generator).item()
+        idx = randint_scalar(0, len(kinds), generator)
         kind = kinds[int(idx)]
 
     if kind == "gaussian":
@@ -175,7 +176,7 @@ def sample_random_matrix(
         m = _sample_kernel_matrix(out_dim, in_dim, generator, device, noise_spec=noise_spec)
     elif kind == "activation":
         other_kinds = ["gaussian", "weights", "singular_values", "kernel"]
-        idx = torch.randint(0, len(other_kinds), (1,), generator=generator).item()
+        idx = randint_scalar(0, len(other_kinds), generator)
         m = sample_random_matrix(
             out_dim,
             in_dim,
