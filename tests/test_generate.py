@@ -940,6 +940,35 @@ def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch)
     assert float(bundle.metadata["filter"]["threshold_effective"]) == pytest.approx(0.80)
     assert called["n_jobs"] == int(cfg.filter.n_jobs)
     assert "reason" not in bundle.metadata["filter"]
+    attempts = bundle.metadata["generation_attempts"]
+    assert attempts["total_attempts"] >= 1
+    assert attempts["retry_count"] == int(attempts["total_attempts"]) - 1
+    assert attempts["filter_attempts"] >= 1
+    assert attempts["filter_rejections"] == 0
+    assert float(attempts["filter_rejection_rate"]) == pytest.approx(0.0)
+
+
+def test_generation_attempt_metadata_tracks_filter_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"count": 0}
+
+    def _stub_filter(*_args, **_kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return False, {"wins_ratio": 0.0, "n_valid_oob": 128}
+        return True, {"wins_ratio": 1.0, "n_valid_oob": 128}
+
+    monkeypatch.setattr("dagzoo.core.generation_engine.apply_extra_trees_filter", _stub_filter)
+    cfg = _tiny_config()
+    cfg.filter.enabled = True
+    cfg.filter.max_attempts = 3
+
+    bundle = generate_one(cfg, seed=1122, device="cpu")
+    attempts = bundle.metadata["generation_attempts"]
+    assert attempts["total_attempts"] == 2
+    assert attempts["retry_count"] == 1
+    assert attempts["filter_attempts"] == 2
+    assert attempts["filter_rejections"] == 1
+    assert float(attempts["filter_rejection_rate"]) == pytest.approx(0.5)
 
 
 def test_auto_retries_on_cpu_when_mps_fails(monkeypatch: pytest.MonkeyPatch) -> None:

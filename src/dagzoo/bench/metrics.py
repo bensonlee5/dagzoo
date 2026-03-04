@@ -12,7 +12,15 @@ from dagzoo.bench.constants import MILLISECONDS_PER_SECOND
 from dagzoo.math_utils import to_numpy as _to_numpy
 from dagzoo.types import DatasetBundle
 
-HIGHER_IS_BETTER_METRICS = frozenset({"datasets_per_second", "datasets_per_minute"})
+HIGHER_IS_BETTER_METRICS = frozenset(
+    {
+        "datasets_per_second",
+        "datasets_per_minute",
+        "generation_datasets_per_minute",
+        "write_datasets_per_minute",
+        "filter_datasets_per_minute",
+    }
+)
 LOWER_IS_BETTER_METRICS = frozenset(
     {
         "elapsed_seconds",
@@ -21,6 +29,10 @@ LOWER_IS_BETTER_METRICS = frozenset(
         "peak_rss_mb",
         "peak_cuda_allocated_mb",
         "peak_cuda_reserved_mb",
+        "filter_rejection_rate_attempt_level",
+        "filter_retry_dataset_rate",
+        "retry_dataset_rate",
+        "mean_attempts_per_dataset",
     }
 )
 

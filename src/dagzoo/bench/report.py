@@ -30,12 +30,22 @@ def _format_float(value: Any, digits: int = 3) -> str:
     return f"{float(value):.{digits}f}"
 
 
+def _format_percent(value: Any, digits: int = 2) -> str:
+    """Render fractional values as percentages for markdown tables."""
+
+    if not isinstance(value, (int, float)):
+        return "-"
+    if not math.isfinite(float(value)):
+        return "-"
+    return f"{float(value) * 100.0:.{digits}f}"
+
+
 def _build_preset_table(preset_results: list[dict[str, Any]]) -> list[str]:
     """Create a markdown table summarizing per-preset performance metrics."""
 
     lines = [
-        "| Preset | Device | Backend | Datasets/min | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) | Diagnostics | Missingness | Lineage | Shift | Noise |",
-        "|---|---|---:|---:|---:|---:|---:|---|---|---|---|---|",
+        "| Preset | Device | Backend | Datasets/min | Gen/min | Write/min | Filter/min | Filter Reject % (attempt) | Filter Retry % (dataset) | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) | Diagnostics | Missingness | Lineage | Shift | Noise |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
     ]
     for result in preset_results:
         diagnostics_state = "on" if bool(result.get("diagnostics_enabled")) else "off"
@@ -61,6 +71,11 @@ def _build_preset_table(preset_results: list[dict[str, Any]]) -> list[str]:
             f"{result.get('device', '-')} | "
             f"{result.get('hardware_backend', '-')} | "
             f"{_format_float(result.get('datasets_per_minute'), 2)} | "
+            f"{_format_float(result.get('generation_datasets_per_minute'), 2)} | "
+            f"{_format_float(result.get('write_datasets_per_minute'), 2)} | "
+            f"{_format_float(result.get('filter_datasets_per_minute'), 2)} | "
+            f"{_format_percent(result.get('filter_rejection_rate_attempt_level'), 2)} | "
+            f"{_format_percent(result.get('filter_retry_dataset_rate'), 2)} | "
             f"{_format_float(result.get('elapsed_seconds'), 3)} | "
             f"{_format_float(result.get('latency_p95_ms'), 2)} | "
             f"{_format_float(result.get('peak_rss_mb'), 2)} | "

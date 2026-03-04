@@ -43,3 +43,26 @@ def test_compare_summary_warn_and_fail() -> None:
     )
     assert fail_result["status"] == "fail"
     assert fail_result["issues"][0]["severity"] == "fail"
+
+
+def test_build_baseline_payload_defaults_include_stage_throughput_metrics() -> None:
+    summary = {
+        "suite": "standard",
+        "preset_results": [
+            {
+                "preset_key": "cpu",
+                "datasets_per_minute": 100.0,
+                "generation_datasets_per_minute": 110.0,
+                "write_datasets_per_minute": 90.0,
+                "filter_datasets_per_minute": 80.0,
+            }
+        ],
+    }
+    payload = build_baseline_payload(summary)
+    assert payload["metrics"] == [
+        "datasets_per_minute",
+        "generation_datasets_per_minute",
+        "write_datasets_per_minute",
+        "filter_datasets_per_minute",
+    ]
+    assert payload["presets"]["cpu"]["generation_datasets_per_minute"] == 110.0

@@ -49,6 +49,7 @@ from dagzoo.bench.collectors import (
     _MissingnessAcceptanceCollector,
     _NoiseGuardrailCollector,
     _ShiftGuardrailCollector,
+    _ThroughputPressureCollector,
     _compose_bundle_callback,
 )
 from dagzoo.bench.guardrails import (
@@ -60,6 +61,11 @@ from dagzoo.bench.guardrails import (
     _status_from_issues,
 )
 from dagzoo.bench.throughput import run_throughput_benchmark
+from dagzoo.bench.stage_metrics import (
+    StageSampleCollector,
+    measure_filter_datasets_per_minute,
+    measure_write_datasets_per_minute,
+)
 from dagzoo.config import (
     GeneratorConfig,
     MISSINGNESS_MECHANISM_NONE,
@@ -82,6 +88,7 @@ from dagzoo.diagnostics_targets import (
     build_diagnostics_aggregation_config,
 )
 from dagzoo.rng import SeedManager, offset_seed32
+from dagzoo.types import DatasetBundle
 
 
 DEFAULT_PRESET_CONFIGS: dict[str, str] = {
@@ -359,13 +366,23 @@ def run_preset_benchmark(
         if noise_enabled
         else None
     )
+    throughput_pressure = _ThroughputPressureCollector()
+    stage_sample_collector = StageSampleCollector(
+        max_samples=_latency_sample_count(config, suite, num_datasets)
+    )
 
-    on_bundle_callback = _compose_bundle_callback(
+    composed_on_bundle_callback = _compose_bundle_callback(
         diagnostics_aggregator=diagnostics_aggregator,
         missingness_acceptance=missingness_acceptance,
         shift_guardrails=shift_guardrails,
         noise_guardrails=noise_guardrails,
+        throughput_pressure=throughput_pressure,
     )
+
+    def on_bundle_callback(bundle: DatasetBundle) -> None:
+        stage_sample_collector.update(bundle)
+        if composed_on_bundle_callback is not None:
+            composed_on_bundle_callback(bundle)
 
     result = run_throughput_benchmark(
         config,
@@ -374,6 +391,26 @@ def run_preset_benchmark(
         device=requested_device,
         on_bundle=on_bundle_callback,
     )
+    sampled_bundles = stage_sample_collector.bundles
+    write_dpm = (
+        measure_write_datasets_per_minute(sampled_bundles, config=config)
+        if sampled_bundles
+        else 0.0
+    )
+    filter_stage_enabled = bool(config.filter.enabled)
+    filter_dpm: float | None
+    if filter_stage_enabled:
+        filter_dpm = (
+            measure_filter_datasets_per_minute(sampled_bundles, config=config)
+            if sampled_bundles
+            else 0.0
+        )
+    else:
+        filter_dpm = None
+    throughput_pressure_summary = throughput_pressure.build_summary()
+    generation_dpm = float(result.get("datasets_per_minute", 0.0))
+    mean_attempts_per_dataset = float(throughput_pressure_summary["attempts_per_dataset_mean"])
+
     result["preset_key"] = spec.key
     result["suite"] = suite
     result["device"] = requested_device
@@ -387,6 +424,26 @@ def run_preset_benchmark(
     result["effective_config_trace"] = serialize_resolution_events(resolved_preset.trace_events)
     result["diagnostics_enabled"] = diagnostics_enabled
     result["diagnostics_artifacts"] = None
+    result["generation_datasets_per_minute"] = generation_dpm
+    result["write_datasets_per_minute"] = float(write_dpm)
+    result["filter_datasets_per_minute"] = float(filter_dpm) if filter_dpm is not None else None
+    result["stage_sample_datasets"] = int(len(sampled_bundles))
+    result["filter_stage_enabled"] = filter_stage_enabled
+    result["accepted_datasets_measured"] = int(throughput_pressure_summary["datasets_seen"])
+    result["total_attempts"] = int(throughput_pressure_summary["attempts_total"])
+    result["mean_attempts_per_dataset"] = mean_attempts_per_dataset
+    result["retry_dataset_count"] = int(throughput_pressure_summary["retry_dataset_count"])
+    result["retry_dataset_rate"] = throughput_pressure_summary["retry_dataset_rate"]
+    result["filter_attempts_total"] = int(throughput_pressure_summary["filter_attempts_total"])
+    result["filter_rejections_total"] = int(throughput_pressure_summary["filter_rejections_total"])
+    result["filter_rejection_rate_attempt_level"] = throughput_pressure_summary[
+        "filter_rejection_rate_attempt_level"
+    ]
+    result["filter_retry_dataset_count"] = int(
+        throughput_pressure_summary["filter_retry_dataset_count"]
+    )
+    result["filter_retry_dataset_rate"] = throughput_pressure_summary["filter_retry_dataset_rate"]
+    result["estimated_attempts_per_minute"] = generation_dpm * mean_attempts_per_dataset
     result["missingness_guardrails"] = {"enabled": False}
     result["lineage_guardrails"] = {"enabled": False}
     result["shift_guardrails"] = {"enabled": False}

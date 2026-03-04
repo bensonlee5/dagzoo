@@ -822,11 +822,36 @@ def _print_preset_result_line(result: dict[str, Any]) -> None:
     if isinstance(noise_guardrails, dict) and bool(noise_guardrails.get("enabled")):
         noise_hint = f" noise={noise_guardrails.get('status', 'pass')}"
 
+    stage_hint = (
+        " "
+        f"gen/min={float(result.get('generation_datasets_per_minute', 0.0)):.2f} "
+        f"write/min={float(result.get('write_datasets_per_minute', 0.0)):.2f}"
+    )
+    filter_stage_dpm = result.get("filter_datasets_per_minute")
+    filter_stage_hint = (
+        f" filter/min={float(filter_stage_dpm):.2f}"
+        if isinstance(filter_stage_dpm, (int, float))
+        else " filter/min=-"
+    )
+    filter_reject_ratio = result.get("filter_rejection_rate_attempt_level")
+    filter_retry_ratio = result.get("filter_retry_dataset_rate")
+    filter_reject_hint = (
+        f" filter_reject_attempt_pct={float(filter_reject_ratio) * 100.0:.2f}"
+        if isinstance(filter_reject_ratio, (int, float))
+        else " filter_reject_attempt_pct=-"
+    )
+    filter_retry_hint = (
+        f" filter_retry_dataset_pct={float(filter_retry_ratio) * 100.0:.2f}"
+        if isinstance(filter_retry_ratio, (int, float))
+        else " filter_retry_dataset_pct=-"
+    )
+
     print(
         f"[{result.get('preset_key')}] device={result.get('device')} "
         f"backend={result.get('hardware_backend')} "
         f"datasets/min={float(result.get('datasets_per_minute', 0.0)):.2f} "
         f"latency_p95_ms={float(result.get('latency_p95_ms', 0.0)):.2f}"
+        f"{stage_hint}{filter_stage_hint}{filter_reject_hint}{filter_retry_hint}"
         f"{diagnostics_hint}{missingness_hint}{lineage_hint}{shift_hint}{noise_hint}"
     )
 

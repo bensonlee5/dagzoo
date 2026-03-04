@@ -15,6 +15,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dagzoo.dag_lineage`. Existing Parquet files with the old schema name will not
   validate against the new constant.
 
+## [0.4.6] - 2026-03-04
+
+### Changed
+
+- Benchmark suite summaries now emit stage-level throughput metrics for
+  generation, parquet writing, and filter replay:
+  `generation_datasets_per_minute`, `write_datasets_per_minute`, and
+  `filter_datasets_per_minute` (nullable when filtering is disabled).
+- Benchmark suite summaries now emit throughput-pressure metrics required for
+  end-to-end interpretation, including attempt pressure and both filter
+  rejection views:
+  `filter_rejection_rate_attempt_level` and `filter_retry_dataset_rate`.
+- Benchmark baseline defaults now gate on stage throughput metrics in addition
+  to `datasets_per_minute`.
+- Benchmark CLI single-line preset summaries and markdown reports now include
+  stage throughput and filter rejection telemetry columns.
+
+### Breaking
+
+- Generated bundle metadata now includes a new additive
+  `metadata.generation_attempts` object. Consumers with strict metadata schemas
+  must allow this field.
+
 ## [0.4.5] - 2026-03-04
 
 ### Fixed

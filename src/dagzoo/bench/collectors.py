@@ -365,12 +365,123 @@ class _NoiseGuardrailCollector:
         }
 
 
+@dataclass(slots=True)
+class _ThroughputPressureCollector:
+    """Collect attempt and filter-pressure counters needed for throughput attribution."""
+
+    datasets_seen: int = 0
+    attempts_total: int = 0
+    retry_dataset_count: int = 0
+    filter_attempts_total: int = 0
+    filter_rejections_total: int = 0
+    filter_retry_dataset_count: int = 0
+
+    @staticmethod
+    def _coerce_non_negative_int(value: Any, *, default: int) -> int:
+        if isinstance(value, bool):
+            return int(default)
+        if isinstance(value, int):
+            return int(max(0, value))
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                return int(default)
+            return int(max(0, int(value)))
+        if isinstance(value, str):
+            normalized = value.strip()
+            signless = normalized[1:] if normalized.startswith(("+", "-")) else normalized
+            if not signless.isdigit():
+                return int(default)
+            return int(max(0, int(normalized)))
+        return int(default)
+
+    def update(self, bundle: DatasetBundle) -> None:
+        """Collect generation-attempt and filter-retry counters for one bundle."""
+
+        self.datasets_seen += 1
+        metadata = bundle.metadata
+        attempts_payload = metadata.get("generation_attempts")
+
+        total_attempts = 1
+        filter_attempts = 0
+        filter_rejections = 0
+
+        if isinstance(attempts_payload, dict):
+            total_attempts = self._coerce_non_negative_int(
+                attempts_payload.get("total_attempts"),
+                default=1,
+            )
+            filter_attempts = self._coerce_non_negative_int(
+                attempts_payload.get("filter_attempts"),
+                default=0,
+            )
+            filter_rejections = self._coerce_non_negative_int(
+                attempts_payload.get("filter_rejections"),
+                default=0,
+            )
+        else:
+            attempt_used = self._coerce_non_negative_int(metadata.get("attempt_used"), default=0)
+            total_attempts = max(1, attempt_used + 1)
+            filter_payload = metadata.get("filter")
+            if isinstance(filter_payload, dict) and bool(filter_payload.get("enabled")):
+                filter_attempts = 1
+                if not bool(filter_payload.get("accepted", False)):
+                    filter_rejections = 1
+
+        total_attempts = max(1, int(total_attempts))
+        filter_attempts = max(0, int(filter_attempts))
+        filter_rejections = max(0, min(int(filter_rejections), filter_attempts))
+
+        self.attempts_total += total_attempts
+        if total_attempts > 1:
+            self.retry_dataset_count += 1
+
+        self.filter_attempts_total += filter_attempts
+        self.filter_rejections_total += filter_rejections
+        if filter_rejections > 0:
+            self.filter_retry_dataset_count += 1
+
+    def build_summary(self) -> dict[str, Any]:
+        """Build aggregate attempt/filter pressure summary metrics."""
+
+        datasets = int(self.datasets_seen)
+        attempts = int(self.attempts_total)
+        filter_attempts = int(self.filter_attempts_total)
+        filter_rejections = int(self.filter_rejections_total)
+        retry_datasets = int(self.retry_dataset_count)
+        filter_retry_datasets = int(self.filter_retry_dataset_count)
+
+        attempts_per_dataset = float(attempts) / float(datasets) if datasets > 0 else 0.0
+        retry_dataset_rate = float(retry_datasets) / float(datasets) if datasets > 0 else None
+        filter_retry_dataset_rate = (
+            float(filter_retry_datasets) / float(datasets)
+            if datasets > 0 and filter_attempts > 0
+            else None
+        )
+        filter_rejection_rate_attempt_level = (
+            float(filter_rejections) / float(filter_attempts) if filter_attempts > 0 else None
+        )
+
+        return {
+            "datasets_seen": datasets,
+            "attempts_total": attempts,
+            "attempts_per_dataset_mean": float(attempts_per_dataset),
+            "retry_dataset_count": retry_datasets,
+            "retry_dataset_rate": retry_dataset_rate,
+            "filter_attempts_total": filter_attempts,
+            "filter_rejections_total": filter_rejections,
+            "filter_rejection_rate_attempt_level": filter_rejection_rate_attempt_level,
+            "filter_retry_dataset_count": filter_retry_datasets,
+            "filter_retry_dataset_rate": filter_retry_dataset_rate,
+        }
+
+
 def _compose_bundle_callback(
     *,
     diagnostics_aggregator: Any,
     missingness_acceptance: _MissingnessAcceptanceCollector | None,
     shift_guardrails: _ShiftGuardrailCollector | None,
     noise_guardrails: _NoiseGuardrailCollector | None,
+    throughput_pressure: _ThroughputPressureCollector | None = None,
 ) -> Callable[[DatasetBundle], None] | None:
     """Compose optional per-bundle collectors into one callback."""
 
@@ -379,6 +490,7 @@ def _compose_bundle_callback(
         and missingness_acceptance is None
         and shift_guardrails is None
         and noise_guardrails is None
+        and throughput_pressure is None
     ):
         return None
 
@@ -391,6 +503,8 @@ def _compose_bundle_callback(
             shift_guardrails.update(bundle)
         if noise_guardrails is not None:
             noise_guardrails.update(bundle)
+        if throughput_pressure is not None:
+            throughput_pressure.update(bundle)
 
     return _on_bundle
 

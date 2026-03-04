@@ -208,6 +208,9 @@ def _generate_torch(
     shift_params = shift_params or resolve_shift_runtime_params(config)
     attempts = max(1, int(config.filter.max_attempts))
     last_reason = "unknown"
+    attempts_used = 0
+    filter_attempts = 0
+    filter_rejections = 0
     dtype = _torch_dtype(config)
     n_rows = n_train + n_test
     noise_runtime_selection = noise_runtime_selection or _resolve_noise_runtime_selection(
@@ -217,6 +220,7 @@ def _generate_torch(
     noise_spec = _noise_sampling_spec(noise_runtime_selection)
 
     for attempt in range(attempts):
+        attempts_used += 1
         try:
             x, y, aux_meta = _generate_graph_dataset_torch(
                 config,
@@ -232,6 +236,13 @@ def _generate_torch(
         except Exception as exc:
             last_reason = f"generation_exception:{exc.__class__.__name__}"
             continue
+
+        filter_meta = aux_meta.get("filter", {})
+        if isinstance(filter_meta, dict) and bool(filter_meta.get("enabled")):
+            filter_attempts += 1
+            if not bool(filter_meta.get("accepted", False)):
+                filter_rejections += 1
+
         if not bool(aux_meta.get("accepted", True)):
             last_reason = "filtered_out"
             continue
@@ -334,6 +345,17 @@ def _generate_torch(
             "filter": aux_meta.get("filter", {}),
             "shift": shift_metadata,
             "noise_distribution": _build_noise_distribution_metadata(noise_runtime_selection),
+            "generation_attempts": {
+                "total_attempts": int(attempts_used),
+                "retry_count": int(max(0, attempts_used - 1)),
+                "filter_attempts": int(filter_attempts),
+                "filter_rejections": int(filter_rejections),
+                "filter_rejection_rate": (
+                    float(filter_rejections) / float(filter_attempts)
+                    if filter_attempts > 0
+                    else None
+                ),
+            },
             "config": asdict(config),
         }
         if missingness_summary is not None:

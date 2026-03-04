@@ -9,7 +9,12 @@ from typing import Any
 
 from dagzoo.bench.metrics import degradation_percent
 
-DEFAULT_GATING_METRICS = ("datasets_per_minute",)
+DEFAULT_GATING_METRICS = (
+    "datasets_per_minute",
+    "generation_datasets_per_minute",
+    "write_datasets_per_minute",
+    "filter_datasets_per_minute",
+)
 
 
 def load_baseline(path: str | Path) -> dict[str, Any]:

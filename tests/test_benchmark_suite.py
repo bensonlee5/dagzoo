@@ -92,10 +92,137 @@ def test_run_benchmark_suite_smoke_single_profile() -> None:
     result = summary["preset_results"][0]
     assert result["preset_key"] == "cpu_test"
     assert result["datasets_per_minute"] > 0
+    assert result["generation_datasets_per_minute"] == pytest.approx(result["datasets_per_minute"])
+    assert result["write_datasets_per_minute"] >= 0.0
+    assert result["filter_datasets_per_minute"] is None
+    assert result["filter_stage_enabled"] is False
+    assert result["filter_rejection_rate_attempt_level"] is None
+    assert result["filter_retry_dataset_rate"] is None
+    assert result["filter_attempts_total"] == 0
+    assert result["filter_rejections_total"] == 0
+    assert result["stage_sample_datasets"] >= 1
+    assert result["accepted_datasets_measured"] >= 1
+    assert result["total_attempts"] >= result["accepted_datasets_measured"]
+    assert result["mean_attempts_per_dataset"] >= 1.0
+    assert result["estimated_attempts_per_minute"] >= result["generation_datasets_per_minute"]
     assert result["latency_p95_ms"] >= 0
     lineage_guardrails = result["lineage_guardrails"]
     assert lineage_guardrails["enabled"] is True
     assert lineage_guardrails["status"] in {"pass", "warn", "fail"}
+
+
+def test_run_benchmark_suite_emits_stage_and_filter_pressure_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_cpu_config()
+    cfg.filter.enabled = True
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
+
+    def _stub_throughput(
+        _config,
+        *,
+        num_datasets: int,
+        warmup_datasets: int = 10,
+        device: str | None = None,
+        on_bundle=None,
+    ):
+        _ = warmup_datasets
+        _ = device
+        if on_bundle is not None:
+            for i in range(num_datasets):
+                on_bundle(
+                    DatasetBundle(
+                        X_train=np.zeros((3, 4), dtype=np.float32),
+                        y_train=np.zeros(3, dtype=np.int64),
+                        X_test=np.zeros((1, 4), dtype=np.float32),
+                        y_test=np.zeros(1, dtype=np.int64),
+                        feature_types=["num", "num", "num", "num"],
+                        metadata={
+                            "seed": i,
+                            "attempt_used": i,
+                            "filter": {"enabled": True, "accepted": True},
+                            "generation_attempts": {
+                                "total_attempts": i + 1,
+                                "retry_count": i,
+                                "filter_attempts": i + 1,
+                                "filter_rejections": i,
+                            },
+                        },
+                    )
+                )
+        dpm = 120.0
+        dps = dpm / 60.0
+        elapsed = (float(num_datasets) / dps) if dps > 0 else 0.0
+        return {
+            "preset": "cpu_test",
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup_datasets,
+            "elapsed_seconds": elapsed,
+            "datasets_per_second": dps,
+            "datasets_per_minute": dpm,
+            "slo_pass_100_datasets_per_min": True,
+        }
+
+    monkeypatch.setattr("dagzoo.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr(
+        "dagzoo.bench.suite._collect_latency",
+        lambda _cfg, *, device, num_samples: {
+            "latency_samples": float(num_samples) + (0.0 if device is None else 0.0),
+            "latency_mean_ms": 1.0,
+            "latency_p95_ms": 1.0,
+            "latency_min_ms": 1.0,
+            "latency_max_ms": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.suite.measure_write_datasets_per_minute",
+        lambda bundles, *, config: (
+            float(len(bundles)) * 10.0 + float(config.output.shard_size) * 0.0
+        ),
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.suite.measure_filter_datasets_per_minute",
+        lambda bundles, *, config: (
+            float(len(bundles)) * 20.0 + float(config.filter.n_estimators) * 0.0
+        ),
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.suite._collect_lineage_guardrails",
+        lambda *_args, **_kwargs: {"enabled": False},
+    )
+
+    summary = run_benchmark_suite(
+        [spec],
+        suite="smoke",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+        baseline_payload=None,
+        num_datasets_override=2,
+        warmup_override=0,
+        collect_memory=False,
+        collect_reproducibility=False,
+        collect_diagnostics=False,
+        diagnostics_root_dir=None,
+        fail_on_regression=False,
+        hardware_policy="none",
+    )
+
+    result = summary["preset_results"][0]
+    assert result["generation_datasets_per_minute"] == pytest.approx(120.0)
+    assert result["write_datasets_per_minute"] == pytest.approx(20.0)
+    assert result["filter_datasets_per_minute"] == pytest.approx(40.0)
+    assert result["filter_stage_enabled"] is True
+    assert result["accepted_datasets_measured"] == 2
+    assert result["total_attempts"] == 3
+    assert result["mean_attempts_per_dataset"] == pytest.approx(1.5)
+    assert result["estimated_attempts_per_minute"] == pytest.approx(180.0)
+    assert result["retry_dataset_count"] == 1
+    assert result["retry_dataset_rate"] == pytest.approx(0.5)
+    assert result["filter_attempts_total"] == 3
+    assert result["filter_rejections_total"] == 1
+    assert result["filter_rejection_rate_attempt_level"] == pytest.approx(1.0 / 3.0)
+    assert result["filter_retry_dataset_count"] == 1
+    assert result["filter_retry_dataset_rate"] == pytest.approx(0.5)
 
 
 def test_run_benchmark_suite_missingness_guardrails_emit_metrics() -> None:
@@ -805,6 +932,8 @@ def test_write_suite_markdown_profile_table_includes_shift_and_noise_columns(
     text = path.read_text(encoding="utf-8")
     assert "| Shift |" in text
     assert "| Noise |" in text
+    assert "Filter Reject % (attempt)" in text
+    assert "Filter Retry % (dataset)" in text
     assert "| shift_smoke |" in text
 
 

@@ -33,7 +33,13 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["suite"] == "smoke"
     assert len(payload["preset_results"]) == 1
-    lineage_guardrails = payload["preset_results"][0]["lineage_guardrails"]
+    profile = payload["preset_results"][0]
+    assert float(profile["generation_datasets_per_minute"]) >= 0.0
+    assert float(profile["write_datasets_per_minute"]) >= 0.0
+    assert profile["filter_datasets_per_minute"] is None
+    assert profile["filter_rejection_rate_attempt_level"] is None
+    assert profile["filter_retry_dataset_rate"] is None
+    lineage_guardrails = profile["lineage_guardrails"]
     assert isinstance(lineage_guardrails, dict)
     assert isinstance(lineage_guardrails["enabled"], bool)
     if lineage_guardrails["enabled"]:
@@ -392,3 +398,26 @@ def test_print_preset_result_line_includes_noise_status(capsys) -> None:
     )
     output = capsys.readouterr().out
     assert "noise=warn" in output
+
+
+def test_print_preset_result_line_includes_stage_and_filter_rejection_metrics(capsys) -> None:
+    _print_preset_result_line(
+        {
+            "preset_key": "throughput_smoke",
+            "device": "cpu",
+            "hardware_backend": "cpu",
+            "datasets_per_minute": 123.0,
+            "generation_datasets_per_minute": 124.0,
+            "write_datasets_per_minute": 80.0,
+            "filter_datasets_per_minute": 60.0,
+            "filter_rejection_rate_attempt_level": 0.125,
+            "filter_retry_dataset_rate": 0.25,
+            "latency_p95_ms": 4.2,
+        }
+    )
+    output = capsys.readouterr().out
+    assert "gen/min=124.00" in output
+    assert "write/min=80.00" in output
+    assert "filter/min=60.00" in output
+    assert "filter_reject_attempt_pct=12.50" in output
+    assert "filter_retry_dataset_pct=25.00" in output
