@@ -124,6 +124,8 @@ def test_effective_diversity_scale_report_smoke_and_baseline_regression() -> Non
     evaluated = [item for item in scale_report["comparisons"] if item["status"] == "evaluated"]
     assert evaluated
     assert all(item["composite_shift_pct"] is not None for item in evaluated)
+    evaluated_arm_ids = {str(item["arm_id"]) for item in evaluated}
+    assert "combined_high_confidence" in evaluated_arm_ids
 
     baseline_payload = build_effective_diversity_baseline_payload(scale_report)
     same_regression = compare_scale_report_to_baseline(
@@ -134,6 +136,8 @@ def test_effective_diversity_scale_report_smoke_and_baseline_regression() -> Non
     )
     assert same_regression["status"] == "pass"
     assert same_regression["issues"] == []
+    assert same_regression["compatibility_issues"] == []
+    assert same_regression["delta_issues"] == []
 
     mutated = copy.deepcopy(scale_report)
     for comparison in mutated["comparisons"]:
@@ -149,6 +153,81 @@ def test_effective_diversity_scale_report_smoke_and_baseline_regression() -> Non
     )
     assert regressed["status"] in {"warn", "fail"}
     assert regressed["issues"]
+    assert regressed["compatibility_issues"] == []
+
+
+def test_compare_scale_report_to_baseline_fails_on_metadata_mismatch() -> None:
+    scale_report = {
+        "config": {
+            "suite": "smoke",
+            "arm_set": "high_confidence",
+            "seed": 123,
+            "num_datasets_per_arm": 2,
+            "meaningful_threshold_pct": 5.0,
+            "device": "cpu",
+            "runtime_activation_names": ["relu", "tanh"],
+            "base_config": {"dataset": {"n_train": 24}},
+        },
+        "comparisons": [
+            {
+                "arm_id": "fam_linear_to_nn",
+                "status": "evaluated",
+                "composite_shift_pct": 1.25,
+            }
+        ],
+    }
+    baseline_payload = build_effective_diversity_baseline_payload(scale_report)
+    baseline_payload["suite"] = "standard"
+    baseline_payload["config_fingerprint"] = "badfingerprint"
+
+    regression = compare_scale_report_to_baseline(
+        scale_report,
+        baseline_payload,
+        warn_threshold_pct=2.5,
+        fail_threshold_pct=5.0,
+    )
+
+    assert regression["status"] == "fail"
+    assert regression["delta_issues"] == []
+    codes = {str(issue.get("code")) for issue in regression["compatibility_issues"]}
+    assert "suite_mismatch" in codes
+    assert "config_fingerprint_mismatch" in codes
+
+
+def test_compare_scale_report_to_baseline_fails_on_missing_evaluated_arm() -> None:
+    scale_report = {
+        "config": {
+            "suite": "smoke",
+            "arm_set": "high_confidence",
+            "seed": 123,
+            "num_datasets_per_arm": 2,
+            "meaningful_threshold_pct": 5.0,
+            "device": "cpu",
+            "runtime_activation_names": ["relu", "tanh"],
+            "base_config": {"dataset": {"n_train": 24}},
+        },
+        "comparisons": [
+            {
+                "arm_id": "fam_linear_to_nn",
+                "status": "evaluated",
+                "composite_shift_pct": 1.25,
+            }
+        ],
+    }
+    baseline_payload = build_effective_diversity_baseline_payload(scale_report)
+    baseline_payload["arms"] = {}
+
+    regression = compare_scale_report_to_baseline(
+        scale_report,
+        baseline_payload,
+        warn_threshold_pct=2.5,
+        fail_threshold_pct=5.0,
+    )
+
+    assert regression["status"] == "fail"
+    assert regression["delta_issues"] == []
+    issue_codes = {str(issue.get("code")) for issue in regression["compatibility_issues"]}
+    assert "missing_baseline_arm" in issue_codes
 
 
 def test_effective_diversity_artifact_writer(tmp_path) -> None:

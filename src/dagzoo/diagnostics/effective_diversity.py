@@ -1089,7 +1089,11 @@ def _build_combined_arm(*, selected_arms: tuple[AblationArm, ...], arm_set: str)
     )
 
 
-def _resolve_scale_arms(arm_set: str) -> tuple[AblationArm, ...]:
+def _resolve_scale_arms(
+    arm_set: str,
+    *,
+    runtime_activations: tuple[str, ...],
+) -> tuple[AblationArm, ...]:
     """Resolve one-at-a-time plus combined ablation arms."""
 
     index = _arm_by_id()
@@ -1100,7 +1104,15 @@ def _resolve_scale_arms(arm_set: str) -> tuple[AblationArm, ...]:
     else:
         raise ValueError(f"Unsupported arm_set: {arm_set!r}")
 
-    combined = _build_combined_arm(selected_arms=selected, arm_set=arm_set)
+    applicable_for_combined = tuple(
+        arm
+        for arm in selected
+        if _arm_skip_reason(arm, runtime_activations=runtime_activations) is None
+    )
+    if not applicable_for_combined:
+        return selected
+
+    combined = _build_combined_arm(selected_arms=applicable_for_combined, arm_set=arm_set)
     return (*selected, combined)
 
 
@@ -1574,6 +1586,7 @@ def generate_effective_diversity_scale_report(
     seed: int = 2_026_0304,
     meaningful_threshold_pct: float = 5.0,
     device: str | None = None,
+    out_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Run dataset-scale overlap impact audit through full generation/postprocess/filter path."""
 
@@ -1590,7 +1603,7 @@ def generate_effective_diversity_scale_report(
         raise ValueError(f"num_datasets_per_arm must be > 0, got {datasets_per_arm}")
 
     runtime_activations = _runtime_activation_names()
-    selected_arms = _resolve_scale_arms(arm_set)
+    selected_arms = _resolve_scale_arms(arm_set, runtime_activations=runtime_activations)
     total_arms = len(selected_arms) + 1  # +1 for baseline
 
     print(
@@ -1638,13 +1651,47 @@ def generate_effective_diversity_scale_report(
             runtime_activations=runtime_activations,
         )
         arm_results.append(arm_result)
-        comparisons.append(
-            _compare_arm_to_baseline(
-                arm_result=arm_result,
-                baseline_result=baseline_result,
-                meaningful_threshold_pct=float(meaningful_threshold_pct),
-            )
+        comparison = _compare_arm_to_baseline(
+            arm_result=arm_result,
+            baseline_result=baseline_result,
+            meaningful_threshold_pct=float(meaningful_threshold_pct),
         )
+        comparisons.append(comparison)
+
+        # -- per-arm telemetry --
+        arm_id = comparison.get("arm_id", "?")
+        cmp_status = comparison.get("status")
+        if cmp_status == "evaluated":
+            composite = comparison.get("composite_shift_pct")
+            meaningful = comparison.get("is_meaningful")
+            shifts = comparison.get("metric_shift_pct", {})
+            shift_parts = ", ".join(f"{k}={v:+.2f}%" for k, v in sorted(shifts.items()))
+            print(
+                f"  -> {arm_id}: composite={composite:+.2f}% "
+                f"meaningful={meaningful} ({shift_parts})",
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            print(
+                f"  -> {arm_id}: {cmp_status}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        if out_dir is not None:
+            arm_json_path = out_dir / f"arm_{arm_id}.json"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            arm_json_path.write_text(
+                json.dumps(
+                    sanitize_json({"arm_result": arm_result, "comparison": comparison}),
+                    indent=2,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
 
     scale_elapsed = time.monotonic() - scale_t0
     print(
@@ -1752,11 +1799,112 @@ def compare_scale_report_to_baseline(
 ) -> dict[str, Any]:
     """Compare scale-impact report against a saved baseline."""
 
+    current_config = scale_report.get("config", {})
+    if not isinstance(current_config, dict):
+        current_config = {}
+    current_config_fingerprint = _config_fingerprint(current_config)
+    baseline_config_fingerprint = baseline_payload.get("config_fingerprint")
+
+    compatibility_issues: list[dict[str, Any]] = []
+    if baseline_payload.get("schema_name") != "dagzoo_effective_diversity_scale_baseline":
+        compatibility_issues.append(
+            {
+                "code": "baseline_schema_mismatch",
+                "expected": "dagzoo_effective_diversity_scale_baseline",
+                "actual": baseline_payload.get("schema_name"),
+                "severity": "fail",
+            }
+        )
+    if baseline_payload.get("version") != 1:
+        compatibility_issues.append(
+            {
+                "code": "baseline_version_mismatch",
+                "expected": 1,
+                "actual": baseline_payload.get("version"),
+                "severity": "fail",
+            }
+        )
+    if baseline_payload.get("suite") != current_config.get("suite"):
+        compatibility_issues.append(
+            {
+                "code": "suite_mismatch",
+                "expected": current_config.get("suite"),
+                "actual": baseline_payload.get("suite"),
+                "severity": "fail",
+            }
+        )
+    if baseline_payload.get("arm_set") != current_config.get("arm_set"):
+        compatibility_issues.append(
+            {
+                "code": "arm_set_mismatch",
+                "expected": current_config.get("arm_set"),
+                "actual": baseline_payload.get("arm_set"),
+                "severity": "fail",
+            }
+        )
+    if baseline_config_fingerprint != current_config_fingerprint:
+        compatibility_issues.append(
+            {
+                "code": "config_fingerprint_mismatch",
+                "expected": current_config_fingerprint,
+                "actual": baseline_config_fingerprint,
+                "severity": "fail",
+            }
+        )
+
     arms_baseline = baseline_payload.get("arms", {})
     if not isinstance(arms_baseline, dict):
+        compatibility_issues.append(
+            {
+                "code": "baseline_arms_not_object",
+                "expected": "object",
+                "actual": type(arms_baseline).__name__,
+                "severity": "fail",
+            }
+        )
         arms_baseline = {}
 
-    issues: list[dict[str, Any]] = []
+    for comparison in scale_report.get("comparisons", []):
+        if not isinstance(comparison, dict):
+            continue
+        if comparison.get("status") != "evaluated":
+            continue
+        arm_id = str(comparison.get("arm_id"))
+        baseline_entry = arms_baseline.get(arm_id)
+        if not isinstance(baseline_entry, dict):
+            compatibility_issues.append(
+                {
+                    "code": "missing_baseline_arm",
+                    "arm_id": arm_id,
+                    "severity": "fail",
+                }
+            )
+            continue
+        baseline = _coerce_float(baseline_entry.get("composite_shift_pct"))
+        if baseline is None:
+            compatibility_issues.append(
+                {
+                    "code": "invalid_baseline_metric",
+                    "arm_id": arm_id,
+                    "metric": "composite_shift_pct",
+                    "actual": baseline_entry.get("composite_shift_pct"),
+                    "severity": "fail",
+                }
+            )
+
+    if compatibility_issues:
+        return {
+            "status": "fail",
+            "warn_threshold_pct": float(warn_threshold_pct),
+            "fail_threshold_pct": float(fail_threshold_pct),
+            "issues": compatibility_issues,
+            "compatibility_issues": compatibility_issues,
+            "delta_issues": [],
+            "baseline_config_fingerprint": baseline_config_fingerprint,
+            "current_config_fingerprint": current_config_fingerprint,
+        }
+
+    delta_issues: list[dict[str, Any]] = []
     for comparison in scale_report.get("comparisons", []):
         if not isinstance(comparison, dict):
             continue
@@ -1777,7 +1925,7 @@ def compare_scale_report_to_baseline(
             continue
 
         severity = "fail" if delta >= float(fail_threshold_pct) else "warn"
-        issues.append(
+        delta_issues.append(
             {
                 "arm_id": arm_id,
                 "metric": "composite_shift_pct",
@@ -1789,20 +1937,22 @@ def compare_scale_report_to_baseline(
         )
 
     status = "pass"
-    if any(issue["severity"] == "fail" for issue in issues):
+    if any(issue["severity"] == "fail" for issue in delta_issues):
         status = "fail"
-    elif issues:
+    elif delta_issues:
         status = "warn"
 
-    issues.sort(key=lambda item: (item["severity"] != "fail", -float(item["delta_pct"])))
+    delta_issues.sort(key=lambda item: (item["severity"] != "fail", -float(item["delta_pct"])))
 
     return {
         "status": status,
         "warn_threshold_pct": float(warn_threshold_pct),
         "fail_threshold_pct": float(fail_threshold_pct),
-        "issues": issues,
-        "baseline_config_fingerprint": baseline_payload.get("config_fingerprint"),
-        "current_config_fingerprint": _config_fingerprint(scale_report.get("config", {})),
+        "issues": delta_issues,
+        "compatibility_issues": [],
+        "delta_issues": delta_issues,
+        "baseline_config_fingerprint": baseline_config_fingerprint,
+        "current_config_fingerprint": current_config_fingerprint,
     }
 
 
@@ -1825,6 +1975,7 @@ def run_effective_diversity_audit(
     baseline_payload: dict[str, Any] | None = None,
     warn_threshold_pct: float = 2.5,
     fail_threshold_pct: float = 5.0,
+    out_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Run local and/or dataset-scale effective-diversity audits."""
 
@@ -1865,6 +2016,7 @@ def run_effective_diversity_audit(
             seed=seed,
             meaningful_threshold_pct=meaningful_threshold_pct,
             device=device,
+            out_dir=out_dir,
         )
 
     regression: dict[str, Any] | None = None

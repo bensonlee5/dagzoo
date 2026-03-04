@@ -175,6 +175,7 @@ def main() -> int:
         baseline_payload=baseline_payload,
         warn_threshold_pct=float(args.warn_threshold_pct),
         fail_threshold_pct=float(args.fail_threshold_pct),
+        out_dir=args.out_dir,
     )
     artifact_paths = write_effective_diversity_run_artifacts(report, out_dir=args.out_dir)
 

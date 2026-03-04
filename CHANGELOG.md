@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dagzoo.dag_lineage`. Existing Parquet files with the old schema name will not
   validate against the new constant.
 
+## [0.4.5] - 2026-03-04
+
+### Fixed
+
+- Effective-diversity baseline regression comparison now fails fast on
+  incompatible baselines (schema/version/suite/arm-set/config-fingerprint
+  mismatch and missing evaluated-arm baseline entries) instead of silently
+  passing.
+- Effective-diversity scale audit now builds combined ablation arms from
+  runtime-applicable mappings only, so unavailable activations do not force
+  combined-arm skips.
+
 ## [0.4.4] - 2026-03-04
 
 ### Changed
