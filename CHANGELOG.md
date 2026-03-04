@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dagzoo.dag_lineage`. Existing Parquet files with the old schema name will not
   validate against the new constant.
 
+## [0.4.4] - 2026-03-04
+
+### Changed
+
+- Added a first-class `dagzoo diversity-audit` CLI command that runs local
+  overlap checks and dataset-scale overlap-impact ablations with reproducible
+  run artifacts.
+- Effective-diversity local auditing now reads activation names from runtime
+  source-of-truth (`fixed_activation_names`) to avoid stale claim coverage when
+  activation pools change.
+- Added scale-impact baseline persistence and regression comparison workflow for
+  repeated effective-diversity audits as the repository evolves.
+
 ## [0.4.3] - 2026-03-03
 
 ### Fixed
