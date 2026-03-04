@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-03-04
+
+### Fixed
+
+- Generate config resolution now applies CLI `--rows` overrides before final
+  post-policy validation, preventing premature failures when CUDA tiered
+  policies raise `dataset.n_test`.
+- Benchmark preset resolution now rejects `dataset.rows` before hardware-policy
+  transforms, so users consistently receive the intended unsupported-feature
+  error message.
+
+## [0.4.6] - 2026-03-04
+
+### Added
+
+- Added unified total-row control for generation via `dataset.rows` and
+  `dagzoo generate --rows ...`.
+- `dataset.rows` supports:
+  - fixed totals (for example `1024`)
+  - ranges (for example `400..60000`)
+  - choice lists (for example `1024,2048,4096` or YAML list form)
+- Variable rows specs now resolve deterministically per dataset seed lineage.
+
+### Changed
+
+- When `dataset.rows` is active, split resolution keeps `dataset.n_test` fixed
+  and derives `n_train = total_rows - n_test`.
+- Fixed-layout APIs now require fixed row modes; variable `dataset.rows`
+  (range/choices) fail fast with clear compatibility errors.
+- Benchmark config resolution now rejects `dataset.rows` (benchmark paths remain
+  on explicit `dataset.n_train` / `dataset.n_test` for now).
+- Generated metadata config snapshots now reflect realized split sizes for each
+  emitted bundle.
+
+### Removed
+
+- Retired curriculum shell workflow: removed
+  `scripts/generate-curriculum.sh` and its test coverage.
+
+### Breaking
+
+- **BREAKING:** Curriculum shell users must migrate to `dataset.rows` /
+  `--rows` workflows for staged row-envelope generation.
+
 ## [0.5.0] - 2026-03-03
 
 ### Changed

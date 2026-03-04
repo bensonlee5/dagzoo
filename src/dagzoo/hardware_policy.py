@@ -89,6 +89,7 @@ def apply_hardware_policy(
     hw: HardwareInfo,
     *,
     policy_name: str = "none",
+    validate: bool = True,
 ) -> GeneratorConfig:
     """Apply a named hardware policy without mutating the input config."""
 
@@ -106,7 +107,8 @@ def apply_hardware_policy(
         raise TypeError(
             f"hardware policy '{normalized_name}' must return GeneratorConfig, got {type(result)!r}."
         )
-    result.validate_generation_constraints()
+    if validate:
+        result.validate_generation_constraints()
     return result
 
 

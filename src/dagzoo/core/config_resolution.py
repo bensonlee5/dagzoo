@@ -189,6 +189,25 @@ def _apply_missingness_overrides(
         )
 
 
+def _apply_rows_override(
+    config: GeneratorConfig,
+    *,
+    rows: str | None,
+    events: list[ResolutionEvent],
+) -> None:
+    """Apply generate rows override."""
+
+    if rows is None:
+        return
+    _set_config_path(
+        config,
+        path="dataset.rows",
+        value=rows,
+        source="cli.rows",
+        events=events,
+    )
+
+
 def _apply_smoke_caps(
     config: GeneratorConfig,
     *,
@@ -229,6 +248,7 @@ def resolve_generate_config(
     config: GeneratorConfig,
     *,
     device_override: str | None,
+    rows: str | None,
     hardware_policy: str,
     missing_rate: float | None,
     missing_mechanism: str | None,
@@ -253,12 +273,23 @@ def resolve_generate_config(
 
     hw = detect_hardware(requested_device)
     before_policy = resolved.to_dict()
-    resolved = apply_hardware_policy(resolved, hw, policy_name=hardware_policy)
+    resolved = apply_hardware_policy(
+        resolved,
+        hw,
+        policy_name=hardware_policy,
+        validate=False,
+    )
     after_policy = resolved.to_dict()
     _append_diff_events(
         before_policy,
         after_policy,
         source=f"hardware_policy.{str(hardware_policy).strip().lower()}",
+        events=trace_events,
+    )
+
+    _apply_rows_override(
+        resolved,
+        rows=rows,
         events=trace_events,
     )
 
@@ -312,6 +343,12 @@ def resolve_benchmark_preset_config(
         source="benchmark.preset_device",
         events=trace_events,
     )
+
+    if resolved.dataset.rows is not None:
+        raise ValueError(
+            "Benchmark config resolution does not support dataset.rows yet. "
+            "Unset dataset.rows (or avoid --rows) for benchmark runs."
+        )
 
     hw = detect_hardware(requested_device)
     before_policy = resolved.to_dict()
