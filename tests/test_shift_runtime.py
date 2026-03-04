@@ -28,7 +28,7 @@ def _entropy_bits(probabilities: list[float]) -> float:
 
 
 def _nonlinear_mass(probs: dict[str, float]) -> float:
-    nonlinear = {"nn", "tree", "discretization", "gp", "product"}
+    nonlinear = {"nn", "bnn", "tree", "discretization", "gp", "product"}
     return float(sum(prob for family, prob in probs.items() if family in nonlinear))
 
 
@@ -161,4 +161,8 @@ def test_mechanism_nonlinear_mass_respects_family_mix() -> None:
     assert mechanism_nonlinear_mass(
         mechanism_logit_tilt=1.0,
         family_weights={"nn": 1.0},
+    ) == pytest.approx(1.0)
+    assert mechanism_nonlinear_mass(
+        mechanism_logit_tilt=1.0,
+        family_weights={"bnn": 1.0},
     ) == pytest.approx(1.0)

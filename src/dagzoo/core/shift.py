@@ -21,6 +21,7 @@ _NOISE_VARIANCE_DB_SPAN = _LOG_TWO / 2.0
 
 MECHANISM_FAMILY_ORDER: tuple[MechanismFamily, ...] = (
     "nn",
+    "bnn",
     "tree",
     "discretization",
     "gp",
@@ -32,6 +33,7 @@ MECHANISM_FAMILY_ORDER: tuple[MechanismFamily, ...] = (
 
 MECHANISM_FAMILY_BASE_LOGITS: dict[MechanismFamily, float] = {
     "nn": 0.7,
+    "bnn": 0.8,
     "tree": 0.7,
     "discretization": 0.5,
     "gp": 0.5,
@@ -42,6 +44,7 @@ MECHANISM_FAMILY_BASE_LOGITS: dict[MechanismFamily, float] = {
 }
 NONLINEAR_MECHANISM_FAMILIES: tuple[MechanismFamily, ...] = (
     "nn",
+    "bnn",
     "tree",
     "discretization",
     "gp",

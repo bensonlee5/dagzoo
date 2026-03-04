@@ -5,15 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-03-03
+## [0.4.6] - 2026-03-04
 
 ### Changed
 
-- **BREAKING:** Renamed package from `dagsynth` to `dagzoo`. All imports change
-  from `from dagsynth ...` to `from dagzoo ...`.
-- **BREAKING:** Lineage schema name changed from `dagsynth.dag_lineage` to
-  `dagzoo.dag_lineage`. Existing Parquet files with the old schema name will not
-  validate against the new constant.
+- Added a new `bnn` mechanism family with a lightweight MC-BNN implementation
+  in random-function sampling.
+- `bnn` now participates in default mechanism-family sampling and is supported
+  by `mechanism.function_family_mix` config weights.
+
+### Fixed
+
+- Removed a conflicting duplicate `0.5.0` changelog section to restore
+  contiguous `0.4.x` release ordering.
 
 ## [0.4.5] - 2026-03-04
 

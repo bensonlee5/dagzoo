@@ -12,13 +12,13 @@ def test_mechanism_family_mix_defaults_to_none() -> None:
 
 def test_mechanism_family_mix_accepts_partial_map_and_normalizes() -> None:
     cfg = GeneratorConfig.from_dict(
-        {"mechanism": {"function_family_mix": {"NN": 3.0, "linear": 1.0, "em": 0.0}}}
+        {"mechanism": {"function_family_mix": {"NN": 3.0, "BNN": 1.0, "em": 0.0}}}
     )
     mix = cfg.mechanism.function_family_mix
     assert mix is not None
-    assert set(mix) == {"nn", "linear"}
+    assert set(mix) == {"nn", "bnn"}
     assert mix["nn"] == pytest.approx(0.75)
-    assert mix["linear"] == pytest.approx(0.25)
+    assert mix["bnn"] == pytest.approx(0.25)
     assert sum(mix.values()) == pytest.approx(1.0)
 
 

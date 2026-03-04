@@ -11,6 +11,7 @@ FeatureType = Literal["num", "cat"]
 ConverterKind = Literal["cat", "num", "target_cls", "target_reg"]
 MechanismFamily = Literal[
     "nn",
+    "bnn",
     "tree",
     "discretization",
     "gp",

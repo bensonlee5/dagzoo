@@ -14,6 +14,7 @@ from dagzoo.rng import SEED32_MAX, SEED32_MIN
 
 MechanismFamily = Literal[
     "nn",
+    "bnn",
     "tree",
     "discretization",
     "gp",
@@ -86,6 +87,7 @@ _NOISE_MIXTURE_COMPONENT_VALUE_MAP: dict[str, NoiseMixtureComponent] = {
 
 _MECHANISM_FAMILY_VALUE_MAP: dict[str, MechanismFamily] = {
     "nn": "nn",
+    "bnn": "bnn",
     "tree": "tree",
     "discretization": "discretization",
     "gp": "gp",

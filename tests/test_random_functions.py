@@ -65,7 +65,7 @@ def test_deterministic_with_shift_tilt_and_noise_multiplier() -> None:
 
 @pytest.mark.parametrize(
     "family",
-    ["nn", "tree", "discretization", "gp", "linear", "quadratic", "em", "product"],
+    ["nn", "bnn", "tree", "discretization", "gp", "linear", "quadratic", "em", "product"],
 )
 def test_each_family(family: MechanismFamily) -> None:
     g = _make_generator(10)
@@ -152,3 +152,15 @@ def test_deterministic_with_family_mix() -> None:
         function_family_mix=mix,  # type: ignore[arg-type]
     )
     torch.testing.assert_close(y1, y2)
+
+
+def test_sampled_family_respects_bnn_allowlist() -> None:
+    g = _make_generator(66)
+    mix = {"bnn": 1.0}
+    for _ in range(16):
+        sampled = _sample_function_family(
+            g,
+            mechanism_logit_tilt=0.9,
+            function_family_mix=mix,  # type: ignore[arg-type]
+        )
+        assert sampled == "bnn"

@@ -115,6 +115,44 @@ def _apply_nn(
     return y
 
 
+def _apply_bnn(
+    x: torch.Tensor,
+    out_dim: int,
+    generator: torch.Generator,
+    *,
+    noise_sigma_multiplier: float = 1.0,
+    noise_spec: NoiseSamplingSpec | None = None,
+) -> torch.Tensor:
+    """Apply a lightweight MC-BNN approximation in torch."""
+    device = str(x.device)
+    posterior_scale = max(
+        1e-6,
+        float(_log_uniform(generator, 1e-3, 0.05, device) * noise_sigma_multiplier),
+    )
+    mc_samples = 2
+    y_accum = torch.zeros(x.shape[0], out_dim, device=x.device, dtype=x.dtype)
+    for _ in range(mc_samples):
+        y = _apply_nn(
+            x,
+            out_dim,
+            generator,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+        )
+        y = y + sample_noise_from_spec(
+            y.shape,
+            generator=generator,
+            device=device,
+            noise_spec=noise_spec,
+            scale_multiplier=posterior_scale,
+        )
+        y = torch.nan_to_num(y, nan=0.0, posinf=1e6, neginf=-1e6)
+        y = torch.clamp(y, min=-1e6, max=1e6)
+        y_accum += y
+
+    return _standardize(y_accum / float(mc_samples))
+
+
 def _apply_tree(
     x: torch.Tensor,
     out_dim: int,
@@ -419,6 +457,14 @@ def apply_random_function(
 
     if function_type == "nn":
         return _apply_nn(
+            y,
+            dout,
+            generator,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+        )
+    if function_type == "bnn":
+        return _apply_bnn(
             y,
             dout,
             generator,
