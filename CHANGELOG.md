@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dagzoo.dag_lineage`. Existing Parquet files with the old schema name will not
   validate against the new constant.
 
+## [0.4.6] - 2026-03-04
+
+### Fixed
+
+- Scalar RNG draws (`torch.randint`, `torch.rand`) now explicitly target the
+  generator's device via new `rand_scalar`/`randint_scalar` helpers, fixing
+  failures when the generator lives on a non-CPU device.
+- Generation retry exception logging now includes the exception message for
+  easier debugging.
+
+### Changed
+
+- Added RTX 3060 to the hardware peak FLOPS lookup table.
+
 ## [0.4.5] - 2026-03-04
 
 ### Fixed
