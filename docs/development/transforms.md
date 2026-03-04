@@ -373,7 +373,7 @@ with activation after hidden layers, optional final activation (prob 0.5).
 
 Activation sampler includes fixed and parametric families.
 
-- Fixed activations: `tanh`, `leaky_relu`, `elu`, `identity`, `silu`, `swiglu`, `relu`, `relu_sq`, `softplus`, `sign`, `gauss`, `exp`, `sin`, `square`, `abs`, `softmax`, `logsigmoid`, `logabs`, `sigmoid`, `round`, `mod1`, `selu`, `relu6`, `hardtanh`, `heaviside`, `indicator_01`, `onehot_argmax`, `argsort`, `rank`.
+- Fixed activations: `tanh`, `leaky_relu`, `elu`, `identity`, `silu`, `swiglu`, `relu`, `relu_sq`, `softplus`, `sign`, `gauss`, `exp`, `sin`, `square`, `abs`, `softmax`, `logsigmoid`, `logabs`, `sigmoid`, `round`, `mod1`, `selu`, `relu6`, `hardtanh`, `indicator_01`, `onehot_argmax`, `argsort`, `rank`.
 - Parametric families: `relu_pow`, `signed_pow`, `inv_pow`, `poly`.
 
 ### 5.4 Tree ensemble (oblivious decision trees)

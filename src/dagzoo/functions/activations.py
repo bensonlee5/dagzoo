@@ -9,6 +9,43 @@ from dagzoo.math_utils import (
     standardize as _standardize,
 )
 
+_FIXED_ACTIVATION_NAMES: tuple[str, ...] = (
+    "tanh",
+    "leaky_relu",
+    "elu",
+    "identity",
+    "silu",
+    "swiglu",
+    "relu",
+    "relu_sq",
+    "softplus",
+    "sign",
+    "gauss",
+    "exp",
+    "sin",
+    "square",
+    "abs",
+    "softmax",
+    "logsigmoid",
+    "logabs",
+    "sigmoid",
+    "round",
+    "mod1",
+    "selu",
+    "relu6",
+    "hardtanh",
+    "indicator_01",
+    "onehot_argmax",
+    "argsort",
+    "rank",
+)
+
+
+def fixed_activation_names() -> tuple[str, ...]:
+    """Return the canonical fixed-activation sampling order."""
+
+    return _FIXED_ACTIVATION_NAMES
+
 
 def _fixed_activation(x: torch.Tensor, name: str) -> torch.Tensor:
     """Apply one fixed activation variant by name in torch."""
@@ -60,8 +97,6 @@ def _fixed_activation(x: torch.Tensor, name: str) -> torch.Tensor:
         return torch.nn.functional.relu6(x)
     if name == "hardtanh":
         return torch.nn.functional.hardtanh(x)
-    if name == "heaviside":
-        return torch.heaviside(x, values=torch.tensor(0.0, device=x.device))
     if name == "indicator_01":
         return ((x >= 0) & (x <= 1)).to(x.dtype)
     if name == "onehot_argmax":
@@ -118,37 +153,7 @@ def apply_random_activation(
     if torch.rand(1, generator=generator).item() < parametric_prob:
         y = _param_activation(y, generator)
     else:
-        fixed = [
-            "tanh",
-            "leaky_relu",
-            "elu",
-            "identity",
-            "silu",
-            "swiglu",
-            "relu",
-            "relu_sq",
-            "softplus",
-            "sign",
-            "gauss",
-            "exp",
-            "sin",
-            "square",
-            "abs",
-            "softmax",
-            "logsigmoid",
-            "logabs",
-            "sigmoid",
-            "round",
-            "mod1",
-            "selu",
-            "relu6",
-            "hardtanh",
-            "heaviside",
-            "indicator_01",
-            "onehot_argmax",
-            "argsort",
-            "rank",
-        ]
+        fixed = fixed_activation_names()
         idx = torch.randint(0, len(fixed), (1,), generator=generator).item()
         y = _fixed_activation(y, fixed[int(idx)])
 

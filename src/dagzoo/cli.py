@@ -38,6 +38,14 @@ from dagzoo.diagnostics import (
     write_coverage_summary_json,
     write_coverage_summary_markdown,
 )
+from dagzoo.diagnostics.effective_diversity import (
+    AuditThresholds,
+    build_effective_diversity_baseline_payload,
+    load_effective_diversity_baseline_payload,
+    run_effective_diversity_audit,
+    write_effective_diversity_baseline_payload,
+    write_effective_diversity_run_artifacts,
+)
 from dagzoo.hardware import detect_hardware
 from dagzoo.hardware_policy import list_hardware_policies
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
@@ -379,6 +387,138 @@ def _build_parser() -> argparse.ArgumentParser:
         "--print-resolution-trace",
         action="store_true",
         help="Print each preset's field-level override trace before execution.",
+    )
+
+    d = sub.add_parser(
+        "diversity-audit",
+        help="Audit local equivalence + dataset-scale effective diversity overlap impact.",
+    )
+    d.add_argument(
+        "--config",
+        default=None,
+        help="Optional generator config for scale phase (defaults to in-code defaults).",
+    )
+    d.add_argument(
+        "--phase",
+        choices=["both", "local", "scale"],
+        default="both",
+        help="Audit phase to run.",
+    )
+    d.add_argument(
+        "--suite",
+        choices=["smoke", "standard", "full"],
+        default="standard",
+        help="Scale-phase run size when --num-datasets-per-arm is omitted.",
+    )
+    d.add_argument(
+        "--arm-set",
+        choices=["high_confidence", "all_claims"],
+        default="high_confidence",
+        help="Ablation arm set for the scale phase.",
+    )
+    d.add_argument(
+        "--num-datasets-per-arm",
+        type=_positive_int,
+        default=None,
+        help="Optional override for datasets generated per scale arm.",
+    )
+    d.add_argument(
+        "--seed",
+        type=_seed_32bit_int,
+        default=2_026_0304,
+        help=f"Base audit seed in [{SEED32_MIN}, {SEED32_MAX}].",
+    )
+    d.add_argument(
+        "--n-seeds",
+        type=_positive_int,
+        default=8,
+        help="Number of local-overlap seed runs to aggregate.",
+    )
+    d.add_argument(
+        "--n-rows",
+        type=_positive_int,
+        default=2_048,
+        help="Rows per local-overlap run.",
+    )
+    d.add_argument(
+        "--n-cols",
+        type=_positive_int,
+        default=16,
+        help="Columns per local-overlap run.",
+    )
+    d.add_argument(
+        "--out-dim",
+        type=_positive_int,
+        default=16,
+        help="Output width for family-overlap probes.",
+    )
+    d.add_argument(
+        "--nn-degenerate-trials",
+        type=_positive_int,
+        default=50_000,
+        help="Trials for estimating nn->linear degenerate probability.",
+    )
+    d.add_argument(
+        "--exact-affine-rmse",
+        type=float,
+        default=1e-6,
+        help="Threshold for exact affine equivalence label.",
+    )
+    d.add_argument(
+        "--near-cosine",
+        type=float,
+        default=0.95,
+        help="Cosine threshold for near-equivalent label.",
+    )
+    d.add_argument(
+        "--near-affine-rmse",
+        type=float,
+        default=0.20,
+        help="Affine RMSE threshold for near-equivalent label.",
+    )
+    d.add_argument(
+        "--meaningful-threshold-pct",
+        type=float,
+        default=5.0,
+        help="Composite shift threshold for a meaningful scale-impact change.",
+    )
+    d.add_argument(
+        "--baseline",
+        default=None,
+        help="Optional baseline JSON path for diversity regression checks.",
+    )
+    d.add_argument(
+        "--save-baseline",
+        default=None,
+        help="Optional path to write a diversity baseline JSON from this run.",
+    )
+    d.add_argument(
+        "--warn-threshold-pct",
+        type=float,
+        default=2.5,
+        help="Warn threshold for composite-shift delta vs baseline.",
+    )
+    d.add_argument(
+        "--fail-threshold-pct",
+        type=float,
+        default=5.0,
+        help="Fail threshold for composite-shift delta vs baseline.",
+    )
+    d.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        help="Return non-zero exit code if diversity regression status is fail.",
+    )
+    d.add_argument(
+        "--out-dir",
+        default=str(Path("effective_config_artifacts") / "effective_diversity"),
+        help="Output directory for diversity audit artifacts.",
+    )
+    d.add_argument(
+        "--device",
+        default=None,
+        choices=DEVICE_CHOICES,
+        help="Optional device override for scale-phase generation.",
     )
 
     h = sub.add_parser("hardware", help="Inspect detected hardware and tier mapping.")
@@ -790,6 +930,71 @@ def _run_benchmark(args: argparse.Namespace) -> int:
     return 1 if hard_fail else 0
 
 
+def _run_diversity_audit(args: argparse.Namespace) -> int:
+    """Execute the ``diversity-audit`` command."""
+
+    base_config = GeneratorConfig.from_yaml(args.config) if args.config else GeneratorConfig()
+    if args.device is not None:
+        base_config.runtime.device = str(args.device)
+
+    thresholds = AuditThresholds(
+        exact_affine_rmse=float(args.exact_affine_rmse),
+        near_cosine=float(args.near_cosine),
+        near_affine_rmse=float(args.near_affine_rmse),
+    )
+    baseline_payload = (
+        load_effective_diversity_baseline_payload(args.baseline) if args.baseline else None
+    )
+    report = run_effective_diversity_audit(
+        base_config=base_config,
+        phase=str(args.phase),
+        arm_set=str(args.arm_set),
+        suite=str(args.suite),
+        num_datasets_per_arm=args.num_datasets_per_arm,
+        device=args.device,
+        seed=int(args.seed),
+        n_seeds=int(args.n_seeds),
+        n_rows=int(args.n_rows),
+        n_cols=int(args.n_cols),
+        out_dim=int(args.out_dim),
+        nn_degenerate_trials=int(args.nn_degenerate_trials),
+        thresholds=thresholds,
+        meaningful_threshold_pct=float(args.meaningful_threshold_pct),
+        baseline_payload=baseline_payload,
+        warn_threshold_pct=float(args.warn_threshold_pct),
+        fail_threshold_pct=float(args.fail_threshold_pct),
+    )
+
+    out_dir = Path(args.out_dir)
+    artifact_paths = write_effective_diversity_run_artifacts(report, out_dir=out_dir)
+    for key in sorted(artifact_paths):
+        print(f"Wrote diversity artifact [{key}]: {artifact_paths[key]}")
+
+    if args.save_baseline:
+        scale_report = report.get("scale_report")
+        if isinstance(scale_report, dict):
+            baseline = build_effective_diversity_baseline_payload(scale_report)
+            baseline_path = write_effective_diversity_baseline_payload(
+                baseline,
+                args.save_baseline,
+            )
+            print(f"Wrote diversity baseline: {baseline_path}")
+
+    regression = report.get("regression")
+    if isinstance(regression, dict):
+        print(
+            "Diversity regression status="
+            f"{regression.get('status', 'pass')} issues={len(regression.get('issues', []))}"
+        )
+
+    hard_fail = bool(
+        args.fail_on_regression
+        and isinstance(regression, dict)
+        and str(regression.get("status", "pass")) == "fail"
+    )
+    return 1 if hard_fail else 0
+
+
 def _run_hardware(args: argparse.Namespace) -> int:
     """Execute the ``hardware`` command."""
 
@@ -810,6 +1015,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_generate(args)
     if args.command == "benchmark":
         return _run_benchmark(args)
+    if args.command == "diversity-audit":
+        return _run_diversity_audit(args)
     if args.command == "hardware":
         return _run_hardware(args)
     parser.error(f"Unknown command: {args.command}")
