@@ -14,6 +14,7 @@ from dagzoo.io.lineage_schema import validate_metadata_lineage
 def test_load_default_config() -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     assert cfg.dataset.n_train > 0
+    assert cfg.dataset.rows is None
     assert cfg.dataset.n_features_min <= cfg.dataset.n_features_max
     assert cfg.output.shard_size > 0
     assert cfg.diagnostics.enabled is False
@@ -111,6 +112,57 @@ def test_classification_rejects_partial_class_range_when_upper_bound_is_infeasib
                     "n_test": 8,
                     "n_classes_min": 2,
                     "n_classes_max": 10,
+                }
+            }
+        )
+
+
+def test_dataset_rows_accepts_fixed_and_range_and_choices() -> None:
+    cfg_fixed = GeneratorConfig.from_dict({"dataset": {"rows": 1024}})
+    assert cfg_fixed.dataset.rows is not None
+    assert cfg_fixed.dataset.rows.mode == "fixed"
+    assert cfg_fixed.dataset.rows.value == 1024
+
+    cfg_range = GeneratorConfig.from_dict({"dataset": {"rows": "400..60000"}})
+    assert cfg_range.dataset.rows is not None
+    assert cfg_range.dataset.rows.mode == "range"
+    assert cfg_range.dataset.rows.start == 400
+    assert cfg_range.dataset.rows.stop == 60000
+
+    cfg_choices = GeneratorConfig.from_dict({"dataset": {"rows": [400, 1024, 60000]}})
+    assert cfg_choices.dataset.rows is not None
+    assert cfg_choices.dataset.rows.mode == "choices"
+    assert cfg_choices.dataset.rows.choices == [400, 1024, 60000]
+
+
+@pytest.mark.parametrize("rows_value", [399, 60001, "399", "60001", "300..600"])
+def test_dataset_rows_rejects_out_of_bounds_values(rows_value: object) -> None:
+    with pytest.raises(ValueError, match=r"dataset\.rows"):
+        GeneratorConfig.from_dict({"dataset": {"rows": rows_value}})
+
+
+def test_dataset_rows_rejects_inverted_range() -> None:
+    with pytest.raises(ValueError, match=r"dataset\.rows range start must be <= stop"):
+        GeneratorConfig.from_dict({"dataset": {"rows": "2000..400"}})
+
+
+def test_dataset_rows_rejects_duplicate_choices() -> None:
+    with pytest.raises(ValueError, match=r"dataset\.rows must not include duplicate row values"):
+        GeneratorConfig.from_dict({"dataset": {"rows": "1024,1024"}})
+
+
+def test_dataset_rows_classification_checks_min_realizable_train_rows() -> None:
+    with pytest.raises(
+        ValueError, match=r"dataset classification split constraints for n_classes_max"
+    ):
+        GeneratorConfig.from_dict(
+            {
+                "dataset": {
+                    "task": "classification",
+                    "rows": "400..600",
+                    "n_test": 380,
+                    "n_classes_min": 2,
+                    "n_classes_max": 32,
                 }
             }
         )

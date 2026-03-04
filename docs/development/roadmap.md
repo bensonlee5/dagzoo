@@ -46,22 +46,22 @@ Roadmap ranking is currently optimized for downstream PFN utility:
 
 Lower rank means higher priority. Rank `0` is reserved for completed items retained for traceability.
 
-| Rank | Roadmap ID | Item                                                         | Status      | Milestone | GitHub Tracking                                      |
-| ---- | ---------- | ------------------------------------------------------------ | ----------- | --------- | ---------------------------------------------------- |
-| 0    | RD-001     | Ground-truth DAG artifact export                             | implemented | Now       | `#44 -> #45 -> #46 -> #47 -> #48` (completed)        |
-| 0    | RD-003     | Missingness generation (MCAR/MAR/MNAR)                       | implemented | Now       | `#15 -> #17 -> #18` (completed)                      |
-| 0    | RD-008     | Meta-feature coverage steering (retired)                     | retired     | Now       | `#9` (historical)                                    |
-| 0    | RD-006     | Curriculum complexity scaling (features + graph)             | implemented | Now       | `#49 -> #50 -> #51 -> #90 -> #52 -> #53` (completed) |
-| 0    | RD-004     | Shift-aware SCM generation                                   | implemented | Now       | `#64 -> #72 -> #73 -> #74 -> #75` (completed)        |
-| 0    | RD-012     | Noise family diversification for synthetic generation        | implemented | Now       | `#24 -> #25 -> #26 -> #27` (completed)               |
-| 3    | RD-011     | Mechanism family mix expansion (BNN/GP kernels/interactions) | planned     | Next      | `#28 -> #29 -> #30 -> #68 -> #69 -> #31 -> #32`      |
-| 5    | RD-013     | Time-series generation tracks for PFN pretraining            | research    | Next      | `#110 -> #111 -> #112 -> #113 -> #114`               |
-| 6    | RD-014     | Run-time bottleneck observability and telemetry              | research    | Next      | `epic TBD; dependency chain TBD`                     |
-| 7    | RD-007     | Many-class and high-cardinality expansion                    | research    | Next      | `#19 -> #43 -> (#20 -> #21 -> #22 -> #23)`           |
-| 8    | RD-005     | Robustness stress profiles (hard-task/adversarial regimes)   | research    | Next      | `#65 -> #76 -> #79 -> #78 -> #77`                    |
-| 9    | RD-009     | Parallel/distributed generation and writing                  | research    | Next      | `#66 -> #80 -> #81 -> #82 -> #83`                    |
-| 10   | RD-002     | Interventional and counterfactual generation modes           | research    | Later     | `#67 -> #84 -> #85 -> #86 -> #87`                    |
-| 11   | RD-010     | Hardware-adaptive autotuning beyond coarse FLOPs tiers       | planned     | Later     | `#54 -> #55 -> #56 -> #70 -> #57 -> #71 -> #58`      |
+| Rank | Roadmap ID | Item                                                         | Status      | Milestone | GitHub Tracking                                                                        |
+| ---- | ---------- | ------------------------------------------------------------ | ----------- | --------- | -------------------------------------------------------------------------------------- |
+| 0    | RD-001     | Ground-truth DAG artifact export                             | implemented | Now       | `#44 -> #45 -> #46 -> #47 -> #48` (completed)                                          |
+| 0    | RD-003     | Missingness generation (MCAR/MAR/MNAR)                       | implemented | Now       | `#15 -> #17 -> #18` (completed)                                                        |
+| 0    | RD-008     | Meta-feature coverage steering (retired)                     | retired     | Now       | `#9` (historical)                                                                      |
+| 0    | RD-006     | Curriculum complexity scaling (features + graph)             | retired     | Now       | `#49 -> #50 -> #51 -> #90 -> #52 -> #53` (historical), `#142` (rows-based replacement) |
+| 0    | RD-004     | Shift-aware SCM generation                                   | implemented | Now       | `#64 -> #72 -> #73 -> #74 -> #75` (completed)                                          |
+| 0    | RD-012     | Noise family diversification for synthetic generation        | implemented | Now       | `#24 -> #25 -> #26 -> #27` (completed)                                                 |
+| 3    | RD-011     | Mechanism family mix expansion (BNN/GP kernels/interactions) | planned     | Next      | `#28 -> #29 -> #30 -> #68 -> #69 -> #31 -> #32`                                        |
+| 5    | RD-013     | Time-series generation tracks for PFN pretraining            | research    | Next      | `#110 -> #111 -> #112 -> #113 -> #114`                                                 |
+| 6    | RD-014     | Run-time bottleneck observability and telemetry              | research    | Next      | `epic TBD; dependency chain TBD`                                                       |
+| 7    | RD-007     | Many-class and high-cardinality expansion                    | research    | Next      | `#19 -> #43 -> (#20 -> #21 -> #22 -> #23)`                                             |
+| 8    | RD-005     | Robustness stress profiles (hard-task/adversarial regimes)   | research    | Next      | `#65 -> #76 -> #79 -> #78 -> #77`                                                      |
+| 9    | RD-009     | Parallel/distributed generation and writing                  | research    | Next      | `#66 -> #80 -> #81 -> #82 -> #83`                                                      |
+| 10   | RD-002     | Interventional and counterfactual generation modes           | research    | Later     | `#67 -> #84 -> #85 -> #86 -> #87`                                                      |
+| 11   | RD-010     | Hardware-adaptive autotuning beyond coarse FLOPs tiers       | planned     | Later     | `#54 -> #55 -> #56 -> #70 -> #57 -> #71 -> #58`                                        |
 
 ## Current Capability Matrix
 
@@ -335,6 +335,10 @@ metadata JSON contract, and DAG lineage schema.
 - Goal: support multi-worker generation and shard writing with deterministic seed partitioning.
 - GitHub tracking: epic `#66`; dependency chain `#80 -> #81 -> #82 -> #83`
 - Repo touchpoints: `src/dagzoo/core/dataset.py`, `src/dagzoo/io/parquet_writer.py`, `src/dagzoo/cli.py`
+- Planned sequencing:
+  - T1: internal GPU micro-batching for dataset generation hot paths (no new user toggles in first rollout).
+  - T2: bounded producer/consumer overlap between generation and shard writing.
+  - T3: multi-worker seed partitioning and deterministic shard assignment.
 - Exit criteria:
   - Worker-aware config/API is backward-compatible and opt-in.
   - Multi-worker mode matches single-worker outputs for fixed seed equivalence checks.

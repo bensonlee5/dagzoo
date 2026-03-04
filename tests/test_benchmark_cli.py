@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from dagzoo.cli import _print_preset_result_line, main
+from dagzoo.config import GeneratorConfig
 
 
 def test_benchmark_cli_writes_json(tmp_path) -> None:
@@ -38,6 +40,33 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
     assert isinstance(lineage_guardrails["enabled"], bool)
     if lineage_guardrails["enabled"]:
         assert lineage_guardrails["status"] in {"pass", "warn", "fail"}
+
+
+def test_benchmark_cli_rejects_dataset_rows_config(tmp_path) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.dataset.rows = "400..60000"  # type: ignore[assignment]
+    config_path = tmp_path / "rows_config.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"does not support dataset\.rows"):
+        main(
+            [
+                "benchmark",
+                "--config",
+                str(config_path),
+                "--preset",
+                "custom",
+                "--suite",
+                "smoke",
+                "--num-datasets",
+                "1",
+                "--warmup",
+                "0",
+                "--hardware-policy",
+                "none",
+                "--no-memory",
+            ]
+        )
 
 
 def test_benchmark_cli_writes_effective_config_trace_artifacts(tmp_path) -> None:
