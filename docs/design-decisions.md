@@ -1,7 +1,7 @@
 # Design Decisions
 
 Lightweight Architecture Decision Records (ADRs) for foundational choices
-in dagsynth.
+in dagzoo.
 
 ______________________________________________________________________
 

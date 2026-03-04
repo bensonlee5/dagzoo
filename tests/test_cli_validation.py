@@ -1,8 +1,8 @@
 import pytest
 import yaml
 
-from dagsynth.cli import main
-from dagsynth.config import GeneratorConfig
+from dagzoo.cli import main
+from dagzoo.config import GeneratorConfig
 
 
 def test_generate_cli_rejects_invalid_device() -> None:
@@ -90,7 +90,7 @@ def test_generate_cli_uses_default_config_without_noise_overrides(
         captured["called"] = True
         yield object()
 
-    monkeypatch.setattr("dagsynth.cli.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr("dagzoo.cli.generate_batch_iter", _stub_generate_batch_iter)
 
     code = main(
         [
@@ -128,7 +128,7 @@ def test_generate_cli_writes_resolution_trace_artifact_no_write(
         for _ in range(num_datasets):
             yield object()
 
-    monkeypatch.setattr("dagsynth.cli.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr("dagzoo.cli.generate_batch_iter", _stub_generate_batch_iter)
 
     code = main(
         [
@@ -159,7 +159,7 @@ def test_generate_cli_writes_resolution_trace_artifact_no_write(
 def test_generate_cli_many_class_preset_end_to_end_no_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from dagsynth.core import dataset as dataset_mod
+    from dagzoo.core import dataset as dataset_mod
 
     captured_metadata: list[dict[str, object]] = []
     original_generate_batch_iter = dataset_mod.generate_batch_iter
@@ -181,7 +181,7 @@ def test_generate_cli_many_class_preset_end_to_end_no_write(
             yield bundle
 
     monkeypatch.setattr(
-        "dagsynth.cli.generate_batch_iter",
+        "dagzoo.cli.generate_batch_iter",
         _capture_generate_batch_iter,
     )
 
@@ -226,7 +226,7 @@ def test_generate_cli_shift_presets_emit_shift_metadata_no_write(
     config_path: str,
     expected_profile: str,
 ) -> None:
-    from dagsynth.core import dataset as dataset_mod
+    from dagzoo.core import dataset as dataset_mod
 
     captured_shift: list[dict[str, object]] = []
     original_generate_batch_iter = dataset_mod.generate_batch_iter
@@ -250,7 +250,7 @@ def test_generate_cli_shift_presets_emit_shift_metadata_no_write(
             yield bundle
 
     monkeypatch.setattr(
-        "dagsynth.cli.generate_batch_iter",
+        "dagzoo.cli.generate_batch_iter",
         _capture_generate_batch_iter,
     )
 
@@ -290,7 +290,7 @@ def test_generate_cli_noise_presets_emit_noise_metadata_no_write(
     config_path: str,
     expected_family: str,
 ) -> None:
-    from dagsynth.core import dataset as dataset_mod
+    from dagzoo.core import dataset as dataset_mod
 
     captured_noise: list[dict[str, object]] = []
     original_generate_batch_iter = dataset_mod.generate_batch_iter
@@ -314,7 +314,7 @@ def test_generate_cli_noise_presets_emit_noise_metadata_no_write(
             yield bundle
 
     monkeypatch.setattr(
-        "dagsynth.cli.generate_batch_iter",
+        "dagzoo.cli.generate_batch_iter",
         _capture_generate_batch_iter,
     )
 
@@ -392,9 +392,9 @@ def test_generate_cli_coverage_tolerates_null_quantiles_and_targets(
         for _ in range(num_datasets):
             yield object()
 
-    monkeypatch.setattr("dagsynth.cli.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr("dagzoo.cli.generate_batch_iter", _stub_generate_batch_iter)
     monkeypatch.setattr(
-        "dagsynth.cli.CoverageAggregator.update_bundle",
+        "dagzoo.cli.CoverageAggregator.update_bundle",
         lambda _self, _bundle: None,
     )
 
@@ -440,7 +440,7 @@ def test_generate_cli_no_write_allows_null_output_dir_when_coverage_disabled(
         for _ in range(num_datasets):
             yield object()
 
-    monkeypatch.setattr("dagsynth.cli.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr("dagzoo.cli.generate_batch_iter", _stub_generate_batch_iter)
 
     code = main(
         [
@@ -477,9 +477,9 @@ def test_generate_cli_enables_diagnostics_flag(
         for _ in range(num_datasets):
             yield object()
 
-    monkeypatch.setattr("dagsynth.cli.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr("dagzoo.cli.generate_batch_iter", _stub_generate_batch_iter)
     monkeypatch.setattr(
-        "dagsynth.cli.CoverageAggregator.update_bundle",
+        "dagzoo.cli.CoverageAggregator.update_bundle",
         lambda _self, _bundle: None,
     )
     code = main(
@@ -523,7 +523,7 @@ def test_generate_cli_applies_missingness_overrides_no_write(
         for _ in range(num_datasets):
             yield object()
 
-    monkeypatch.setattr("dagsynth.cli.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr("dagzoo.cli.generate_batch_iter", _stub_generate_batch_iter)
 
     code = main(
         [

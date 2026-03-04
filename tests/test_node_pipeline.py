@@ -1,6 +1,6 @@
 import torch
 
-from dagsynth.core.node_pipeline import (
+from dagzoo.core.node_pipeline import (
     ConverterSpec,
     apply_node_pipeline,
     parse_feature_key,

@@ -50,12 +50,12 @@ fi
 
 if [[ -n "${CURRICULUM_DAGSYNTH_BIN:-}" ]]; then
   GEN_RUNNER=("${CURRICULUM_DAGSYNTH_BIN}")
-elif [[ -x "${REPO_ROOT}/.venv/bin/dagsynth" ]]; then
-  GEN_RUNNER=("${REPO_ROOT}/.venv/bin/dagsynth")
+elif [[ -x "${REPO_ROOT}/.venv/bin/dagzoo" ]]; then
+  GEN_RUNNER=("${REPO_ROOT}/.venv/bin/dagzoo")
 elif command -v uv >/dev/null 2>&1; then
-  GEN_RUNNER=("uv" "run" "dagsynth")
+  GEN_RUNNER=("uv" "run" "dagzoo")
 else
-  die "dagsynth runner not found; set CURRICULUM_DAGSYNTH_BIN, create .venv, or install uv"
+  die "dagzoo runner not found; set CURRICULUM_DAGSYNTH_BIN, create .venv, or install uv"
 fi
 
 is_int() {

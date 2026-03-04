@@ -3,10 +3,10 @@
 import pytest
 import torch
 
-from dagsynth.sampling.noise import NoiseSamplingSpec
-from dagsynth.sampling.random_points import sample_random_points
+from dagzoo.sampling.noise import NoiseSamplingSpec
+from dagzoo.sampling.random_points import sample_random_points
 from conftest import make_generator as _make_generator
-import dagsynth.sampling.random_points as random_points_mod
+import dagzoo.sampling.random_points as random_points_mod
 
 
 def test_output_shape() -> None:

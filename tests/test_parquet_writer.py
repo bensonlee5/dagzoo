@@ -5,19 +5,19 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dagsynth.config import GeneratorConfig
-from dagsynth.core.dataset import generate_one
-from dagsynth.io import resolve_lineage_path
-from dagsynth.io.lineage_artifact import unpack_upper_triangle_adjacency
-from dagsynth.io.lineage_schema import (
+from dagzoo.config import GeneratorConfig
+from dagzoo.core.dataset import generate_one
+from dagzoo.io import resolve_lineage_path
+from dagzoo.io.lineage_artifact import unpack_upper_triangle_adjacency
+from dagzoo.io.lineage_schema import (
     LINEAGE_ADJACENCY_ENCODING,
     LINEAGE_SCHEMA_NAME,
     LINEAGE_SCHEMA_VERSION,
     LINEAGE_SCHEMA_VERSION_COMPACT,
     validate_lineage_payload,
 )
-from dagsynth.io.parquet_writer import _sanitize_json, write_packed_parquet_shards_stream
-from dagsynth.types import DatasetBundle
+from dagzoo.io.parquet_writer import _sanitize_json, write_packed_parquet_shards_stream
+from dagzoo.types import DatasetBundle
 
 
 def test_sanitize_json_replaces_non_finite_floats() -> None:
@@ -112,7 +112,7 @@ def test_io_exports_resolve_lineage_path(tmp_path) -> None:
 
 def test_write_packed_parquet_shards_stream_writes_iterable(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "dagsynth.io.parquet_writer._write_packed_split",
+        "dagzoo.io.parquet_writer._write_packed_split",
         _stub_write_packed_split,
     )
     bundles = (_bundle(i) for i in range(3))
@@ -208,7 +208,7 @@ def test_write_packed_parquet_shards_stream_rejects_stale_output(tmp_path) -> No
 
 def test_write_packed_parquet_shards_stream_writes_lineage_metadata(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "dagsynth.io.parquet_writer._write_packed_split",
+        "dagzoo.io.parquet_writer._write_packed_split",
         _stub_write_packed_split,
     )
     bundle = _bundle_with_dense_lineage(7)
@@ -280,7 +280,7 @@ def test_generate_and_persist_compact_lineage_for_task(
     bundle = _generate_one_with_retries(cfg, seed=919, device="cpu")
 
     monkeypatch.setattr(
-        "dagsynth.io.parquet_writer._write_packed_split",
+        "dagzoo.io.parquet_writer._write_packed_split",
         _stub_write_packed_split,
     )
     written = write_packed_parquet_shards_stream(
@@ -319,7 +319,7 @@ def test_write_packed_parquet_shards_stream_opens_lineage_blob_once_per_shard(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        "dagsynth.io.parquet_writer._write_packed_split",
+        "dagzoo.io.parquet_writer._write_packed_split",
         _stub_write_packed_split,
     )
 
@@ -361,7 +361,7 @@ def test_write_packed_parquet_shards_stream_limits_open_lineage_blob_descriptors
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        "dagsynth.io.parquet_writer._write_packed_split",
+        "dagzoo.io.parquet_writer._write_packed_split",
         _stub_write_packed_split,
     )
 
@@ -422,7 +422,7 @@ def test_write_packed_parquet_shards_stream_closes_lineage_blob_on_failure(
             raise RuntimeError("forced split failure")
 
     monkeypatch.setattr(
-        "dagsynth.io.parquet_writer._write_packed_split",
+        "dagzoo.io.parquet_writer._write_packed_split",
         _failing_write_packed_split,
     )
 
@@ -475,7 +475,7 @@ def test_write_packed_parquet_shards_stream_writes_lineage_index_on_failure(
             raise RuntimeError("forced split failure")
 
     monkeypatch.setattr(
-        "dagsynth.io.parquet_writer._write_packed_split",
+        "dagzoo.io.parquet_writer._write_packed_split",
         _failing_write_packed_split,
     )
 

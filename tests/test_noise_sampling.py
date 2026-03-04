@@ -1,14 +1,14 @@
 import pytest
 import torch
 
-from dagsynth.sampling.noise import (
+from dagzoo.sampling.noise import (
     NoiseSamplingSpec,
     sample_mixture_component_family,
     sample_noise,
     sample_noise_from_spec,
 )
 from conftest import make_generator as _make_generator
-import dagsynth.sampling.noise as noise_mod
+import dagzoo.sampling.noise as noise_mod
 
 
 @pytest.mark.parametrize(

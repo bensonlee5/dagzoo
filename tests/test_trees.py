@@ -2,7 +2,7 @@
 
 import torch
 
-from dagsynth.core.trees import compute_odt_leaf_indices, sample_odt_splits
+from dagzoo.core.trees import compute_odt_leaf_indices, sample_odt_splits
 from conftest import make_generator as _make_generator
 
 

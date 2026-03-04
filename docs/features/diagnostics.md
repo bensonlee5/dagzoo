@@ -18,7 +18,7 @@ ______________________________________________________________________
 Enable diagnostics directly:
 
 ```bash
-dagsynth generate \
+dagzoo generate \
   --config configs/default.yaml \
   --num-datasets 50 \
   --diagnostics \
@@ -28,7 +28,7 @@ dagsynth generate \
 Use the discoverable preset:
 
 ```bash
-dagsynth generate \
+dagzoo generate \
   --config configs/preset_diagnostics_on.yaml \
   --num-datasets 25 \
   --diagnostics \
@@ -45,7 +45,7 @@ ______________________________________________________________________
 Diagnostics also work with `benchmark`:
 
 ```bash
-dagsynth benchmark \
+dagzoo benchmark \
   --suite smoke \
   --preset cpu \
   --diagnostics \

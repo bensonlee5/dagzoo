@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-import dagsynth.bench.guardrails as guardrails_mod
-import dagsynth.bench.suite as suite_mod
-from dagsynth.bench.micro import run_microbenchmarks
-from dagsynth.bench.report import write_suite_markdown
-from dagsynth.bench.suite import PresetRunSpec, run_benchmark_suite
-from dagsynth.config import GeneratorConfig
-from dagsynth.types import DatasetBundle
+import dagzoo.bench.guardrails as guardrails_mod
+import dagzoo.bench.suite as suite_mod
+from dagzoo.bench.micro import run_microbenchmarks
+from dagzoo.bench.report import write_suite_markdown
+from dagzoo.bench.suite import PresetRunSpec, run_benchmark_suite
+from dagzoo.config import GeneratorConfig
+from dagzoo.types import DatasetBundle
 
 
 def _tiny_cpu_config() -> GeneratorConfig:
@@ -183,9 +183,9 @@ def test_run_benchmark_suite_missingness_runtime_guardrail_updates_regression_st
             "slo_pass_100_datasets_per_min": dpm >= 100.0,
         }
 
-    monkeypatch.setattr("dagsynth.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr("dagzoo.bench.suite.run_throughput_benchmark", _stub_throughput)
     monkeypatch.setattr(
-        "dagsynth.bench.suite._collect_latency",
+        "dagzoo.bench.suite._collect_latency",
         lambda _cfg, *, device, num_samples: {
             "latency_samples": float(num_samples) + (0.0 if device is None else 0.0),
             "latency_mean_ms": 1.0,
@@ -319,9 +319,9 @@ def test_run_benchmark_suite_shift_runtime_guardrail_updates_regression_status(
             "slo_pass_100_datasets_per_min": dpm >= 100.0,
         }
 
-    monkeypatch.setattr("dagsynth.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr("dagzoo.bench.suite.run_throughput_benchmark", _stub_throughput)
     monkeypatch.setattr(
-        "dagsynth.bench.suite._collect_latency",
+        "dagzoo.bench.suite._collect_latency",
         lambda _cfg, *, device, num_samples: {
             "latency_samples": float(num_samples) + (0.0 if device is None else 0.0),
             "latency_mean_ms": 1.0,
@@ -331,7 +331,7 @@ def test_run_benchmark_suite_shift_runtime_guardrail_updates_regression_status(
         },
     )
     monkeypatch.setattr(
-        "dagsynth.bench.suite._collect_lineage_guardrails",
+        "dagzoo.bench.suite._collect_lineage_guardrails",
         lambda *_args, **_kwargs: {"enabled": False},
     )
 
@@ -424,9 +424,9 @@ def test_run_benchmark_suite_shift_directional_guardrail_failure_updates_status(
             "slo_pass_100_datasets_per_min": True,
         }
 
-    monkeypatch.setattr("dagsynth.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr("dagzoo.bench.suite.run_throughput_benchmark", _stub_throughput)
     monkeypatch.setattr(
-        "dagsynth.bench.suite._collect_latency",
+        "dagzoo.bench.suite._collect_latency",
         lambda _cfg, *, device, num_samples: {
             "latency_samples": float(num_samples) + (0.0 if device is None else 0.0),
             "latency_mean_ms": 1.0,
@@ -436,7 +436,7 @@ def test_run_benchmark_suite_shift_directional_guardrail_failure_updates_status(
         },
     )
     monkeypatch.setattr(
-        "dagsynth.bench.suite._collect_lineage_guardrails",
+        "dagzoo.bench.suite._collect_lineage_guardrails",
         lambda *_args, **_kwargs: {"enabled": False},
     )
 
@@ -558,9 +558,9 @@ def test_run_benchmark_suite_noise_runtime_guardrail_updates_regression_status(
             "slo_pass_100_datasets_per_min": dpm >= 100.0,
         }
 
-    monkeypatch.setattr("dagsynth.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr("dagzoo.bench.suite.run_throughput_benchmark", _stub_throughput)
     monkeypatch.setattr(
-        "dagsynth.bench.suite._collect_latency",
+        "dagzoo.bench.suite._collect_latency",
         lambda _cfg, *, device, num_samples: {
             "latency_samples": float(num_samples) + (0.0 if device is None else 0.0),
             "latency_mean_ms": 1.0,
@@ -570,7 +570,7 @@ def test_run_benchmark_suite_noise_runtime_guardrail_updates_regression_status(
         },
     )
     monkeypatch.setattr(
-        "dagsynth.bench.suite._collect_lineage_guardrails",
+        "dagzoo.bench.suite._collect_lineage_guardrails",
         lambda *_args, **_kwargs: {"enabled": False},
     )
 
@@ -657,9 +657,9 @@ def test_run_benchmark_suite_noise_metadata_coverage_failure_updates_status(
             "slo_pass_100_datasets_per_min": dpm >= 100.0,
         }
 
-    monkeypatch.setattr("dagsynth.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr("dagzoo.bench.suite.run_throughput_benchmark", _stub_throughput)
     monkeypatch.setattr(
-        "dagsynth.bench.suite._collect_latency",
+        "dagzoo.bench.suite._collect_latency",
         lambda _cfg, *, device, num_samples: {
             "latency_samples": float(num_samples) + (0.0 if device is None else 0.0),
             "latency_mean_ms": 1.0,
@@ -669,7 +669,7 @@ def test_run_benchmark_suite_noise_metadata_coverage_failure_updates_status(
         },
     )
     monkeypatch.setattr(
-        "dagsynth.bench.suite._collect_lineage_guardrails",
+        "dagzoo.bench.suite._collect_lineage_guardrails",
         lambda *_args, **_kwargs: {"enabled": False},
     )
 
@@ -726,7 +726,7 @@ def test_run_benchmark_suite_lineage_runtime_guardrail_updates_regression_status
     spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     monkeypatch.setattr(
-        "dagsynth.bench.suite._collect_lineage_guardrails",
+        "dagzoo.bench.suite._collect_lineage_guardrails",
         lambda *_args, **_kwargs: {
             "enabled": True,
             "sample_datasets": 2,
@@ -832,7 +832,7 @@ def test_collect_lineage_guardrails_uses_median_of_three_trials_with_runtime_gat
                 metadata={
                     "seed": i,
                     "attempt_used": 0,
-                    "lineage": {"schema_name": "dagsynth.dag_lineage"},
+                    "lineage": {"schema_name": "dagzoo.dag_lineage"},
                 },
             )
 
@@ -849,9 +849,9 @@ def test_collect_lineage_guardrails_uses_median_of_three_trials_with_runtime_gat
         assert num_bundles > 0
         return float(next(trial_values))
 
-    monkeypatch.setattr("dagsynth.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr("dagzoo.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter)
     monkeypatch.setattr(
-        "dagsynth.bench.guardrails._measure_persistence_datasets_per_minute",
+        "dagzoo.bench.guardrails._measure_persistence_datasets_per_minute",
         _stub_measure,
     )
 
@@ -906,7 +906,7 @@ def test_collect_lineage_guardrails_smoke_suppresses_runtime_issue_at_sample_cap
                 metadata={
                     "seed": i,
                     "attempt_used": 0,
-                    "lineage": {"schema_name": "dagsynth.dag_lineage"},
+                    "lineage": {"schema_name": "dagzoo.dag_lineage"},
                 },
             )
 
@@ -923,9 +923,9 @@ def test_collect_lineage_guardrails_smoke_suppresses_runtime_issue_at_sample_cap
         assert num_bundles > 0
         return float(next(trial_values))
 
-    monkeypatch.setattr("dagsynth.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr("dagzoo.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter)
     monkeypatch.setattr(
-        "dagsynth.bench.guardrails._measure_persistence_datasets_per_minute",
+        "dagzoo.bench.guardrails._measure_persistence_datasets_per_minute",
         _stub_measure,
     )
 
@@ -976,7 +976,7 @@ def test_collect_lineage_guardrails_emits_runtime_issue_for_standard_suite(
                 metadata={
                     "seed": i,
                     "attempt_used": 0,
-                    "lineage": {"schema_name": "dagsynth.dag_lineage"},
+                    "lineage": {"schema_name": "dagzoo.dag_lineage"},
                 },
             )
 
@@ -993,9 +993,9 @@ def test_collect_lineage_guardrails_emits_runtime_issue_for_standard_suite(
         assert num_bundles > 0
         return float(next(trial_values))
 
-    monkeypatch.setattr("dagsynth.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr("dagzoo.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter)
     monkeypatch.setattr(
-        "dagsynth.bench.guardrails._measure_persistence_datasets_per_minute",
+        "dagzoo.bench.guardrails._measure_persistence_datasets_per_minute",
         _stub_measure,
     )
 
@@ -1045,7 +1045,7 @@ def test_collect_lineage_guardrails_reports_unavailable_for_non_runtime_persiste
                 metadata={
                     "seed": i,
                     "attempt_used": 0,
-                    "lineage": {"schema_name": "dagsynth.dag_lineage"},
+                    "lineage": {"schema_name": "dagzoo.dag_lineage"},
                 },
             )
 
@@ -1064,9 +1064,9 @@ def test_collect_lineage_guardrails_reports_unavailable_for_non_runtime_persiste
         _ = trials
         raise ValueError("codec unavailable")
 
-    monkeypatch.setattr("dagsynth.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr("dagzoo.bench.guardrails.generate_batch_iter", _stub_generate_batch_iter)
     monkeypatch.setattr(
-        "dagsynth.bench.guardrails._measure_lineage_persistence_trials",
+        "dagzoo.bench.guardrails._measure_lineage_persistence_trials",
         _stub_trials,
     )
 
@@ -1125,9 +1125,9 @@ def test_measure_lineage_persistence_trials_replays_staged_bundles_without_gener
         assert seen == 2
         return 100.0 if len(call_counts) % 2 == 1 else 90.0
 
-    monkeypatch.setattr("dagsynth.bench.guardrails.generate_batch_iter", _unexpected_generate)
+    monkeypatch.setattr("dagzoo.bench.guardrails.generate_batch_iter", _unexpected_generate)
     monkeypatch.setattr(
-        "dagsynth.bench.guardrails._measure_persistence_datasets_per_minute",
+        "dagzoo.bench.guardrails._measure_persistence_datasets_per_minute",
         _stub_measure,
     )
 
@@ -1184,7 +1184,7 @@ def test_collect_reproducibility_uses_streaming_generation(
             yield _bundle(int(seed or 0) + i)
 
     monkeypatch.setattr(
-        "dagsynth.bench.suite.generate_batch_iter",
+        "dagzoo.bench.suite.generate_batch_iter",
         _stub_generate_batch_iter,
     )
 

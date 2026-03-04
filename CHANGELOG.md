@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-03
+
+### Changed
+
+- **BREAKING:** Renamed package from `dagsynth` to `dagzoo`. All imports change
+  from `from dagsynth ...` to `from dagzoo ...`.
+- **BREAKING:** Lineage schema name changed from `dagsynth.dag_lineage` to
+  `dagzoo.dag_lineage`. Existing Parquet files with the old schema name will not
+  validate against the new constant.
+
 ## [0.4.3] - 2026-03-04
 
 ### Fixed
@@ -66,8 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
-- `dagsynth benchmark --profile ...` was removed; use `--preset ...`.
-- `dagsynth generate --no-write` was removed; use `--no-dataset-write`.
+- `dagzoo benchmark --profile ...` was removed; use `--preset ...`.
+- `dagzoo generate --no-write` was removed; use `--no-dataset-write`.
 - Config files using `shift.profile`, `shift.noise_scale`, `noise.scale`, `benchmark.profile_name`, or `benchmark.profiles` must be migrated to the new keys above.
 - Dataset metadata consumers must read `metadata.noise_distribution` (not `metadata.noise`) and `metadata.shift.mode` (not `metadata.shift.profile`).
 
@@ -75,7 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Refactored generation config validation into explicit staged validators in `src/dagsynth/config.py`:
+- Refactored generation config validation into explicit staged validators in `src/dagzoo/config.py`:
   stage 1 field normalization/typing, stage 2 cross-field constraints, and stage 3 post-override revalidation.
 - `resolve_generate_config()` and `resolve_benchmark_profile_config()` now rely on `GeneratorConfig.validate_generation_constraints()` as the single post-override revalidation pass.
 - Classification configs now enforce split feasibility for both `dataset.n_classes_min` and `dataset.n_classes_max` (previously only `n_classes_min` was checked).
@@ -123,8 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Rename: `cauchy-generator` is now `dagsynth`.** Package name, CLI entrypoint, Python import paths, and all internal references updated. The CLI command is now `dagsynth` (was `cauchy-gen`). Python imports change from `from cauchy_generator.…` to `from dagsynth.…`.
-- **Breaking:** Lineage schema name changed from `cauchy_generator.dag_lineage` to `dagsynth.dag_lineage`. Existing Parquet files with embedded lineage metadata will fail validation against the new schema name.
+- **Rename: `cauchy-generator` is now `dagzoo`.** Package name, CLI entrypoint, Python import paths, and all internal references updated. The CLI command is now `dagzoo` (was `cauchy-gen`). Python imports change from `from cauchy_generator.…` to `from dagzoo.…`.
+- **Breaking:** Lineage schema name changed from `cauchy_generator.dag_lineage` to `dagzoo.dag_lineage`. Existing Parquet files with embedded lineage metadata will fail validation against the new schema name.
 - `sample_cauchy_dag` renamed to `sample_dag`; `graph/cauchy_graph.py` renamed to `graph/dag_sampler.py`.
 - Noise rollout presets for generate/benchmark smoke workflows (`configs/preset_noise_*.yaml`)
 - Noise workflow script wrapper (`scripts/generate-noise.sh`)
@@ -206,7 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Versioned DAG lineage schema validator for `metadata.lineage` (`schema_name=dagsynth.dag_lineage`, `schema_version=1.0.0`) with strict adjacency/assignment checks and backward-compatible optional metadata mode
+- Versioned DAG lineage schema validator for `metadata.lineage` (`schema_name=dagzoo.dag_lineage`, `schema_version=1.0.0`) with strict adjacency/assignment checks and backward-compatible optional metadata mode
 
 ## [0.1.11] - 2026-02-23
 
@@ -258,7 +268,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opt-in soft meta-feature steering with bounded deterministic candidate selection
 - New generation CLI controls: `--diagnostics`, `--steer-meta`, and repeatable `--meta-target key=min:max[:weight]`
 - Steering metadata payload propagation on generated bundles when steering is enabled
-- Benchmark diagnostics collection controls: `dagsynth benchmark --diagnostics [--diagnostics-out-dir ...]`
+- Benchmark diagnostics collection controls: `dagzoo benchmark --diagnostics [--diagnostics-out-dir ...]`
 - Per-profile benchmark diagnostics artifacts and summary pointers under `diagnostics/<sanitized_preset_key>_<hash>/`
 - New presets: `configs/preset_diagnostics_on.yaml` and `configs/preset_steering_conservative.yaml`
 

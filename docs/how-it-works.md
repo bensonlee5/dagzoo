@@ -1,16 +1,16 @@
-# How dagsynth Works
+# How dagzoo Works
 
-This guide explains `dagsynth` end-to-end with enough detail to reason about
+This guide explains `dagzoo` end-to-end with enough detail to reason about
 behavior without needing to jump between many documents.
 
 ## Who this is for
 
-- End users running `dagsynth generate` and `dagsynth benchmark`
+- End users running `dagzoo generate` and `dagzoo benchmark`
 - Contributors building a mental model before reading implementation files
 
 ## Mental model in 90 seconds
 
-`dagsynth` synthesizes tabular datasets by sampling causal structure,
+`dagzoo` synthesizes tabular datasets by sampling causal structure,
 executing randomized mechanisms over that structure, and enforcing quality and
 realism controls.
 
@@ -123,7 +123,7 @@ The trace is field-level provenance (`path`, `source`, `old_value`,
 
 ### 5. Hardware-aware execution semantics
 
-`dagsynth` tracks three related but distinct runtime notions:
+`dagzoo` tracks three related but distinct runtime notions:
 
 - `requested_device`: normalized user intent (`auto`, `cpu`, `cuda`, `mps`)
 - `resolved_device`: backend selected from request/environment
@@ -162,7 +162,7 @@ flowchart TB
     classDef bench fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#4a148c
     classDef hw fill:#f1f8e9,stroke:#33691e,stroke-width:2px,color:#33691e
 
-    CLI(["dagsynth CLI"])
+    CLI(["dagzoo CLI"])
 
     CLI --> GenCfg
     CLI --> BenchCfg
@@ -220,7 +220,7 @@ This section maps the runtime to module boundaries and data flow.
 
 ### 1) Entry points and orchestration boundaries
 
-- Public generation APIs live in `src/dagsynth/core/dataset.py`.
+- Public generation APIs live in `src/dagzoo/core/dataset.py`.
 - `dataset.py` is a façade over focused internals:
   - `generation_context.py`: seed/split/device/dtype helpers
   - `generation_engine.py`: torch generation loop and retries

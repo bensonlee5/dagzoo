@@ -1,4 +1,4 @@
-# dagsynth
+# dagzoo
 
 High-throughput synthetic tabular data generation built around causal structure.
 Use it to generate, benchmark, and stress-test tabular datasets with
@@ -28,7 +28,7 @@ flowchart LR
 
 ### From Latent DAG to Tabular Data
 
-Unlike many generators that treat each column as an independent noise source, `dagsynth` generates data from a **latent causal structure**. A single node in the causal graph can branch into multiple observable features, preserving complex dependency patterns.
+Unlike many generators that treat each column as an independent noise source, `dagzoo` generates data from a **latent causal structure**. A single node in the causal graph can branch into multiple observable features, preserving complex dependency patterns.
 
 ```mermaid
 flowchart LR
@@ -61,9 +61,9 @@ flowchart LR
     style ObservableSpace fill:#fafafa,stroke:#212121
 ```
 
-## Why dagsynth
+## Why dagzoo
 
-`dagsynth` is for situations where you need synthetic tabular data that is:
+`dagzoo` is for situations where you need synthetic tabular data that is:
 
 - Causally structured: datasets are generated from a sampled latent DAG, not
   independent column noise.
@@ -91,13 +91,13 @@ source .venv/bin/activate
 Install the packaged CLI globally when you do not need repo presets/config files:
 
 ```bash
-uv tool install dagsynth
+uv tool install dagzoo
 ```
 
 Generate a default batch from the repo:
 
 ```bash
-dagsynth generate --config configs/default.yaml --num-datasets 10 --out data/run1
+dagzoo generate --config configs/default.yaml --num-datasets 10 --out data/run1
 ```
 
 Each generate run writes `effective_config.yaml` and `effective_config_trace.yaml`
@@ -106,21 +106,21 @@ in the resolved output directory.
 Run a smoke benchmark:
 
 ```bash
-dagsynth benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
+dagzoo benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
 ```
 
 Inspect detected hardware tier:
 
 ```bash
-dagsynth hardware
+dagzoo hardware
 ```
 
 View help and available options for commands:
 
 ```bash
-dagsynth --help
-dagsynth generate --help
-dagsynth benchmark --help
+dagzoo --help
+dagzoo generate --help
+dagzoo benchmark --help
 ```
 
 ## Features
@@ -164,7 +164,7 @@ for the full module map with file paths and descriptions.
 ## Python API
 
 ```python
-from dagsynth import GeneratorConfig, generate_one
+from dagzoo import GeneratorConfig, generate_one
 
 config = GeneratorConfig.from_yaml("configs/default.yaml")
 bundle = generate_one(config, seed=42)

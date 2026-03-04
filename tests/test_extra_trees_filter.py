@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from dagsynth.filtering import apply_extra_trees_filter
+from dagzoo.filtering import apply_extra_trees_filter
 
 
 def _make_regression_data(

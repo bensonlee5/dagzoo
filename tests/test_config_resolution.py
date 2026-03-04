@@ -1,13 +1,13 @@
 import pytest
 
-from dagsynth.bench.constants import (
+from dagzoo.bench.constants import (
     SMOKE_N_FEATURES_CAP,
     SMOKE_N_NODES_CAP,
     SMOKE_N_TEST_CAP,
     SMOKE_N_TRAIN_CAP,
 )
-from dagsynth.config import GeneratorConfig
-from dagsynth.core.config_resolution import (
+from dagzoo.config import GeneratorConfig
+from dagzoo.core.config_resolution import (
     BenchmarkSmokeCaps,
     resolve_benchmark_preset_config,
     resolve_generate_config,

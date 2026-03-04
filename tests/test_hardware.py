@@ -1,9 +1,9 @@
 import math
 import pytest
 
-from dagsynth.config import GeneratorConfig
-from dagsynth.hardware import HardwareInfo, detect_hardware, get_peak_flops
-from dagsynth.hardware_policy import apply_hardware_policy, list_hardware_policies
+from dagzoo.config import GeneratorConfig
+from dagzoo.hardware import HardwareInfo, detect_hardware, get_peak_flops
+from dagzoo.hardware_policy import apply_hardware_policy, list_hardware_policies
 
 
 def test_peak_flops_lookup() -> None:

@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from dagsynth.converters.categorical import apply_categorical_converter
+from dagzoo.converters.categorical import apply_categorical_converter
 from conftest import make_generator as _make_generator
 
 

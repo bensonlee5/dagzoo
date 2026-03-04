@@ -2,7 +2,7 @@
 
 import torch
 
-from dagsynth.converters.numeric import apply_numeric_converter
+from dagzoo.converters.numeric import apply_numeric_converter
 from conftest import make_generator as _make_generator
 
 

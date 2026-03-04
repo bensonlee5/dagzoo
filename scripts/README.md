@@ -1,6 +1,6 @@
 # Generation Scripts
 
-These wrappers run `dagsynth` from the repo root (typically via `uv run`).
+These wrappers run `dagzoo` from the repo root (typically via `uv run`).
 
 ## Scripts
 
@@ -17,7 +17,7 @@ These wrappers run `dagsynth` from the repo root (typically via `uv run`).
 - `scripts/generate-smoke.sh [config] [num_datasets] [device]`
   - Runs quick in-memory generation with `--no-dataset-write`.
 - `scripts/generate-curriculum.sh --base-config ... --out-root ... --datasets-per-stage ... --n-test ... (--train-start/--train-stop/--train-step | --train-values)`
-  - Runs a curriculum as repeated `dagsynth generate` calls over stage row counts.
+  - Runs a curriculum as repeated `dagzoo generate` calls over stage row counts.
   - Stage rows are required; columns are optional (`--n-features` or `--stage-columns`).
   - `--chunk-size` controls sequential datasets per call.
 - `scripts/generate-missingness.sh [mechanism] [missing_rate] [num_datasets] [device] [out_dir] [seed]`
@@ -25,7 +25,7 @@ These wrappers run `dagsynth` from the repo root (typically via `uv run`).
 - `scripts/fetch-additional-references.sh`
   - Downloads the additional arXiv papers listed in `reference/ADDITIONAL_PAPERS.md`.
 - `scripts/benchmark-suite.sh [suite] [preset] [out_dir] [diagnostics] [diagnostics_out_dir]`
-  - Runs `dagsynth benchmark` with suite/preset selection and optional diagnostics.
+  - Runs `dagzoo benchmark` with suite/preset selection and optional diagnostics.
 - `scripts/benchmark-smoke.sh [preset] [diagnostics] [diagnostics_out_dir]`
   - Quick smoke benchmark for a single preset with optional diagnostics.
 - `scripts/bump-version.sh <major|minor|patch> [--dry-run] [--tag]`
@@ -51,11 +51,11 @@ These wrappers run `dagsynth` from the repo root (typically via `uv run`).
 ./scripts/benchmark-smoke.sh cpu on benchmarks/results/smoke_diag
 ./scripts/benchmark-suite.sh standard all benchmarks/results/latest
 ./scripts/benchmark-suite.sh smoke cpu benchmarks/results/smoke_cpu_diag on
-uv run dagsynth generate --config configs/preset_diagnostics_on.yaml --num-datasets 25 --diagnostics --out data/run_diag
-uv run dagsynth generate --config configs/preset_missingness_mnar.yaml --num-datasets 25 --out data/run_missing_mnar
-uv run dagsynth generate --config configs/preset_noise_student_t_generate_smoke.yaml --num-datasets 25 --out data/run_noise_student_t
-uv run dagsynth benchmark --config configs/preset_missingness_mar.yaml --preset custom --suite smoke --no-memory --out-dir benchmarks/results/smoke_missing_mar
-uv run dagsynth benchmark --config configs/preset_noise_benchmark_smoke.yaml --preset custom --suite smoke --no-memory --out-dir benchmarks/results/smoke_noise
+uv run dagzoo generate --config configs/preset_diagnostics_on.yaml --num-datasets 25 --diagnostics --out data/run_diag
+uv run dagzoo generate --config configs/preset_missingness_mnar.yaml --num-datasets 25 --out data/run_missing_mnar
+uv run dagzoo generate --config configs/preset_noise_student_t_generate_smoke.yaml --num-datasets 25 --out data/run_noise_student_t
+uv run dagzoo benchmark --config configs/preset_missingness_mar.yaml --preset custom --suite smoke --no-memory --out-dir benchmarks/results/smoke_missing_mar
+uv run dagzoo benchmark --config configs/preset_noise_benchmark_smoke.yaml --preset custom --suite smoke --no-memory --out-dir benchmarks/results/smoke_noise
 ./scripts/bump-version.sh patch --dry-run
 ./scripts/bump-version.sh minor --tag
 ```

@@ -3,7 +3,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "dagsynth"
+name = "dagzoo"
 version = "0.4.3"
 description = "High-performance synthetic tabular data generator"
 readme = "README.md"
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-dagsynth = "dagsynth.cli:main"
+dagzoo = "dagzoo.cli:main"
 
 [dependency-groups]
 dev = [
@@ -34,7 +34,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/dagsynth"]
+packages = ["src/dagzoo"]
 
 [tool.uv]
 package = true
@@ -48,11 +48,11 @@ line-length = 100
 target-version = "py313"
 
 [tool.coverage.run]
-source = ["dagsynth"]
+source = ["dagzoo"]
 omit = [
-  "src/dagsynth/cli.py",
-  "src/dagsynth/__main__.py",
-  "src/dagsynth/bench/*",
+  "src/dagzoo/cli.py",
+  "src/dagzoo/__main__.py",
+  "src/dagzoo/bench/*",
 ]
 
 [tool.coverage.report]

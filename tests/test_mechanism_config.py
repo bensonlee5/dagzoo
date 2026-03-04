@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from dagsynth.config import GeneratorConfig
+from dagzoo.config import GeneratorConfig
 
 
 def test_mechanism_family_mix_defaults_to_none() -> None:

@@ -1,6 +1,6 @@
 import pytest
 
-from dagsynth.config import (
+from dagzoo.config import (
     NOISE_FAMILY_GAUSSIAN,
     NOISE_FAMILY_LAPLACE,
     NOISE_FAMILY_MIXTURE,

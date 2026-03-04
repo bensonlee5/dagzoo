@@ -1,8 +1,8 @@
-from dagsynth.bench.baseline import (
+from dagzoo.bench.baseline import (
     build_baseline_payload,
     compare_summary_to_baseline,
 )
-from dagsynth.bench.metrics import degradation_percent, percent_change
+from dagzoo.bench.metrics import degradation_percent, percent_change
 
 
 def test_percent_change_and_degradation_direction() -> None:

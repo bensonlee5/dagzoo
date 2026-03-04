@@ -24,7 +24,7 @@ jobs:
       - name: Test with coverage
         run: >
           uv run pytest
-          --cov=dagsynth
+          --cov=dagzoo
           --cov-report=term-missing
           --cov-report=xml:coverage.xml
           -q

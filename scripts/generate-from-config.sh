@@ -22,7 +22,7 @@ if [[ ! -f "$CONFIG_PATH" ]]; then
 fi
 
 CMD=(
-  uv run dagsynth generate
+  uv run dagzoo generate
   --config "$CONFIG_PATH"
   --num-datasets "$NUM_DATASETS"
   --device "$DEVICE"

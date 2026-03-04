@@ -1,6 +1,6 @@
 # Config Resolution
 
-Canonical precedence and effective-config behavior for `dagsynth` runtime commands.
+Canonical precedence and effective-config behavior for `dagzoo` runtime commands.
 
 This document is the source of truth for:
 
@@ -12,7 +12,7 @@ ______________________________________________________________________
 
 ## Generate precedence
 
-`dagsynth generate` resolves config in this order (later steps win):
+`dagzoo generate` resolves config in this order (later steps win):
 
 1. Base YAML (`--config`)
 1. CLI device override (`--device`) -> `runtime.device`
@@ -31,7 +31,7 @@ ______________________________________________________________________
 
 ## Benchmark precedence
 
-Each preset in `dagsynth benchmark` resolves independently in this order:
+Each preset in `dagzoo benchmark` resolves independently in this order:
 
 1. Base preset config:
    - built-in preset config (`cpu`, `cuda_desktop`, `cuda_h100`) or
@@ -115,5 +115,5 @@ Fields:
 
 Use CLI flags to print payloads to stdout:
 
-- `dagsynth generate --print-effective-config --print-resolution-trace ...`
-- `dagsynth benchmark --print-effective-config --print-resolution-trace ...`
+- `dagzoo generate --print-effective-config --print-resolution-trace ...`
+- `dagzoo benchmark --print-effective-config --print-resolution-trace ...`

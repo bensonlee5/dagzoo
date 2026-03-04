@@ -1,6 +1,6 @@
 import pytest
 
-from dagsynth.config import (
+from dagzoo.config import (
     MAX_SUPPORTED_CLASS_COUNT,
     MISSINGNESS_MECHANISM_MAR,
     MISSINGNESS_MECHANISM_MCAR,
@@ -8,7 +8,7 @@ from dagsynth.config import (
     MISSINGNESS_MECHANISM_NONE,
     GeneratorConfig,
 )
-from dagsynth.io.lineage_schema import validate_metadata_lineage
+from dagzoo.io.lineage_schema import validate_metadata_lineage
 
 
 def test_load_default_config() -> None:

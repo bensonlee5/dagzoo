@@ -4,14 +4,14 @@ import math
 
 import pytest
 
-from dagsynth.config import (
+from dagzoo.config import (
     SHIFT_MODE_GRAPH_DRIFT,
     SHIFT_MODE_MECHANISM_DRIFT,
     SHIFT_MODE_MIXED,
     SHIFT_MODE_NOISE_DRIFT,
     GeneratorConfig,
 )
-from dagsynth.core.shift import (
+from dagzoo.core.shift import (
     MECHANISM_FAMILY_ORDER,
     mechanism_nonlinear_mass,
     mechanism_family_probabilities,

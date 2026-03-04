@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from dagsynth.io.lineage_schema import (
+from dagzoo.io.lineage_schema import (
     LINEAGE_ADJACENCY_ENCODING,
     LINEAGE_SCHEMA_NAME,
     LINEAGE_SCHEMA_VERSION_COMPACT,
@@ -82,7 +82,7 @@ def test_validate_lineage_payload_rejects_wrong_schema_name() -> None:
     payload["schema_name"] = "other.schema"
     with pytest.raises(
         LineageValidationError,
-        match=r"lineage\.schema_name: must equal 'dagsynth\.dag_lineage'",
+        match=r"lineage\.schema_name: must equal 'dagzoo\.dag_lineage'",
     ):
         validate_lineage_payload(payload)
 

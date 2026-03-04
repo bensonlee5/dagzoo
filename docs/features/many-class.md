@@ -16,7 +16,7 @@ ______________________________________________________________________
 ## Generation workflow
 
 ```bash
-dagsynth generate \
+dagzoo generate \
   --config configs/preset_many_class_generate_smoke.yaml \
   --num-datasets 25 \
   --out data/run_many_class_smoke
@@ -27,7 +27,7 @@ ______________________________________________________________________
 ## Benchmark workflow
 
 ```bash
-dagsynth benchmark \
+dagzoo benchmark \
   --config configs/preset_many_class_benchmark_smoke.yaml \
   --preset custom \
   --suite smoke \

@@ -1,7 +1,7 @@
 # Dagsynth Functional Transforms (Canonical)
 
-This document is the canonical mathematical specification for the generation transforms used by `dagsynth`.
-Equations are implementation-faithful to the current runtime in `src/dagsynth`.
+This document is the canonical mathematical specification for the generation transforms used by `dagzoo`.
+Equations are implementation-faithful to the current runtime in `src/dagzoo`.
 
 ## Notation and Symbols
 

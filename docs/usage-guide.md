@@ -19,7 +19,7 @@ source .venv/bin/activate
 For a global CLI install (without repo presets/config files):
 
 ```bash
-uv tool install dagsynth
+uv tool install dagzoo
 ```
 
 ______________________________________________________________________
@@ -29,7 +29,7 @@ ______________________________________________________________________
 Use this when you want a default high-quality batch.
 
 ```bash
-dagsynth generate --config configs/default.yaml --num-datasets 10 --out data/run1
+dagzoo generate --config configs/default.yaml --num-datasets 10 --out data/run1
 ```
 
 Each generate run writes `effective_config.yaml` and `effective_config_trace.yaml`
@@ -42,7 +42,7 @@ ______________________________________________________________________
 Use diagnostics to emit per-dataset observability artifacts.
 
 ```bash
-dagsynth generate \
+dagzoo generate \
   --config configs/default.yaml \
   --num-datasets 50 \
   --diagnostics \
@@ -61,7 +61,7 @@ Use a fixed layout plan when you want many datasets with consistent structure
 and aligned emitted columns across the batch.
 
 ```python
-from dagsynth import (
+from dagzoo import (
     GeneratorConfig,
     generate_batch_fixed_layout,
     sample_fixed_layout,
@@ -83,7 +83,7 @@ ______________________________________________________________________
 Use missingness workflows for MCAR/MAR/MNAR robustness regimes:
 
 ```bash
-dagsynth generate --config configs/preset_missingness_mar.yaml --num-datasets 25 --out data/run_missing_mar
+dagzoo generate --config configs/preset_missingness_mar.yaml --num-datasets 25 --out data/run_missing_mar
 ```
 
 Detailed guide: [Missingness](features/missingness.md)
@@ -95,9 +95,9 @@ ______________________________________________________________________
 Use many-class workflows to exercise the rollout envelope (`n_classes_max <= 32`).
 
 ```bash
-dagsynth generate --config configs/preset_many_class_generate_smoke.yaml --num-datasets 25 --out data/run_many_class_smoke
+dagzoo generate --config configs/preset_many_class_generate_smoke.yaml --num-datasets 25 --out data/run_many_class_smoke
 
-dagsynth benchmark \
+dagzoo benchmark \
   --config configs/preset_many_class_benchmark_smoke.yaml \
   --preset custom \
   --suite smoke \
@@ -114,7 +114,7 @@ ______________________________________________________________________
 Use shift profiles for controlled graph/mechanism/noise drift:
 
 ```bash
-dagsynth generate --config configs/preset_shift_mixed_generate_smoke.yaml --num-datasets 25 --out data/run_shift_mixed
+dagzoo generate --config configs/preset_shift_mixed_generate_smoke.yaml --num-datasets 25 --out data/run_shift_mixed
 ```
 
 Detailed guide: [Shift / Drift](features/shift.md)
@@ -126,7 +126,7 @@ ______________________________________________________________________
 Use noise workflows for explicit Gaussian/Laplace/Student-t/mixture regimes:
 
 ```bash
-dagsynth generate --config configs/preset_noise_mixture_generate_smoke.yaml --num-datasets 25 --out data/run_noise_mixture
+dagzoo generate --config configs/preset_noise_mixture_generate_smoke.yaml --num-datasets 25 --out data/run_noise_mixture
 ```
 
 Detailed guide: [Noise Diversification](features/noise.md)
@@ -139,7 +139,7 @@ Use benchmark workflows for smoke checks, feature guardrails, and regression
 gating.
 
 ```bash
-dagsynth benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
+dagzoo benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
 ```
 
 Detailed guide: [Benchmark Workflows and Guardrails](features/benchmark-guardrails.md)

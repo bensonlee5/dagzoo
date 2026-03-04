@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dagsynth.config import GeneratorConfig
+from dagzoo.config import GeneratorConfig
 
 
 @pytest.mark.parametrize(

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from dagsynth.cli import _print_preset_result_line, main
+from dagzoo.cli import _print_preset_result_line, main
 
 
 def test_benchmark_cli_writes_json(tmp_path) -> None:

@@ -4,11 +4,11 @@ from dataclasses import fields
 
 import pytest
 
-from dagsynth.config import GeneratorConfig
-from dagsynth.core.dataset import generate_one
-from dagsynth.core.metrics_torch import extract_torch_metrics
-from dagsynth.diagnostics import extract_dataset_metrics
-from dagsynth.diagnostics.types import DatasetMetrics
+from dagzoo.config import GeneratorConfig
+from dagzoo.core.dataset import generate_one
+from dagzoo.core.metrics_torch import extract_torch_metrics
+from dagzoo.diagnostics import extract_dataset_metrics
+from dagzoo.diagnostics.types import DatasetMetrics
 
 
 def _tiny_config(task: str) -> GeneratorConfig:
@@ -60,8 +60,8 @@ def test_generation_does_not_call_numpy_diagnostics_extractor(
     def _fail_extract(*_args, **_kwargs):
         raise AssertionError("generation should not call diagnostics.extract_dataset_metrics")
 
-    monkeypatch.setattr("dagsynth.diagnostics.metrics.extract_dataset_metrics", _fail_extract)
-    monkeypatch.setattr("dagsynth.diagnostics.extract_dataset_metrics", _fail_extract)
+    monkeypatch.setattr("dagzoo.diagnostics.metrics.extract_dataset_metrics", _fail_extract)
+    monkeypatch.setattr("dagzoo.diagnostics.extract_dataset_metrics", _fail_extract)
 
     cfg = _tiny_config("regression")
 

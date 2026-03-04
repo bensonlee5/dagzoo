@@ -2,10 +2,10 @@ import numpy as np
 import pytest
 import torch
 
-from dagsynth.config import GeneratorConfig
-from dagsynth.core.dataset import generate_batch, generate_one
-from dagsynth.diagnostics import extract_dataset_metrics, extract_metrics_batch
-from dagsynth.types import DatasetBundle
+from dagzoo.config import GeneratorConfig
+from dagzoo.core.dataset import generate_batch, generate_one
+from dagzoo.diagnostics import extract_dataset_metrics, extract_metrics_batch
+from dagzoo.types import DatasetBundle
 
 
 def _tiny_config(task: str) -> GeneratorConfig:
@@ -39,7 +39,7 @@ def test_extract_dataset_metrics_classification_invariants(
     def _stub_filter(*_args, **_kwargs):
         return True, {"wins_ratio": 0.75, "n_valid_oob": 64, "backend": "extra_trees_cpu"}
 
-    monkeypatch.setattr("dagsynth.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagzoo.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
     bundle = generate_one(_tiny_config("classification"), seed=7, device="cpu")
 
     metrics = extract_dataset_metrics(bundle, include_spearman=True)
@@ -74,7 +74,7 @@ def test_extract_dataset_metrics_regression_branch(
     def _stub_filter(*_args, **_kwargs):
         return True, {"wins_ratio": 0.55, "n_valid_oob": 64, "backend": "extra_trees_cpu"}
 
-    monkeypatch.setattr("dagsynth.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagzoo.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
     bundle = generate_one(_tiny_config("regression"), seed=17, device="cpu")
 
     metrics = extract_dataset_metrics(bundle)
@@ -99,7 +99,7 @@ def test_extract_dataset_metrics_spearman_toggle(
     def _stub_filter(*_args, **_kwargs):
         return True, {"wins_ratio": 0.61, "n_valid_oob": 6, "backend": "extra_trees_cpu"}
 
-    monkeypatch.setattr("dagsynth.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagzoo.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
     bundle = DatasetBundle(
         X_train=np.asarray([[0.0, 10.0], [1.0, 20.0], [2.0, 30.0], [3.0, 40.0]], dtype=np.float32),
         y_train=np.asarray([0.0, 1.0, 2.0, 3.0], dtype=np.float32),
@@ -125,7 +125,7 @@ def test_extract_dataset_metrics_reproducible_for_fixed_input(
     def _stub_filter(*_args, **_kwargs):
         return True, {"wins_ratio": 0.42, "n_valid_oob": 64, "backend": "extra_trees_cpu"}
 
-    monkeypatch.setattr("dagsynth.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagzoo.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
     cfg = _tiny_config("classification")
     bundle_a = generate_one(cfg, seed=123, device="cpu")
     bundle_b = generate_one(cfg, seed=123, device="cpu")
@@ -204,7 +204,7 @@ def test_extract_dataset_metrics_handles_degenerate_constant_columns(
     def _stub_filter(*_args, **_kwargs):
         return False, {"reason": "insufficient_oob_predictions", "n_valid_oob": 0}
 
-    monkeypatch.setattr("dagsynth.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagzoo.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
     bundle = DatasetBundle(
         X_train=np.ones((8, 3), dtype=np.float32),
         y_train=np.linspace(0.0, 1.0, num=8, dtype=np.float32),
@@ -233,7 +233,7 @@ def test_extract_metrics_batch_preserves_order(
     def _stub_filter(*_args, **_kwargs):
         return True, {"wins_ratio": 0.8, "n_valid_oob": 64, "backend": "extra_trees_cpu"}
 
-    monkeypatch.setattr("dagsynth.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagzoo.core.metrics_torch.apply_extra_trees_filter", _stub_filter)
     cfg = _tiny_config("classification")
     bundles = generate_batch(cfg, num_datasets=2, seed=900, device="cpu")
 
@@ -295,7 +295,7 @@ def test_extract_dataset_metrics_normalizes_bundle_to_cpu_before_extraction(
             "cat_cardinality_max": None,
         }
 
-    monkeypatch.setattr("dagsynth.diagnostics.metrics.extract_torch_metrics", _stub_extract)
+    monkeypatch.setattr("dagzoo.diagnostics.metrics.extract_torch_metrics", _stub_extract)
 
     metrics = extract_dataset_metrics(bundle, include_spearman=False)
     extracted_bundle = captured["bundle"]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from dagsynth.config import (
+from dagzoo.config import (
     MISSINGNESS_MECHANISM_MAR,
     MISSINGNESS_MECHANISM_MCAR,
     MISSINGNESS_MECHANISM_MNAR,
@@ -13,8 +13,8 @@ from dagsynth.config import (
     DatasetConfig,
     MissingnessMechanism,
 )
-from dagsynth.rng import SeedManager
-from dagsynth.sampling import sample_missingness_mask
+from dagzoo.rng import SeedManager
+from dagzoo.sampling import sample_missingness_mask
 
 
 def _feature_matrix(n_rows: int = 512, n_cols: int = 12) -> torch.Tensor:

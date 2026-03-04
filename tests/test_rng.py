@@ -2,7 +2,7 @@
 
 import pytest
 
-from dagsynth.rng import (
+from dagzoo.rng import (
     SEED32_MAX,
     SeedManager,
     derive_seed,

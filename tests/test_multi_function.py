@@ -3,8 +3,8 @@
 import pytest
 import torch
 
-from dagsynth.core.layout_types import AggregationKind
-from dagsynth.functions.multi import apply_multi_function
+from dagzoo.core.layout_types import AggregationKind
+from dagzoo.functions.multi import apply_multi_function
 from conftest import make_generator as _make_generator
 
 

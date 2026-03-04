@@ -18,9 +18,9 @@ ______________________________________________________________________
 Use presets for standard mechanism runs:
 
 ```bash
-dagsynth generate --config configs/preset_missingness_mcar.yaml --num-datasets 25 --out data/run_missing_mcar
-dagsynth generate --config configs/preset_missingness_mar.yaml --num-datasets 25 --out data/run_missing_mar
-dagsynth generate --config configs/preset_missingness_mnar.yaml --num-datasets 25 --out data/run_missing_mnar
+dagzoo generate --config configs/preset_missingness_mcar.yaml --num-datasets 25 --out data/run_missing_mcar
+dagzoo generate --config configs/preset_missingness_mar.yaml --num-datasets 25 --out data/run_missing_mar
+dagzoo generate --config configs/preset_missingness_mnar.yaml --num-datasets 25 --out data/run_missing_mnar
 ```
 
 ______________________________________________________________________
@@ -28,7 +28,7 @@ ______________________________________________________________________
 ## Targeted MAR calibration via CLI
 
 ```bash
-dagsynth generate \
+dagzoo generate \
   --config configs/default.yaml \
   --num-datasets 25 \
   --device cpu \

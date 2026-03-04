@@ -2,8 +2,8 @@
 
 import torch
 
-from dagsynth.config import DatasetConfig
-from dagsynth.postprocess.postprocess import (
+from dagzoo.config import DatasetConfig
+from dagzoo.postprocess.postprocess import (
     _clip_and_standardize,
     inject_missingness,
     postprocess_dataset,

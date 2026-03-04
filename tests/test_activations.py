@@ -2,7 +2,7 @@
 
 import torch
 
-from dagsynth.functions.activations import _fixed_activation, apply_random_activation
+from dagzoo.functions.activations import _fixed_activation, apply_random_activation
 from conftest import make_generator as _make_generator
 
 

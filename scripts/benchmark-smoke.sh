@@ -18,4 +18,4 @@ if [[ -n "$DIAGNOSTICS_OUT_DIR" ]]; then
   args+=(--diagnostics-out-dir "$DIAGNOSTICS_OUT_DIR")
 fi
 
-uv run dagsynth "${args[@]}"
+uv run dagzoo "${args[@]}"

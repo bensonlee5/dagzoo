@@ -18,14 +18,14 @@ ______________________________________________________________________
 Quick smoke and broader standard runs:
 
 ```bash
-dagsynth benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
-dagsynth benchmark --suite standard --preset cpu --out-dir benchmarks/results/standard_cpu
+dagzoo benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
+dagzoo benchmark --suite standard --preset cpu --out-dir benchmarks/results/standard_cpu
 ```
 
 Diagnostics-enabled benchmark:
 
 ```bash
-dagsynth benchmark \
+dagzoo benchmark \
   --suite smoke \
   --preset cpu \
   --diagnostics \
@@ -37,21 +37,21 @@ ______________________________________________________________________
 ## Feature-specific guardrail runs
 
 ```bash
-dagsynth benchmark \
+dagzoo benchmark \
   --config configs/preset_missingness_mar.yaml \
   --preset custom \
   --suite smoke \
   --no-memory \
   --out-dir benchmarks/results/smoke_missing_mar
 
-dagsynth benchmark \
+dagzoo benchmark \
   --config configs/preset_shift_benchmark_smoke.yaml \
   --preset custom \
   --suite smoke \
   --no-memory \
   --out-dir benchmarks/results/smoke_shift_guardrails
 
-dagsynth benchmark \
+dagzoo benchmark \
   --config configs/preset_noise_benchmark_smoke.yaml \
   --preset custom \
   --suite smoke \
@@ -66,7 +66,7 @@ ______________________________________________________________________
 For CI-like checks:
 
 ```bash
-dagsynth benchmark \
+dagzoo benchmark \
   --config configs/preset_shift_benchmark_smoke.yaml \
   --preset custom \
   --suite smoke \

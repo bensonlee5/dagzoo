@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from dagsynth.functions.random_functions import (
+from dagzoo.functions.random_functions import (
     MechanismFamily,
     _sample_function_family,
     _apply_tree,
