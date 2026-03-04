@@ -20,6 +20,7 @@ from sklearn.metrics import adjusted_rand_score
 from dagzoo.config import GeneratorConfig
 from dagzoo.converters import categorical as categorical_converter_module
 from dagzoo.core.dataset import generate_batch_iter
+from dagzoo.core.layout_types import AggregationKind, MechanismFamily
 from dagzoo.core.shift import MECHANISM_FAMILY_ORDER
 from dagzoo.diagnostics.coverage import CoverageAggregationConfig, CoverageAggregator
 from dagzoo.diagnostics_targets import build_diagnostics_aggregation_config
@@ -32,9 +33,9 @@ from dagzoo.math_utils import log_uniform, sanitize_json, standardize
 from dagzoo.sampling import random_points as random_points_module
 from dagzoo.types import DatasetBundle
 
-_MECHANISM_FAMILIES: tuple[str, ...] = MECHANISM_FAMILY_ORDER
+_MECHANISM_FAMILIES: tuple[MechanismFamily, ...] = MECHANISM_FAMILY_ORDER
 _AGGREGATION_SCALE_FACTORS: tuple[float, ...] = (0.25, 1.0, 4.0, 16.0)
-_AGGREGATION_KINDS: frozenset[str] = frozenset({"sum", "product", "max", "logsumexp"})
+_AGGREGATION_KINDS: frozenset[AggregationKind] = frozenset({"sum", "product", "max", "logsumexp"})
 
 _SCALE_CORE_METRICS: tuple[str, ...] = (
     "linearity_proxy",
@@ -82,8 +83,8 @@ class AblationArm:
     claim_ids: tuple[str, ...] = ()
     confidence: str = "high"
     activation_map: dict[str, str] = field(default_factory=dict)
-    family_map: dict[str, str] = field(default_factory=dict)
-    aggregation_map: dict[str, str] = field(default_factory=dict)
+    family_map: dict[MechanismFamily, MechanismFamily] = field(default_factory=dict)
+    aggregation_map: dict[AggregationKind, AggregationKind] = field(default_factory=dict)
 
 
 _HYPOTHESIS_CLAIMS: tuple[HypothesisClaim, ...] = (
@@ -492,7 +493,7 @@ def _activation_output(name: str, x: torch.Tensor, *, seed: int) -> torch.Tensor
 
 
 def _family_output(
-    family: str,
+    family: MechanismFamily,
     x: torch.Tensor,
     *,
     seed: int,
@@ -501,7 +502,7 @@ def _family_output(
     """Apply one function family with fixed output width."""
 
     generator = _torch_generator(seed)
-    y = apply_random_function(x, generator, out_dim=out_dim, function_type=family)  # type: ignore[arg-type]
+    y = apply_random_function(x, generator, out_dim=out_dim, function_type=family)
     y = torch.nan_to_num(y.to(torch.float32), nan=0.0, posinf=1e6, neginf=-1e6)
     y = torch.clamp(y, -1e6, 1e6)
     y = standardize(y)
@@ -540,7 +541,9 @@ def _build_activation_track(
         for idx, left in enumerate(activations):
             for right in activations[idx + 1 :]:
                 key = _pair_key(left, right)
-                pair_runs.setdefault(key, []).append(_numeric_metrics(outputs[left], outputs[right]))
+                pair_runs.setdefault(key, []).append(
+                    _numeric_metrics(outputs[left], outputs[right])
+                )
 
     pairs = _aggregate_pair_runs(pair_runs, thresholds=thresholds)
     return {
@@ -578,7 +581,9 @@ def _build_family_track(
         for idx, left in enumerate(_MECHANISM_FAMILIES):
             for right in _MECHANISM_FAMILIES[idx + 1 :]:
                 key = _pair_key(left, right)
-                pair_runs.setdefault(key, []).append(_numeric_metrics(outputs[left], outputs[right]))
+                pair_runs.setdefault(key, []).append(
+                    _numeric_metrics(outputs[left], outputs[right])
+                )
 
     constructed_pair_runs: dict[tuple[str, str], list[dict[str, float]]] = {}
     for seed_offset in range(n_seeds):
@@ -739,7 +744,7 @@ def _evaluate_hypothesis_registry(
     evaluated: list[dict[str, Any]] = []
 
     for claim in _HYPOTHESIS_CLAIMS:
-        claim_payload = {
+        claim_payload: dict[str, Any] = {
             "claim_id": claim.claim_id,
             "track": claim.track,
             "left": claim.left,
@@ -782,7 +787,10 @@ def _evaluate_hypothesis_registry(
         if claim.track == "aggregation":
             status = "informational"
             if claim.claim_type == "approximate":
-                if "near_equivalent" in aggregation_labels or "exact_affine_equivalent" in aggregation_labels:
+                if (
+                    "near_equivalent" in aggregation_labels
+                    or "exact_affine_equivalent" in aggregation_labels
+                ):
                     status = "supported"
                 else:
                     status = "not_supported"
@@ -845,7 +853,8 @@ def generate_effective_diversity_report(
     family_pairs = family_track["pairs"]
     constructed_pairs = family_track["constructed_pairs"]
     logsumexp_profile = {
-        f"scale_{entry['scale_factor']}": entry["pair_metrics"] for entry in aggregation_track["scales"]
+        f"scale_{entry['scale_factor']}": entry["pair_metrics"]
+        for entry in aggregation_track["scales"]
     }
 
     x_probe = torch.randn(n_rows, n_cols, generator=_torch_generator(seed + 888))
@@ -1031,8 +1040,8 @@ def _build_combined_arm(*, selected_arms: tuple[AblationArm, ...], arm_set: str)
     """Build merged combined arm for the selected one-at-a-time set."""
 
     activation_map: dict[str, str] = {}
-    family_map: dict[str, str] = {}
-    aggregation_map: dict[str, str] = {}
+    family_map: dict[MechanismFamily, MechanismFamily] = {}
+    aggregation_map: dict[AggregationKind, AggregationKind] = {}
 
     for arm in selected_arms:
         for source, target in arm.activation_map.items():
@@ -1057,7 +1066,9 @@ def _build_combined_arm(*, selected_arms: tuple[AblationArm, ...], arm_set: str)
                 )
             aggregation_map[source] = target
 
-    combined_id = "combined_high_confidence" if arm_set == "high_confidence" else "combined_all_claims"
+    combined_id = (
+        "combined_high_confidence" if arm_set == "high_confidence" else "combined_all_claims"
+    )
     combined_description = (
         "Combined high-confidence redundancy mappings."
         if arm_set == "high_confidence"
@@ -1240,11 +1251,11 @@ def _coverage_config_for_scale(base_config: GeneratorConfig) -> CoverageAggregat
 
 
 def _adjust_family_mix(
-    function_family_mix: dict[str, float] | None,
+    function_family_mix: dict[MechanismFamily, float] | None,
     *,
-    source_family: str,
-    target_family: str,
-) -> dict[str, float] | None:
+    source_family: MechanismFamily,
+    target_family: MechanismFamily,
+) -> dict[MechanismFamily, float] | None:
     """Ensure mapped explicit function family remains allowed under mix constraints."""
 
     if function_family_mix is None:
@@ -1294,34 +1305,34 @@ def _runtime_override_context(arm: AblationArm) -> Iterator[None]:
             generator: torch.Generator,
             *,
             mechanism_logit_tilt: float,
-            function_family_mix: dict[str, float] | None = None,
-        ) -> str:
+            function_family_mix: dict[MechanismFamily, float] | None = None,
+        ) -> MechanismFamily:
             sampled = original_sample_function_family(
                 generator,
                 mechanism_logit_tilt=mechanism_logit_tilt,
                 function_family_mix=function_family_mix,
             )
-            return str(arm.family_map.get(str(sampled), str(sampled)))
+            return arm.family_map.get(sampled, sampled)
 
         def _mapped_apply_random_function(
             x: torch.Tensor,
             generator: torch.Generator,
             *,
             out_dim: int | None = None,
-            function_type: str | None = None,
+            function_type: MechanismFamily | None = None,
             mechanism_logit_tilt: float = 0.0,
-            function_family_mix: dict[str, float] | None = None,
+            function_family_mix: dict[MechanismFamily, float] | None = None,
             noise_sigma_multiplier: float = 1.0,
             noise_spec: Any = None,
         ) -> torch.Tensor:
             mapped_type = function_type
             adjusted_mix = function_family_mix
             if function_type is not None:
-                mapped_type = str(arm.family_map.get(str(function_type), str(function_type)))
+                mapped_type = arm.family_map.get(function_type, function_type)
                 adjusted_mix = _adjust_family_mix(
                     function_family_mix,
-                    source_family=str(function_type),
-                    target_family=str(mapped_type),
+                    source_family=function_type,
+                    target_family=mapped_type,
                 )
             return original_apply_random_function(
                 x,
@@ -1334,10 +1345,14 @@ def _runtime_override_context(arm: AblationArm) -> Iterator[None]:
                 noise_spec=noise_spec,
             )
 
-        _patch_attr(random_functions_module, "_sample_function_family", _mapped_sample_function_family)
+        _patch_attr(
+            random_functions_module, "_sample_function_family", _mapped_sample_function_family
+        )
         _patch_attr(random_functions_module, "apply_random_function", _mapped_apply_random_function)
         _patch_attr(multi_module, "apply_random_function", _mapped_apply_random_function)
-        _patch_attr(categorical_converter_module, "apply_random_function", _mapped_apply_random_function)
+        _patch_attr(
+            categorical_converter_module, "apply_random_function", _mapped_apply_random_function
+        )
         _patch_attr(random_points_module, "apply_random_function", _mapped_apply_random_function)
 
     if arm.aggregation_map:
@@ -1346,10 +1361,10 @@ def _runtime_override_context(arm: AblationArm) -> Iterator[None]:
         def _mapped_aggregate_parent_outputs(
             stacked: torch.Tensor,
             *,
-            aggregation_kind: str,
+            aggregation_kind: AggregationKind,
         ) -> torch.Tensor:
-            mapped_kind = str(arm.aggregation_map.get(aggregation_kind, aggregation_kind))
-            return original_aggregate(stacked, aggregation_kind=mapped_kind)  # type: ignore[arg-type]
+            mapped_kind = arm.aggregation_map.get(aggregation_kind, aggregation_kind)
+            return original_aggregate(stacked, aggregation_kind=mapped_kind)
 
         _patch_attr(multi_module, "_aggregate_parent_outputs", _mapped_aggregate_parent_outputs)
 
@@ -1604,7 +1619,11 @@ def generate_effective_diversity_scale_report(
     arm_results: list[dict[str, Any]] = []
     comparisons: list[dict[str, Any]] = []
     for i, arm in enumerate(selected_arms, start=2):
-        status = "skipped" if _arm_skip_reason(arm, runtime_activations=runtime_activations) else "running"
+        status = (
+            "skipped"
+            if _arm_skip_reason(arm, runtime_activations=runtime_activations)
+            else "running"
+        )
         print(
             f"\n[{i}/{total_arms}] {status}: {arm.arm_id} ({arm.confidence})",
             file=sys.stderr,
@@ -1818,7 +1837,11 @@ def run_effective_diversity_audit(
     local_report: dict[str, Any] | None = None
     scale_report: dict[str, Any] | None = None
 
-    print(f"Effective-diversity audit starting (phase={normalized_phase})", file=sys.stderr, flush=True)
+    print(
+        f"Effective-diversity audit starting (phase={normalized_phase})",
+        file=sys.stderr,
+        flush=True,
+    )
 
     if normalized_phase in {"both", "local"}:
         print("\n--- Local overlap phase ---", file=sys.stderr, flush=True)
@@ -1976,7 +1999,9 @@ def write_effective_diversity_run_artifacts(
         paths["equivalence_markdown"] = local_md
 
     if isinstance(scale_report, dict):
-        impact_json, impact_md = write_effective_diversity_scale_artifacts(scale_report, out_dir=out_path)
+        impact_json, impact_md = write_effective_diversity_scale_artifacts(
+            scale_report, out_dir=out_path
+        )
         paths["impact_json"] = impact_json
         paths["impact_markdown"] = impact_md
 
