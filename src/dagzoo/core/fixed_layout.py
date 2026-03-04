@@ -10,7 +10,7 @@ from typing import Any
 
 import torch
 
-from dagzoo.config import GeneratorConfig
+from dagzoo.config import GeneratorConfig, dataset_rows_is_variable
 from dagzoo.core.generation_context import (
     _resolve_device,
     _resolve_run_seed,
@@ -89,14 +89,16 @@ def _build_fixed_layout_compatibility_snapshot(
     config: GeneratorConfig,
     *,
     resolved_device: str,
+    n_train: int,
+    n_test: int,
 ) -> dict[str, Any]:
     """Build a fixed-layout compatibility snapshot from effective generation inputs."""
 
     shift_params = resolve_shift_runtime_params(config)
     return {
         "dataset.task": str(config.dataset.task),
-        "dataset.n_train": int(config.dataset.n_train),
-        "dataset.n_test": int(config.dataset.n_test),
+        "dataset.n_train": int(n_train),
+        "dataset.n_test": int(n_test),
         "dataset.n_features_min": int(config.dataset.n_features_min),
         "dataset.n_features_max": int(config.dataset.n_features_max),
         "dataset.categorical_ratio_min": float(config.dataset.categorical_ratio_min),
@@ -111,6 +113,16 @@ def _build_fixed_layout_compatibility_snapshot(
     }
 
 
+def _validate_fixed_layout_rows_mode(config: GeneratorConfig) -> None:
+    """Reject variable rows specs for fixed-layout generation contracts."""
+
+    if dataset_rows_is_variable(config.dataset.rows):
+        raise ValueError(
+            "Fixed-layout generation requires a fixed split size; variable dataset.rows "
+            "modes (range/choices) are not supported."
+        )
+
+
 def sample_fixed_layout(
     config: GeneratorConfig,
     *,
@@ -120,12 +132,13 @@ def sample_fixed_layout(
     """Sample one reusable layout plan for fixed-layout batch generation."""
 
     run_seed = _resolve_run_seed(config, seed)
+    _validate_fixed_layout_rows_mode(config)
     requested_device = (device or config.runtime.device or "auto").lower()
     resolved_device = _resolve_device(config, device)
     manager = SeedManager(run_seed)
     layout_gen = manager.torch_rng("layout")
     layout = _sample_layout(config, layout_gen, "cpu")
-    n_train, n_test = _resolve_split_sizes(config)
+    n_train, n_test = _resolve_split_sizes(config, dataset_seed=run_seed)
     _validate_class_split_for_layout(config, layout=layout, n_train=n_train, n_test=n_test)
     return FixedLayoutPlan(
         layout=layout,
@@ -138,6 +151,8 @@ def sample_fixed_layout(
         compatibility_snapshot=_build_fixed_layout_compatibility_snapshot(
             config,
             resolved_device=resolved_device,
+            n_train=n_train,
+            n_test=n_test,
         ),
     )
 
@@ -189,6 +204,8 @@ def _validate_fixed_layout_plan_compatibility(
 ) -> str:
     """Validate that a fixed-layout plan is compatible with the active config."""
 
+    _validate_fixed_layout_rows_mode(config)
+
     snapshot = plan.compatibility_snapshot
     if not isinstance(snapshot, dict):
         raise ValueError(
@@ -237,9 +254,12 @@ def _validate_fixed_layout_plan_compatibility(
             f"the currently resolved backend ({plan.resolved_device!r} != {resolved_device!r})."
         )
 
+    current_n_train, current_n_test = _resolve_split_sizes(config, dataset_seed=int(plan.plan_seed))
     current_snapshot = _build_fixed_layout_compatibility_snapshot(
         config,
         resolved_device=resolved_device,
+        n_train=current_n_train,
+        n_test=current_n_test,
     )
     mismatches: list[str] = []
     for key in _FIXED_LAYOUT_COMPAT_KEYS:

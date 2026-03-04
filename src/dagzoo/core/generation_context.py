@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import torch
 
-from dagzoo.config import GeneratorConfig, validate_class_split_feasibility
+from dagzoo.config import (
+    GeneratorConfig,
+    resolve_dataset_total_rows,
+    validate_class_split_feasibility,
+)
 from dagzoo.core.constants import (
     NODE_SPEC_SEED_OFFSET,
     SPLIT_PERMUTATION_SEED_OFFSET,
@@ -13,10 +17,25 @@ from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.rng import offset_seed32, validate_seed32
 
 
-def _resolve_split_sizes(config: GeneratorConfig) -> tuple[int, int]:
-    """Resolve explicit train/test split sizes from config."""
+def _resolve_split_sizes(
+    config: GeneratorConfig,
+    *,
+    dataset_seed: int | None = None,
+) -> tuple[int, int]:
+    """Resolve train/test split sizes from explicit or rows-derived config state."""
 
-    return int(config.dataset.n_train), int(config.dataset.n_test)
+    n_test = int(config.dataset.n_test)
+    total_rows = resolve_dataset_total_rows(config.dataset.rows, dataset_seed=dataset_seed)
+    if total_rows is None:
+        return int(config.dataset.n_train), n_test
+
+    n_train = int(total_rows) - n_test
+    if n_train <= 0:
+        raise ValueError(
+            "Resolved rows split is invalid: total rows must be > dataset.n_test "
+            f"(total_rows={int(total_rows)}, n_test={n_test})."
+        )
+    return n_train, n_test
 
 
 def _resolve_run_seed(config: GeneratorConfig, seed_override: int | None) -> int:
