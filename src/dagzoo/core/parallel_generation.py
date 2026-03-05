@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import queue
+import sys
 import threading
+
+import torch
 
 from dagzoo.config import GeneratorConfig
 from dagzoo.core import generation_context as _generation_context
@@ -24,6 +28,29 @@ class ParallelGenerationConfigError(ValueError):
 class _BundleResult:
     dataset_index: int
     bundle: DatasetBundle
+
+
+@contextmanager
+def _cap_torch_intraop_threads(worker_count: int) -> Iterator[None]:
+    """Prevent local worker threads from oversubscribing Torch CPU kernels."""
+
+    if worker_count <= 1:
+        yield
+        return
+
+    original_threads = int(torch.get_num_threads())
+    capped_threads = max(1, original_threads // worker_count)
+    if capped_threads >= original_threads:
+        yield
+        return
+
+    # Torch thread settings are process-global, so keep the cap scoped to the local
+    # multi-worker benchmark path and restore it after all worker threads have joined.
+    torch.set_num_threads(capped_threads)
+    try:
+        yield
+    finally:
+        torch.set_num_threads(original_threads)
 
 
 def _validate_parallel_generation_request(
@@ -81,6 +108,7 @@ def generate_parallel_batch_iter(
     bundle_queues = [
         queue.Queue[_BundleResult](maxsize=per_worker_capacity) for _ in range(worker_count)
     ]
+    # Each worker writes its own slot at most once; the consumer only reads stable references.
     worker_errors: list[BaseException | None] = [None] * worker_count
     stop_event = threading.Event()
     consumer_closed_event = threading.Event()
@@ -107,9 +135,9 @@ def generate_parallel_batch_iter(
                 continue
 
     def _run_worker(local_worker_index: int) -> None:
-        worker_config = copy.deepcopy(config)
-        worker_config.runtime.worker_index = local_worker_index
         try:
+            worker_config = copy.deepcopy(config)
+            worker_config.runtime.worker_index = local_worker_index
             for dataset_index, dataset_seed in iter_worker_dataset_seeds(
                 run_seed=run_seed,
                 num_datasets=num_datasets,
@@ -135,27 +163,20 @@ def generate_parallel_batch_iter(
 
     first_error: BaseException | None = None
 
-    with ThreadPoolExecutor(
-        max_workers=worker_count,
-        thread_name_prefix="dagzoo-parallel-gen",
-    ) as executor:
-        futures = [executor.submit(_run_worker, worker_idx) for worker_idx in range(worker_count)]
-        try:
-            for next_dataset_index in range(num_datasets):
-                target_worker_index = next_dataset_index % worker_count
-                target_queue = bundle_queues[target_worker_index]
-                target_future = futures[target_worker_index]
-                while True:
-                    if first_error is None:
-                        worker_error = _recorded_worker_error(target_worker_index)
-                        if worker_error is not None:
-                            first_error = worker_error
-                            stop_event.set()
-                    if first_error is not None:
-                        raise first_error
-                    try:
-                        item = target_queue.get(timeout=0.05)
-                    except queue.Empty:
+    with _cap_torch_intraop_threads(worker_count):
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="dagzoo-parallel-gen",
+        ) as executor:
+            futures = [
+                executor.submit(_run_worker, worker_idx) for worker_idx in range(worker_count)
+            ]
+            try:
+                for next_dataset_index in range(num_datasets):
+                    target_worker_index = next_dataset_index % worker_count
+                    target_queue = bundle_queues[target_worker_index]
+                    target_future = futures[target_worker_index]
+                    while True:
                         if first_error is None:
                             worker_error = _recorded_worker_error(target_worker_index)
                             if worker_error is not None:
@@ -163,33 +184,57 @@ def generate_parallel_batch_iter(
                                 stop_event.set()
                         if first_error is not None:
                             raise first_error
-                        if target_future.done():
-                            worker_exc = target_future.exception()
-                            if worker_exc is not None:
-                                stop_event.set()
-                                raise worker_exc
-                            worker_error = _recorded_worker_error(target_worker_index)
-                            if worker_error is not None:
-                                stop_event.set()
-                                raise worker_error
+                        try:
+                            item = target_queue.get(timeout=0.05)
+                        except queue.Empty:
+                            if first_error is None:
+                                worker_error = _recorded_worker_error(target_worker_index)
+                                if worker_error is not None:
+                                    first_error = worker_error
+                                    stop_event.set()
+                            if first_error is not None:
+                                raise first_error
+                            if target_future.done():
+                                # Defensive fallback for unexpected thread-body failures that bypass
+                                # the recorded worker error path.
+                                worker_exc = target_future.exception()
+                                if worker_exc is not None:
+                                    stop_event.set()
+                                    raise worker_exc
+                                worker_error = _recorded_worker_error(target_worker_index)
+                                if worker_error is not None:
+                                    stop_event.set()
+                                    raise worker_error
+                                raise RuntimeError(
+                                    "Parallel generation worker ended before producing the expected "
+                                    f"dataset index {next_dataset_index}."
+                                )
+                            continue
+                        if item.dataset_index != next_dataset_index:
                             raise RuntimeError(
-                                "Parallel generation worker ended before producing the expected "
-                                f"dataset index {next_dataset_index}."
+                                "Parallel generation yielded an unexpected dataset index from worker "
+                                f"{target_worker_index}: expected {next_dataset_index}, "
+                                f"got {item.dataset_index}."
                             )
-                        continue
-                    if item.dataset_index != next_dataset_index:
-                        raise RuntimeError(
-                            "Parallel generation yielded an unexpected dataset index from worker "
-                            f"{target_worker_index}: expected {next_dataset_index}, "
-                            f"got {item.dataset_index}."
-                        )
-                    yield item.bundle
-                    break
-        finally:
-            consumer_closed_event.set()
-            stop_event.set()
-            for future in futures:
-                future.result()
+                        yield item.bundle
+                        break
+            finally:
+                consumer_closed_event.set()
+                stop_event.set()
+                current_exception = sys.exc_info()[1]
+                teardown_error: BaseException | None = None
+                for future in futures:
+                    try:
+                        future.result()
+                    except BaseException as exc:  # pragma: no cover - requires teardown timing
+                        if (
+                            current_exception is None
+                            and first_error is None
+                            and teardown_error is None
+                        ):
+                            teardown_error = exc
+                if current_exception is None and first_error is None and teardown_error is not None:
+                    raise teardown_error
 
     if first_error is not None:
         raise first_error

@@ -10,6 +10,25 @@ from dagzoo.core.parallel_generation import generate_parallel_batch_iter
 from dagzoo.rng import SeedManager
 
 
+def _patch_torch_thread_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    num_threads: int,
+) -> list[int]:
+    set_calls: list[int] = []
+    monkeypatch.setattr(
+        parallel_generation_mod.torch,
+        "get_num_threads",
+        lambda: num_threads,
+    )
+    monkeypatch.setattr(
+        parallel_generation_mod.torch,
+        "set_num_threads",
+        lambda value: set_calls.append(int(value)),
+    )
+    return set_calls
+
+
 def test_generate_parallel_batch_iter_preserves_global_seed_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -17,6 +36,7 @@ def test_generate_parallel_batch_iter_preserves_global_seed_order(
     cfg.runtime.worker_count = 3
     cfg.runtime.worker_index = 0
     cfg.runtime.device = "cpu"
+    set_calls = _patch_torch_thread_settings(monkeypatch, num_threads=8)
 
     observed_seeds: list[int] = []
 
@@ -40,6 +60,16 @@ def test_generate_parallel_batch_iter_preserves_global_seed_order(
 
     assert produced == expected
     assert sorted(observed_seeds) == sorted(expected)
+    assert set_calls == [2, 8]
+
+
+def test_generate_parallel_batch_iter_yields_nothing_for_zero_datasets() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 0
+    cfg.runtime.device = "cpu"
+
+    assert list(generate_parallel_batch_iter(cfg, num_datasets=0, seed=777, device="cpu")) == []
 
 
 def test_generate_parallel_batch_iter_propagates_worker_error(
@@ -49,6 +79,7 @@ def test_generate_parallel_batch_iter_propagates_worker_error(
     cfg.runtime.worker_count = 2
     cfg.runtime.worker_index = 0
     cfg.runtime.device = "cpu"
+    set_calls = _patch_torch_thread_settings(monkeypatch, num_threads=8)
 
     failing_seed = SeedManager(777).child("dataset", 2)
 
@@ -69,6 +100,44 @@ def test_generate_parallel_batch_iter_propagates_worker_error(
 
     with pytest.raises(RuntimeError, match="boom"):
         list(generate_parallel_batch_iter(cfg, num_datasets=6, seed=777, device="cpu"))
+    assert set_calls == [4, 8]
+
+
+def test_generate_parallel_batch_iter_propagates_worker_setup_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 0
+    cfg.runtime.device = "cpu"
+
+    deepcopy_calls = 0
+    original_deepcopy = parallel_generation_mod.copy.deepcopy
+
+    def _patched_deepcopy(value):
+        nonlocal deepcopy_calls
+        deepcopy_calls += 1
+        if deepcopy_calls == 2:
+            raise RuntimeError("copy boom")
+        return original_deepcopy(value)
+
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation.copy.deepcopy",
+        _patched_deepcopy,
+    )
+
+    with pytest.raises(RuntimeError, match="copy boom"):
+        list(generate_parallel_batch_iter(cfg, num_datasets=4, seed=777, device="cpu"))
+
+
+def test_generate_parallel_batch_iter_rejects_single_worker_request() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 1
+    cfg.runtime.worker_index = 0
+    cfg.runtime.device = "cpu"
+
+    with pytest.raises(ValueError, match=r"runtime\.worker_count > 1"):
+        list(generate_parallel_batch_iter(cfg, num_datasets=1, seed=7, device="cpu"))
 
 
 def test_generate_parallel_batch_iter_rejects_nonzero_worker_index() -> None:
@@ -98,6 +167,61 @@ def test_generate_parallel_batch_iter_rejects_non_cpu_resolved_device(
         list(generate_parallel_batch_iter(cfg, num_datasets=2, seed=7, device="auto"))
 
 
+def test_generate_parallel_batch_iter_skips_torch_thread_cap_when_already_single_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 4
+    cfg.runtime.worker_index = 0
+    cfg.runtime.device = "cpu"
+
+    set_calls = _patch_torch_thread_settings(monkeypatch, num_threads=1)
+
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation._generation_engine._generate_one_seeded",
+        lambda _config, *, seed, requested_device, resolved_device: seed,
+    )
+
+    expected_seed = SeedManager(777).child("dataset", 0)
+
+    assert list(generate_parallel_batch_iter(cfg, num_datasets=1, seed=777, device="cpu")) == [
+        expected_seed
+    ]
+    assert set_calls == []
+
+
+def test_generate_parallel_batch_iter_handles_single_dataset_with_many_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 4
+    cfg.runtime.worker_index = 0
+    cfg.runtime.device = "cpu"
+
+    observed_seeds: list[int] = []
+
+    def _stub_generate_one_seeded(
+        config, *, seed: int, requested_device: str, resolved_device: str
+    ):
+        _ = config
+        _ = requested_device
+        _ = resolved_device
+        observed_seeds.append(seed)
+        return seed
+
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation._generation_engine._generate_one_seeded",
+        _stub_generate_one_seeded,
+    )
+
+    expected_seed = SeedManager(777).child("dataset", 0)
+
+    assert list(generate_parallel_batch_iter(cfg, num_datasets=1, seed=777, device="cpu")) == [
+        expected_seed
+    ]
+    assert observed_seeds == [expected_seed]
+
+
 def test_generate_parallel_batch_iter_close_does_not_hang_with_full_queue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -105,6 +229,7 @@ def test_generate_parallel_batch_iter_close_does_not_hang_with_full_queue(
     cfg.runtime.worker_count = 2
     cfg.runtime.worker_index = 0
     cfg.runtime.device = "cpu"
+    set_calls = _patch_torch_thread_settings(monkeypatch, num_threads=8)
 
     observed_seeds: list[int] = []
 
@@ -152,6 +277,7 @@ def test_generate_parallel_batch_iter_close_does_not_hang_with_full_queue(
 
     assert not close_thread.is_alive()
     assert close_result.get_nowait() is None
+    assert set_calls == [4, 8]
 
 
 def test_generate_parallel_batch_iter_bounds_faster_worker_runahead(
