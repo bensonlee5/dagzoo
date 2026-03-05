@@ -61,9 +61,9 @@ Equations are implementation-faithful to the current runtime in `src/dagzoo`.
 | $\mathsf{leaf}(X)$                | Oblivious-tree leaf index determined by sampled splits/thresholds.                         | Input: row vector(s) and tree splits; Output: leaf id(s).                          | Section 5.4.                      | Selects leaf values that define piecewise latent behavior.                             |
 | $\mathsf{logit}_{ik}$            | Pre-softmax score for row $i$, component/class $k$.                                        | Input: row-to-center distances and scale terms; Output: score matrix.              | Section 5.7.                      | Determines assignment probabilities that shape EM-style latent outputs.                |
 | $\mathsf{softmax}_k(\cdot)$     | Normalize exponentiated logits over index $k$ to probabilities.                            | Input: logits per row; Output: probabilities summing to 1 across $k$.              | Sections 5.7 and 6.2.             | Converts scores into stochastic assignments that drive categorical/mixture behavior.   |
-| $\mathsf{sample\_noise}(\cdot)$   | Noise sampler with configurable family and scale.                                          | Input: shape + family params; Output: random tensor with requested shape.          | Section 7.1.                      | Injects stochastic variation into points, matrices, weights, and node outputs.         |
+| $\mathsf{sample\\_noise}(\cdot)$   | Noise sampler with configurable family and scale.                                          | Input: shape + family params; Output: random tensor with requested shape.          | Section 7.1.                      | Injects stochastic variation into points, matrices, weights, and node outputs.         |
 | $\mathsf{clip}(x,a,b)$            | Clamp each entry of $x$ into $[a,b]$.                                                      | Input: tensor; Output: tensor with same shape.                                     | Section 4.3.                      | Prevents extreme values from destabilizing downstream standardization/conversion.      |
-| $\mathsf{nan\_to\_num}(x)$          | Replace NaN/Inf entries with finite values.                                                | Input: tensor; Output: finite tensor with same shape.                              | Section 4.3.                      | Stabilizes latent values before weighting and conversion.                              |
+| $\mathsf{nan\\_to\\_num}(x)$          | Replace NaN/Inf entries with finite values.                                                | Input: tensor; Output: finite tensor with same shape.                              | Section 4.3.                      | Stabilizes latent values before weighting and conversion.                              |
 | $\mathsf{standardize}(x)$         | Column-wise centering and scaling to unit variance (with epsilon guard).                   | Input: matrix $(n \times d)$; Output: matrix $(n \times d)$.                     | Sections 4.3 and 6.2.             | Controls scale so mechanism outputs/converters are numerically comparable.             |
 | $\mathsf{Cauchy}(0,1)$            | Standard Cauchy distribution.                                                              | Input: location/scale; Output: scalar or tensor draws.                             | Section 1.                        | Provides heavy-tailed latent logits for heterogeneous graph connectivity.              |
 | $\mathsf{Bernoulli}(p)$           | Bernoulli draw with success probability $p$.                                               | Input: probability $p \in [0,1]$; Output: binary draw.                            | Section 1.                        | Converts edge probabilities into realized adjacency $G$.                               |
@@ -81,7 +81,7 @@ Conventions:
 ### End-to-End Primary Variable Map
 
 **Primary Variable:** $\mathcal{O} = (X, y, \text{metadata})$.<br>
-**Dependency Map:** $s_{\text{shift}}, A, B_i, C_j, \lambda_f, \tilde{\ell}_f, \text{noise\_spec}, \epsilon, G, \pi_f, Z_{\text{base}}, Z_{\text{comp}}, Y, Z_{\text{post}}, (X'_s, v_s) \rightarrow \mathcal{O}$.<br>
+**Dependency Map:** $s_{\text{shift}}, A, B_i, C_j, \lambda_f, \tilde{\ell}_f, \text{noise\\_spec}, \epsilon, G, \pi_f, Z_{\text{base}}, Z_{\text{comp}}, Y, Z_{\text{post}}, (X'_s, v_s) \rightarrow \mathcal{O}$.<br>
 **Path to Final Output:** shift runtime values define graph, mechanism, and noise controls; these drive node latents and converter emissions that become $(X,y)$, while runtime selections and graph/mechanism/noise summaries become metadata in $\mathcal{O}$.<br>
 
 **Rationale.** This section is the single whole-picture view that ties section-level primary variables into one output contract. It complements the per-section formal details by making global dataflow explicit.
@@ -91,10 +91,10 @@ Pipeline skeleton:
 $$s_{\text{shift}} \rightarrow (\beta_{\text{edge}}, \tau, \gamma_{\sigma}, \gamma_{\text{var}})$$
 $$\left(\beta_{\text{edge}}, A, B_i, C_j\right) \rightarrow G$$
 $$\left(\lambda_f, \tau, \tilde{\ell}_f\right) \rightarrow \pi_f$$
-$$\text{noise\_spec} \rightarrow \epsilon_{\text{family}} \rightarrow \epsilon$$
+$$\text{noise\\_spec} \rightarrow \epsilon_{\text{family}} \rightarrow \epsilon$$
 $$\left(G, \pi_f, \epsilon, Z_{\text{base}}, Z_{\text{comp}}, Y, Z_{\text{post}}\right) \rightarrow {Z_j}_{j=0}^{N-1}$$
 $$\left({Z_j}, \mathsf{Converter}_s\right) \rightarrow {(X'_s, v_s)}_s \rightarrow (X, y)$$
-$$\left(G, \pi_f, \text{noise\_spec}, s_{\text{shift}}\right) \rightarrow \text{metadata}$$
+$$\left(G, \pi_f, \text{noise\\_spec}, s_{\text{shift}}\right) \rightarrow \text{metadata}$$
 $$\mathcal{O} = (X, y, \text{metadata})$$
 
 Operator role notes:
@@ -155,7 +155,7 @@ and for $i \ge j$, $G_{ij}=0$.
 
 ## 2. Shift Runtime Parameters
 
-**Primary Variable:** $s_{\text{shift}} = (\text{graph\_scale}, \text{mechanism\_scale}, \text{variance\_scale})$.<br>
+**Primary Variable:** $s_{\text{shift}} = (\text{graph\\_scale}, \text{mechanism\\_scale}, \text{variance\\_scale})$.<br>
 **Dependency Map:** $s_{\text{shift}} \rightarrow (\beta_{\text{edge}}, \tau, \gamma_{\sigma}, \gamma_{\text{var}})$ via deterministic runtime mappings.<br>
 **Path to Final Output:** $\beta_{\text{edge}} \rightarrow G$, $\tau \rightarrow \pi_f$, and $\gamma_{\sigma} \rightarrow$ noise amplitude; these three paths converge in node generation and sampling to shape final `X`, `y`, and shift metadata.<br>
 
@@ -163,9 +163,9 @@ and for $i \ge j$, $G_{ij}=0$.
 
 With resolved shift scales `(graph_scale, mechanism_scale, variance_scale)`:
 
-$$\beta_{\text{edge}} = \ln(2) \cdot \text{graph\_scale}$$
-$$\tau = \text{mechanism\_scale}$$
-$$\gamma_\sigma = \exp\left(\frac{\ln(2)}{2} \cdot \text{variance\_scale}\right), \quad \gamma_{\text{var}} = \gamma_\sigma^2 = 2^{\text{variance\_scale}}$$
+$$\beta_{\text{edge}} = \ln(2) \cdot \text{graph\\_scale}$$
+$$\tau = \text{mechanism\\_scale}$$
+$$\gamma_\sigma = \exp\left(\frac{\ln(2)}{2} \cdot \text{variance\\_scale}\right), \quad \gamma_{\text{var}} = \gamma_\sigma^2 = 2^{\text{variance\\_scale}}$$
 
 So positive `variance_scale` increases global noise variance multiplicatively.
 
@@ -179,7 +179,7 @@ So positive `variance_scale` increases global noise variance multiplicatively.
 
 Let raw family weights be:
 
-$$\lambda_f = \begin{cases} 1, & \text{if no function\_family\_mix} \\ \text{configured positive weight}, & \text{otherwise} \end{cases}$$
+$$\lambda_f = \begin{cases} 1, & \text{if no function\\_family\\_mix} \\ \text{configured positive weight}, & \text{otherwise} \end{cases}$$
 
 Normalize over positive-weight families:
 
@@ -301,7 +301,7 @@ $$d_{\text{req}} = \sum_s \max(1, d_s), \quad d = d_{\text{req}} + d_{\text{extr
 
 After mechanism output:
 
-$$Z_j \leftarrow \mathsf{clip}(\mathsf{nan\_to\_num}(Z_j), -10^6, 10^6)$$
+$$Z_j \leftarrow \mathsf{clip}(\mathsf{nan\\_to\\_num}(Z_j), -10^6, 10^6)$$
 $$Z_j \leftarrow \mathsf{standardize}(Z_j)$$
 $$Z_j \leftarrow Z_j \odot w^\top$$
 $$Z_j \leftarrow \frac{Z_j}{\max\left(\frac{1}{n} \sum_{r=1}^n |Z_{j,r:}|_2, 10^{-6}\right)}$$
@@ -526,7 +526,7 @@ Output representation $X'$ is variant-dependent (input copy, repeated index, cen
 
 **Rationale.** Multiple primitive families cover light-tail, double-exponential, and heavy-tail regimes under one API surface. Explicit formulas keep distributional assumptions auditable across backends.
 
-For $\mathsf{sample\_noise}(\text{shape, family, scale, \dots})$:
+For $\mathsf{sample\\_noise}(\text{shape, family, scale, }\dots)$:
 
 - **Gaussian**: i.i.d. $\mathcal{N}(0, 1)$
 - **Laplace** (inverse CDF):
