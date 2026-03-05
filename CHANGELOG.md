@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-03-05
+
+### Added
+
+- Added worker-partition runtime schema fields:
+  `runtime.worker_count` and `runtime.worker_index`.
+- Added deterministic round-robin worker partitioning for
+  `dagzoo generate --no-dataset-write`, where `num_datasets` remains the global
+  dataset-index space and each worker covers a disjoint subset.
+
+### Breaking
+
+- **BREAKING:** `dagzoo generate` now rejects write-enabled runs when
+  `runtime.worker_count > 1`. Multi-worker mode is currently supported only with
+  `--no-dataset-write` until shard-writing coordination lands.
+- **BREAKING:** `dagzoo benchmark` and `dagzoo diversity-audit` now reject
+  configs with `runtime.worker_count > 1` until those flows become
+  partition-aware.
+
 ## [0.5.2] - 2026-03-05
 
 ### Fixed

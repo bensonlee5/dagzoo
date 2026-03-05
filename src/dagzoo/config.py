@@ -815,6 +815,22 @@ def _normalize_runtime_fields(runtime: RuntimeConfig) -> None:
     if not runtime.torch_dtype:
         raise ValueError("runtime.torch_dtype must be a non-empty string.")
 
+    runtime.worker_count = _validate_int_field(
+        field_name="runtime.worker_count",
+        value=runtime.worker_count,
+        minimum=1,
+    )
+    runtime.worker_index = _validate_int_field(
+        field_name="runtime.worker_index",
+        value=runtime.worker_index,
+        minimum=0,
+    )
+    if runtime.worker_index >= runtime.worker_count:
+        raise ValueError(
+            "runtime.worker_index must be < runtime.worker_count, "
+            f"got {runtime.worker_index} >= {runtime.worker_count}."
+        )
+
 
 def _normalize_output_fields(_output: OutputConfig) -> None:
     """Stage 1: output section has no additional field normalization."""
@@ -1149,6 +1165,8 @@ class NoiseConfig:
 class RuntimeConfig:
     device: str = "auto"
     torch_dtype: str = "float32"
+    worker_count: int = 1
+    worker_index: int = 0
 
 
 @dataclass(slots=True)

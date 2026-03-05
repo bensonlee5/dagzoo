@@ -97,6 +97,177 @@ def test_generate_cli_rejects_inline_filter_enabled(tmp_path) -> None:
     assert int(exc.value.code) == 2
 
 
+def test_generate_cli_rejects_worker_partition_when_dataset_write_enabled(tmp_path) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 1
+    config_path = tmp_path / "multi_worker.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                str(config_path),
+                "--num-datasets",
+                "3",
+                "--device",
+                "cpu",
+                "--hardware-policy",
+                "none",
+                "--out",
+                str(tmp_path / "out"),
+            ]
+        )
+    assert int(exc.value.code) == 2
+    assert not (tmp_path / "out" / "effective_config.yaml").exists()
+    assert not (tmp_path / "out" / "effective_config_trace.yaml").exists()
+
+
+def test_generate_cli_allows_worker_partition_with_no_dataset_write(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 1
+    config_path = tmp_path / "multi_worker_no_write.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    captured: dict[str, int] = {}
+
+    def _stub_generate_batch_iter(
+        config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        _ = seed
+        _ = device
+        captured["worker_count"] = int(config.runtime.worker_count)
+        captured["worker_index"] = int(config.runtime.worker_index)
+        yield object()
+
+    monkeypatch.setattr("dagzoo.cli.generate_worker_batch_iter", _stub_generate_batch_iter)
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            str(config_path),
+            "--num-datasets",
+            "3",
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
+            "--no-dataset-write",
+            "--out",
+            str(tmp_path / "out_no_write"),
+        ]
+    )
+    assert code == 0
+    assert captured["worker_count"] == 2
+    assert captured["worker_index"] == 1
+    worker_dir = tmp_path / "out_no_write" / "worker_00001_of_00002"
+    assert (worker_dir / "effective_config.yaml").exists()
+    assert (worker_dir / "effective_config_trace.yaml").exists()
+
+
+def test_generate_cli_namespaces_worker_diagnostics_artifacts(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.device = "cpu"
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 1
+    cfg.output.out_dir = str(tmp_path / "run")
+    cfg.diagnostics.enabled = True
+    config_path = tmp_path / "worker_diag.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    def _stub_generate_worker_batch_iter(
+        _config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        _ = seed
+        _ = device
+        for _ in range(num_datasets):
+            yield object()
+
+    monkeypatch.setattr("dagzoo.cli.generate_worker_batch_iter", _stub_generate_worker_batch_iter)
+    monkeypatch.setattr(
+        "dagzoo.cli.CoverageAggregator.update_bundle",
+        lambda _self, _bundle: None,
+    )
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            str(config_path),
+            "--num-datasets",
+            "1",
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
+            "--no-dataset-write",
+        ]
+    )
+    assert code == 0
+    worker_dir = tmp_path / "run" / "worker_00001_of_00002"
+    assert (worker_dir / "effective_config.yaml").exists()
+    assert (worker_dir / "effective_config_trace.yaml").exists()
+    assert (worker_dir / "coverage_summary.json").exists()
+    assert (worker_dir / "coverage_summary.md").exists()
+
+
+def test_benchmark_cli_rejects_worker_partition_config(tmp_path) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 1
+    config_path = tmp_path / "benchmark_multi_worker.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "benchmark",
+                "--config",
+                str(config_path),
+                "--preset",
+                "custom",
+                "--suite",
+                "smoke",
+                "--no-memory",
+            ]
+        )
+    assert int(exc.value.code) == 2
+
+
+def test_diversity_audit_cli_rejects_worker_partition_config(tmp_path) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 1
+    config_path = tmp_path / "diversity_multi_worker.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "diversity-audit",
+                "--config",
+                str(config_path),
+            ]
+        )
+    assert int(exc.value.code) == 2
+
+
 def test_filter_cli_rejects_invalid_n_jobs() -> None:
     with pytest.raises(SystemExit) as exc:
         main(
