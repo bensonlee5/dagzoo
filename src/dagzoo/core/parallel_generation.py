@@ -32,14 +32,6 @@ class _WorkerError:
     error: BaseException
 
 
-@dataclass(slots=True)
-class _WorkerDone:
-    worker_index: int
-
-
-_QueueItem = _BundleResult | _WorkerError | _WorkerDone
-
-
 def _validate_parallel_generation_request(
     config: GeneratorConfig,
     *,
@@ -90,20 +82,23 @@ def generate_parallel_batch_iter(
         device=device,
     )
     run_seed = _generation_context._resolve_run_seed(config, seed)
-    result_queue: queue.Queue[_QueueItem] = queue.Queue(
-        maxsize=max(1, int(max_buffered_results or (worker_count * 2)))
-    )
+    buffer_budget = max(1, int(max_buffered_results or (worker_count * 2)))
+    per_worker_capacity = max(1, (buffer_budget + worker_count - 1) // worker_count)
+    bundle_queues = [
+        queue.Queue[_BundleResult](maxsize=per_worker_capacity) for _ in range(worker_count)
+    ]
+    error_queue: queue.Queue[_WorkerError] = queue.Queue()
     stop_event = threading.Event()
     consumer_closed_event = threading.Event()
 
-    def _put(item: _QueueItem) -> bool:
+    def _put_bundle(worker_index: int, item: _BundleResult) -> bool:
         while True:
             if consumer_closed_event.is_set():
                 return False
-            if stop_event.is_set() and isinstance(item, _BundleResult):
+            if stop_event.is_set():
                 return False
             try:
-                result_queue.put(item, timeout=0.05)
+                bundle_queues[worker_index].put(item, timeout=0.05)
                 return True
             except queue.Full:
                 continue
@@ -126,17 +121,16 @@ def generate_parallel_batch_iter(
                     requested_device=requested_device,
                     resolved_device=resolved_device,
                 )
-                if not _put(_BundleResult(dataset_index=dataset_index, bundle=bundle)):
+                if not _put_bundle(
+                    local_worker_index,
+                    _BundleResult(dataset_index=dataset_index, bundle=bundle),
+                ):
                     break
         except BaseException as exc:  # pragma: no cover - exercised via consumer raise path
             stop_event.set()
-            _put(_WorkerError(worker_index=local_worker_index, error=exc))
-        finally:
-            _put(_WorkerDone(worker_index=local_worker_index))
+            if not consumer_closed_event.is_set():
+                error_queue.put_nowait(_WorkerError(worker_index=local_worker_index, error=exc))
 
-    next_dataset_index = 0
-    completed_workers = 0
-    pending: dict[int, DatasetBundle] = {}
     first_error: BaseException | None = None
 
     with ThreadPoolExecutor(
@@ -145,22 +139,42 @@ def generate_parallel_batch_iter(
     ) as executor:
         futures = [executor.submit(_run_worker, worker_idx) for worker_idx in range(worker_count)]
         try:
-            while completed_workers < worker_count:
-                item = result_queue.get()
-                if isinstance(item, _BundleResult):
-                    if first_error is not None:
-                        continue
-                    pending[item.dataset_index] = item.bundle
-                    while next_dataset_index in pending:
-                        yield pending.pop(next_dataset_index)
-                        next_dataset_index += 1
-                    continue
-                if isinstance(item, _WorkerError):
+            for next_dataset_index in range(num_datasets):
+                target_worker_index = next_dataset_index % worker_count
+                target_queue = bundle_queues[target_worker_index]
+                target_future = futures[target_worker_index]
+                while True:
                     if first_error is None:
-                        first_error = item.error
-                        stop_event.set()
-                    continue
-                completed_workers += 1
+                        try:
+                            worker_error = error_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        else:
+                            first_error = worker_error.error
+                            stop_event.set()
+                    if first_error is not None:
+                        raise first_error
+                    try:
+                        item = target_queue.get(timeout=0.05)
+                    except queue.Empty:
+                        if target_future.done():
+                            worker_exc = target_future.exception()
+                            if worker_exc is not None:
+                                stop_event.set()
+                                raise worker_exc
+                            raise RuntimeError(
+                                "Parallel generation worker ended before producing the expected "
+                                f"dataset index {next_dataset_index}."
+                            )
+                        continue
+                    if item.dataset_index != next_dataset_index:
+                        raise RuntimeError(
+                            "Parallel generation yielded an unexpected dataset index from worker "
+                            f"{target_worker_index}: expected {next_dataset_index}, "
+                            f"got {item.dataset_index}."
+                        )
+                    yield item.bundle
+                    break
         finally:
             consumer_closed_event.set()
             stop_event.set()
@@ -169,8 +183,3 @@ def generate_parallel_batch_iter(
 
     if first_error is not None:
         raise first_error
-    if next_dataset_index != num_datasets:
-        raise RuntimeError(
-            "Parallel generation ended before emitting the full dataset index space: "
-            f"expected {num_datasets}, emitted {next_dataset_index}."
-        )

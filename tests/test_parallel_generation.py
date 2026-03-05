@@ -151,3 +151,74 @@ def test_generate_parallel_batch_iter_close_does_not_hang_with_full_queue(
 
     assert not close_thread.is_alive()
     assert close_result.get_nowait() is None
+
+
+def test_generate_parallel_batch_iter_bounds_faster_worker_runahead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 0
+    cfg.runtime.device = "cpu"
+
+    manager = SeedManager(777)
+    seed0 = manager.child("dataset", 0)
+    seed1 = manager.child("dataset", 1)
+    seed3 = manager.child("dataset", 3)
+    seed5 = manager.child("dataset", 5)
+
+    observed_seeds: list[int] = []
+    worker_zero_started = threading.Event()
+    worker_one_second_started = threading.Event()
+    release_worker_zero = threading.Event()
+
+    def _stub_generate_one_seeded(
+        config, *, seed: int, requested_device: str, resolved_device: str
+    ):
+        _ = config
+        _ = requested_device
+        _ = resolved_device
+        observed_seeds.append(seed)
+        if seed == seed0:
+            worker_zero_started.set()
+            assert release_worker_zero.wait(timeout=1.0)
+        if seed == seed3:
+            worker_one_second_started.set()
+        return seed
+
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation._generation_engine._generate_one_seeded",
+        _stub_generate_one_seeded,
+    )
+
+    iterator = generate_parallel_batch_iter(
+        cfg,
+        num_datasets=8,
+        seed=777,
+        device="cpu",
+        max_buffered_results=1,
+    )
+    next_result: queue.Queue[int | BaseException] = queue.Queue()
+
+    def _consume_first() -> None:
+        try:
+            next_result.put(next(iterator))
+        except BaseException as exc:  # pragma: no cover - surfaced via queue assertion
+            next_result.put(exc)
+
+    consumer_thread = threading.Thread(target=_consume_first, daemon=True)
+    consumer_thread.start()
+
+    assert worker_zero_started.wait(timeout=1.0)
+    assert worker_one_second_started.wait(timeout=1.0)
+    assert seed1 in observed_seeds
+    assert seed3 in observed_seeds
+    assert seed5 not in observed_seeds
+    assert consumer_thread.is_alive()
+
+    release_worker_zero.set()
+    consumer_thread.join(timeout=1.0)
+
+    assert not consumer_thread.is_alive()
+    assert next_result.get_nowait() == seed0
+    iterator.close()
