@@ -53,3 +53,11 @@ benchmarks/results/
 *.pdf
 
 effective_config_artifacts/
+
+# Hugo docs build artifacts
+public/
+site/public/
+site/resources/
+site/.hugo_build.lock
+site/.generated/
+site/node_modules/

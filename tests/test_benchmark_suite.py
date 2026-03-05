@@ -1,5 +1,6 @@
 import numpy as np
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -181,9 +182,12 @@ def test_run_benchmark_suite_emits_stage_and_filter_pressure_metrics(
         ),
     )
     monkeypatch.setattr(
-        "dagzoo.bench.suite.measure_filter_datasets_per_minute",
-        lambda bundles, *, config: (
-            float(len(bundles)) * 20.0 + float(config.filter.n_estimators) * 0.0
+        "dagzoo.bench.suite.measure_filter_stage_metrics",
+        lambda bundles, *, config: SimpleNamespace(
+            datasets_per_minute=float(len(bundles)) * 20.0
+            + float(config.filter.n_estimators) * 0.0,
+            filter_attempts_total=3,
+            filter_rejections_total=1,
         ),
     )
     monkeypatch.setattr(

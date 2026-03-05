@@ -77,4 +77,4 @@ ______________________________________________________________________
 ## Related docs
 
 - Workflow hub: [usage-guide.md](../usage-guide.md)
-- System terminology: [how-it-works.md](../how-it-works.md)
+- System terminology: [how-it-works.html](../how-it-works.html)

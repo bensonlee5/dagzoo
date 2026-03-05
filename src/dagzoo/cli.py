@@ -52,6 +52,7 @@ from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 from dagzoo.diagnostics_targets import (
     build_diagnostics_aggregation_config,
 )
+from dagzoo.filtering import run_deferred_filter
 from dagzoo.rng import SEED32_MAX, SEED32_MIN
 
 DEVICE_CHOICES = ("auto", "cpu", "cuda", "mps")
@@ -91,6 +92,15 @@ def _seed_32bit_int(value: str) -> int:
             f"Expected a seed in [{SEED32_MIN}, {SEED32_MAX}], got {value}."
         )
     return parsed
+
+
+def _filter_n_jobs(value: str) -> int:
+    """argparse type: parse filter worker count (-1 or >= 1)."""
+
+    parsed = int(value)
+    if parsed == -1 or parsed >= 1:
+        return parsed
+    raise argparse.ArgumentTypeError(f"Expected -1 or an integer >= 1 for --n-jobs, got {value}.")
 
 
 def _parse_finite_float(raw: str, *, flag: str) -> float:
@@ -298,6 +308,37 @@ def _build_parser() -> argparse.ArgumentParser:
         "--print-resolution-trace",
         action="store_true",
         help="Print field-level override trace for resolved config before generation.",
+    )
+    f = sub.add_parser(
+        "filter",
+        help="Run deferred CPU filtering on existing shard outputs.",
+    )
+    f.add_argument(
+        "--in",
+        dest="in_dir",
+        required=True,
+        help="Input directory containing shard_* outputs (or a single shard directory).",
+    )
+    f.add_argument(
+        "--out",
+        required=True,
+        help="Directory for deferred filter manifest/summary artifacts.",
+    )
+    f.add_argument(
+        "--curated-out",
+        default=None,
+        help="Optional output directory for accepted-only curated shards.",
+    )
+    f.add_argument(
+        "--config",
+        default=None,
+        help="Optional fallback YAML config when shard metadata lacks embedded filter settings.",
+    )
+    f.add_argument(
+        "--n-jobs",
+        type=_filter_n_jobs,
+        default=None,
+        help="Optional override for ExtraTrees worker count (-1 or >= 1).",
     )
     b = sub.add_parser("benchmark", help="Run benchmark suite across one or more presets.")
     b.add_argument("--config", default=None, help="Optional YAML config for preset 'custom'.")
@@ -624,6 +665,12 @@ def _run_generate(args: argparse.Namespace) -> int:
         _raise_usage_error(str(exc))
 
     config = resolved.config
+    if bool(config.filter.enabled):
+        _raise_usage_error(
+            "Inline filtering has been removed from generate. Set filter.enabled=false and run "
+            "`dagzoo filter --in <shard_dir> --out <out_dir>` after generation."
+        )
+
     hw = resolved.hardware
     trace_payload = serialize_resolution_events(resolved.trace_events)
 
@@ -705,6 +752,35 @@ def _run_generate(args: argparse.Namespace) -> int:
             diagnostics_aggregator, diagnostics_out_dir=diagnostics_out_dir
         )
     print(f"Wrote {written} datasets to: {Path(out_dir)}")
+    return 0
+
+
+def _run_filter(args: argparse.Namespace) -> int:
+    """Execute the ``filter`` command."""
+
+    try:
+        fallback_config = GeneratorConfig.from_yaml(args.config) if args.config else None
+        result = run_deferred_filter(
+            in_dir=args.in_dir,
+            out_dir=args.out,
+            config=fallback_config,
+            curated_out_dir=args.curated_out,
+            n_jobs_override=args.n_jobs,
+        )
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        _raise_usage_error(str(exc))
+    print(f"Wrote filter manifest: {result.manifest_path}")
+    print(f"Wrote filter summary: {result.summary_path}")
+    print(
+        "Deferred filter summary: "
+        f"total={result.total_datasets} accepted={result.accepted_datasets} "
+        f"rejected={result.rejected_datasets} dpm={result.datasets_per_minute:.2f}"
+    )
+    if result.curated_out_dir is not None:
+        print(
+            f"Wrote curated accepted-only shards: {result.curated_out_dir} "
+            f"(datasets={result.curated_accepted_datasets})"
+        )
     return 0
 
 
@@ -1048,6 +1124,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "generate":
         return _run_generate(args)
+    if args.command == "filter":
+        return _run_filter(args)
     if args.command == "benchmark":
         return _run_benchmark(args)
     if args.command == "diversity-audit":

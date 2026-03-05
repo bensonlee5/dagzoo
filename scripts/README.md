@@ -28,6 +28,10 @@ These wrappers run `dagzoo` from the repo root (typically via `uv run`).
   - Runs the issue #148 prioritization benchmark/profiling matrix for CUDA desktop hosts and writes a verdict report under a `/tmp/issue148_cuda_desktop_*` artifact root.
 - `scripts/bump-version.sh <major|minor|patch> [--dry-run] [--tag]`
   - Bump the semver version in `pyproject.toml`. Use `--tag` to commit and create a git tag.
+- `scripts/docs/sync_hugo_content.py [--check]`
+  - Sync canonical docs from `docs/` into generated Hugo inputs under `site/.generated/` (single-source docs model).
+- `scripts/docs/check_links.py [roots...]`
+  - Validate local Markdown/HTML links across source docs and generated site content.
 
 ## Examples
 
@@ -48,6 +52,9 @@ These wrappers run `dagzoo` from the repo root (typically via `uv run`).
 ./scripts/benchmark-suite.sh standard all benchmarks/results/latest
 ./scripts/benchmark-suite.sh smoke cpu benchmarks/results/smoke_cpu_diag on
 ./scripts/benchmark-issue148-cuda-desktop.sh --reps 3 --suite standard
+./.venv/bin/python scripts/docs/sync_hugo_content.py
+./.venv/bin/python scripts/docs/sync_hugo_content.py --check
+./.venv/bin/python scripts/docs/check_links.py
 uv run dagzoo generate --config configs/preset_diagnostics_on.yaml --num-datasets 25 --diagnostics --out data/run_diag
 uv run dagzoo generate --config configs/default.yaml --rows 1024 --num-datasets 25 --out data/run_rows_1024
 uv run dagzoo generate --config configs/default.yaml --rows 400..60000 --num-datasets 50 --no-dataset-write

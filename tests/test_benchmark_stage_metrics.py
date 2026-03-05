@@ -5,6 +5,7 @@ from dagzoo.bench.collectors import _ThroughputPressureCollector
 from dagzoo.bench.stage_metrics import (
     StageSampleCollector,
     measure_filter_datasets_per_minute,
+    measure_filter_stage_metrics,
     measure_write_datasets_per_minute,
 )
 from dagzoo.config import GeneratorConfig
@@ -111,42 +112,67 @@ def test_stage_metric_helpers_return_zero_for_empty_samples() -> None:
     assert measure_write_datasets_per_minute([], config=cfg) == 0.0
 
 
-def test_filter_stage_metric_uses_recorded_elapsed_seconds() -> None:
+def test_filter_stage_metric_replays_filter_and_reports_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cfg = GeneratorConfig()
+    cfg.filter.enabled = True
+    replay_seeds: list[int] = []
+
+    def _stub_filter(*_args, **_kwargs):
+        replay_seeds.append(int(_kwargs["seed"]))
+        return bool(int(_kwargs["seed"]) % 2), {"n_valid_oob": 128}
+
+    monkeypatch.setattr("dagzoo.bench.stage_metrics.apply_extra_trees_filter", _stub_filter)
     bundles = [
-        _bundle(metadata={}, runtime_metrics={"filter_elapsed_seconds": 0.25}),
-        _bundle(metadata={}, runtime_metrics={"filter_elapsed_seconds": 0.50}),
+        _bundle(metadata={"seed": 11}),
+        _bundle(metadata={"seed": 12}),
     ]
-    dpm = measure_filter_datasets_per_minute(
-        bundles,
-        config=cfg,
-    )
-    assert dpm == pytest.approx(160.0)
+    measurement = measure_filter_stage_metrics(bundles, config=cfg)
+    assert measurement.filter_attempts_total == 2
+    assert measurement.filter_rejections_total == 1
+    assert measurement.datasets_per_minute > 0.0
+    assert replay_seeds == [11, 12]
+    assert measure_filter_datasets_per_minute(bundles, config=cfg) > 0.0
 
 
-def test_filter_stage_metric_ignores_missing_or_invalid_elapsed_seconds() -> None:
+def test_filter_stage_metric_returns_zero_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cfg = GeneratorConfig()
-    dpm = measure_filter_datasets_per_minute(
+    cfg.filter.enabled = False
+    calls: dict[str, int] = {"count": 0}
+
+    def _stub_filter(*_args, **_kwargs):
+        calls["count"] += 1
+        return True, {}
+
+    monkeypatch.setattr("dagzoo.bench.stage_metrics.apply_extra_trees_filter", _stub_filter)
+    measurement = measure_filter_stage_metrics([_bundle(metadata={})], config=cfg)
+    assert measurement.datasets_per_minute == 0.0
+    assert measurement.filter_attempts_total == 0
+    assert measurement.filter_rejections_total == 0
+    assert calls["count"] == 0
+
+
+def test_filter_stage_metric_uses_fallback_seed_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig()
+    cfg.filter.enabled = True
+    cfg.seed = 77
+    replay_seeds: list[int] = []
+
+    def _stub_filter(*_args, **_kwargs):
+        replay_seeds.append(int(_kwargs["seed"]))
+        return True, {}
+
+    monkeypatch.setattr("dagzoo.bench.stage_metrics.apply_extra_trees_filter", _stub_filter)
+    _ = measure_filter_stage_metrics(
         [
             _bundle(metadata={}),
-            _bundle(metadata={}, runtime_metrics={}),
-            _bundle(metadata={}, runtime_metrics={"filter_elapsed_seconds": "bad"}),
-            _bundle(metadata={}, runtime_metrics={"filter_elapsed_seconds": -0.1}),
-            _bundle(metadata={}, runtime_metrics={"filter_elapsed_seconds": 0.0}),
+            _bundle(metadata={"seed": 100}),
         ],
         config=cfg,
     )
-    assert dpm == 0.0
-
-
-def test_filter_stage_metric_uses_only_valid_timed_bundles() -> None:
-    cfg = GeneratorConfig()
-    dpm = measure_filter_datasets_per_minute(
-        [
-            _bundle(metadata={}, runtime_metrics={"filter_elapsed_seconds": 0.5}),
-            _bundle(metadata={}, runtime_metrics={"filter_elapsed_seconds": -1.0}),
-            _bundle(metadata={}, runtime_metrics={"filter_elapsed_seconds": 0.5}),
-        ],
-        config=cfg,
-    )
-    assert dpm == pytest.approx(120.0)
+    assert replay_seeds == [77, 100]

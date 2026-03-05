@@ -158,19 +158,22 @@ Present for all generated bundles.
 
 ### Filter sub-object
 
-| Key                   | Type        | Description                                                                                 |
-| --------------------- | ----------- | ------------------------------------------------------------------------------------------- |
-| `enabled`             | bool        | Whether filtering was active                                                                |
-| `wins_ratio`          | float       | Bootstrap wins ratio (when enabled)                                                         |
-| `n_valid_oob`         | int         | OOB sample count (when enabled)                                                             |
-| `backend`             | str         | Filter implementation (when enabled)                                                        |
-| `accepted`            | bool        | Whether the dataset passed (when enabled)                                                   |
-| `threshold_requested` | float       | Requested filter threshold before class-aware adjustment                                    |
-| `threshold_effective` | float       | Effective threshold used in acceptance decision                                             |
-| `threshold_policy`    | str         | Threshold policy identifier (`class_aware_piecewise_v1`)                                    |
-| `class_count`         | int or null | Realized class count used by filter (`null` for regression)                                 |
-| `class_bucket`        | str         | Class-count bucket for policy lookup (`<=8`, `9-16`, `17-24`, `25-32`, or `not_applicable`) |
-| `threshold_delta`     | float       | Difference between requested and effective threshold                                        |
+| Key                   | Type        | Description                                                                                  |
+| --------------------- | ----------- | -------------------------------------------------------------------------------------------- |
+| `mode`                | str         | Filter execution mode. Current value is `deferred`.                                          |
+| `status`              | str         | `not_run` for freshly generated outputs; `accepted`/`rejected` after `dagzoo filter`.        |
+| `enabled`             | bool        | Present after deferred filter replay. Always `true` when replayed.                           |
+| `accepted`            | bool        | Present after deferred filter replay.                                                        |
+| `wins_ratio`          | float       | Bootstrap wins ratio (present after deferred replay).                                        |
+| `n_valid_oob`         | int         | OOB sample count (present after deferred replay).                                            |
+| `backend`             | str         | Filter implementation identifier (present after deferred replay).                            |
+| `threshold_requested` | float       | Requested filter threshold before class-aware adjustment (present after deferred replay).    |
+| `threshold_effective` | float       | Effective threshold used in acceptance decision (present after deferred replay).             |
+| `threshold_policy`    | str         | Threshold policy identifier (`class_aware_piecewise_v1`) (present after deferred replay).    |
+| `class_count`         | int or null | Realized class count used by filter (`null` for regression) (present after deferred replay). |
+| `class_bucket`        | str         | Class-count bucket for policy lookup (present after deferred replay).                        |
+| `threshold_delta`     | float       | Difference between requested and effective threshold (present after deferred replay).        |
+| `reason`              | str         | Present on rejected outputs when replay emits a specific rejection reason.                   |
 
 ### Class Structure sub-object (classification only)
 

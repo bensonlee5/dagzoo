@@ -13,7 +13,7 @@ Related docs:
 
 - Decision rubric and go/no-go gates: `docs/development/backlog_decision_rules.md`
 - Evidence appendix: `reference/literature_evidence_2026.md`
-- System behavior walkthrough: `docs/how-it-works.md`
+- System behavior walkthrough: `docs/how-it-works.html`
 - Output contract: `docs/output-format.md`
 
 ## Status Labels
@@ -80,7 +80,7 @@ Lower rank means higher priority. Rank `0` is reserved for completed items retai
 ## Current Implementation Baseline
 
 This section captures the current implementation baseline. For control/data-flow
-walkthroughs, see `docs/how-it-works.md`.
+walkthroughs, see `docs/how-it-works.html`.
 
 ### Source of Truth
 
@@ -153,7 +153,7 @@ metadata JSON contract, and DAG lineage schema.
 
 1. Current generator path runs Torch on all devices (CPU/CUDA/MPS); diagnostics
    extraction converts bundles to CPU before computing metrics (see
-   `docs/how-it-works.md` for diagnostics data flow).
+   `docs/how-it-works.html` for diagnostics data flow).
 1. Keep kernels batch-oriented with vectorized torch operations and avoid Python
    loops in inner math paths.
 1. Use optional filtering (`E.14`) behind config flags to avoid CPU bottlenecks
@@ -243,7 +243,7 @@ metadata JSON contract, and DAG lineage schema.
 - Pillar alignment: tabular realism
 - Goal: provide configurable missing-data mechanisms with deterministic seeded behavior and benchmark-time acceptance/runtime guardrails.
 - Delivered scope:
-  - `DatasetConfig` supports missingness controls (`missing_rate`, mechanism, MAR/MNAR scales). See [docs/how-it-works.md](../how-it-works.md) for MCAR/MAR/MNAR mechanism definitions.
+  - `DatasetConfig` supports missingness controls (`missing_rate`, mechanism, MAR/MNAR scales). See [docs/how-it-works.html](../how-it-works.html) for MCAR/MAR/MNAR mechanism definitions.
   - `dagzoo generate` supports missingness CLI overrides.
   - Generation path injects deterministic missingness masks and emits per-bundle metadata.
   - Benchmark profiles emit `missingness_guardrails` including metadata coverage, realized-rate accuracy, and runtime degradation checks.

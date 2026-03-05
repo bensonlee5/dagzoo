@@ -64,7 +64,7 @@ from dagzoo.bench.guardrails import (
 from dagzoo.bench.throughput import run_throughput_benchmark
 from dagzoo.bench.stage_metrics import (
     StageSampleCollector,
-    measure_filter_datasets_per_minute,
+    measure_filter_stage_metrics,
     measure_write_datasets_per_minute,
 )
 from dagzoo.config import (
@@ -408,8 +408,10 @@ def run_preset_benchmark(
         noise_guardrails=noise_guardrails,
     )
 
+    generation_config = _copy_runtime_config(config)
+    generation_config.filter.enabled = False
     result = run_throughput_benchmark(
-        config,
+        generation_config,
         num_datasets=num_datasets,
         warmup_datasets=warmup,
         device=requested_device,
@@ -425,14 +427,39 @@ def run_preset_benchmark(
     filter_stage_enabled = bool(config.filter.enabled)
     filter_dpm: float | None
     if filter_stage_enabled:
-        filter_dpm = (
-            measure_filter_datasets_per_minute(sampled_bundles, config=config)
+        filter_stage_measurement = (
+            measure_filter_stage_metrics(sampled_bundles, config=config)
             if sampled_bundles
+            else None
+        )
+        filter_dpm = (
+            float(filter_stage_measurement.datasets_per_minute)
+            if filter_stage_measurement is not None
             else 0.0
         )
     else:
+        filter_stage_measurement = None
         filter_dpm = None
     throughput_pressure_summary = throughput_pressure.build_summary()
+    filter_attempts_total = int(throughput_pressure_summary["filter_attempts_total"])
+    filter_rejections_total = int(throughput_pressure_summary["filter_rejections_total"])
+    if filter_stage_measurement is not None:
+        filter_attempts_total = int(filter_stage_measurement.filter_attempts_total)
+        filter_rejections_total = int(filter_stage_measurement.filter_rejections_total)
+
+    accepted_datasets_measured = int(throughput_pressure_summary["datasets_seen"])
+    filter_rejection_rate_attempt_level = (
+        float(filter_rejections_total) / float(filter_attempts_total)
+        if filter_attempts_total > 0
+        else None
+    )
+    filter_retry_dataset_count = int(filter_rejections_total)
+    filter_retry_dataset_rate = (
+        float(filter_retry_dataset_count) / float(accepted_datasets_measured)
+        if accepted_datasets_measured > 0 and filter_attempts_total > 0
+        else None
+    )
+
     generation_dpm = float(result.get("datasets_per_minute", 0.0))
     mean_attempts_per_dataset = float(throughput_pressure_summary["attempts_per_dataset_mean"])
 
@@ -454,20 +481,16 @@ def run_preset_benchmark(
     result["filter_datasets_per_minute"] = float(filter_dpm) if filter_dpm is not None else None
     result["stage_sample_datasets"] = int(stage_sample_datasets)
     result["filter_stage_enabled"] = filter_stage_enabled
-    result["accepted_datasets_measured"] = int(throughput_pressure_summary["datasets_seen"])
+    result["accepted_datasets_measured"] = accepted_datasets_measured
     result["total_attempts"] = int(throughput_pressure_summary["attempts_total"])
     result["mean_attempts_per_dataset"] = mean_attempts_per_dataset
     result["retry_dataset_count"] = int(throughput_pressure_summary["retry_dataset_count"])
     result["retry_dataset_rate"] = throughput_pressure_summary["retry_dataset_rate"]
-    result["filter_attempts_total"] = int(throughput_pressure_summary["filter_attempts_total"])
-    result["filter_rejections_total"] = int(throughput_pressure_summary["filter_rejections_total"])
-    result["filter_rejection_rate_attempt_level"] = throughput_pressure_summary[
-        "filter_rejection_rate_attempt_level"
-    ]
-    result["filter_retry_dataset_count"] = int(
-        throughput_pressure_summary["filter_retry_dataset_count"]
-    )
-    result["filter_retry_dataset_rate"] = throughput_pressure_summary["filter_retry_dataset_rate"]
+    result["filter_attempts_total"] = int(filter_attempts_total)
+    result["filter_rejections_total"] = int(filter_rejections_total)
+    result["filter_rejection_rate_attempt_level"] = filter_rejection_rate_attempt_level
+    result["filter_retry_dataset_count"] = filter_retry_dataset_count
+    result["filter_retry_dataset_rate"] = filter_retry_dataset_rate
     result["estimated_attempts_per_minute"] = generation_dpm * mean_attempts_per_dataset
     result["missingness_guardrails"] = {"enabled": False}
     result["lineage_guardrails"] = {"enabled": False}

@@ -958,68 +958,26 @@ def test_generate_one_returns_torch_tensors_on_cpu() -> None:
     assert bundle.metadata["backend"] == "torch"
 
 
-def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    called: dict[str, int] = {"count": 0, "n_jobs": 0}
-
-    def _stub_filter(*_args, **_kwargs):
-        called["count"] += 1
-        called["n_jobs"] = int(_kwargs["n_jobs"])
-        return True, {
-            "wins_ratio": 1.0,
-            "n_valid_oob": 128,
-            "threshold_requested": 0.95,
-            "threshold_effective": 0.80,
-            "threshold_policy": "class_aware_piecewise_v1",
-            "class_count": 32,
-            "class_bucket": "25-32",
-            "threshold_delta": 0.15,
-        }
-
-    monkeypatch.setattr("dagzoo.core.generation_engine.apply_extra_trees_filter", _stub_filter)
+def test_torch_path_sets_deferred_filter_not_run_metadata() -> None:
     cfg = _tiny_config()
-    cfg.filter.enabled = True
 
     bundle = generate_one(cfg, seed=77, device="cpu")
-    assert called["count"] >= 1
     assert bundle.metadata["backend"] == "torch"
-    assert bundle.metadata["filter"]["enabled"] is True
-    assert bundle.metadata["filter"]["accepted"] is True
-    assert bundle.metadata["filter"]["threshold_policy"] == "class_aware_piecewise_v1"
-    assert bundle.metadata["filter"]["class_bucket"] == "25-32"
-    assert float(bundle.metadata["filter"]["threshold_effective"]) == pytest.approx(0.80)
-    assert "elapsed_seconds" not in bundle.metadata["filter"]
-    assert float(bundle.runtime_metrics["filter_elapsed_seconds"]) >= 0.0
-    assert called["n_jobs"] == int(cfg.filter.n_jobs)
-    assert "reason" not in bundle.metadata["filter"]
+    assert bundle.metadata["filter"]["mode"] == "deferred"
+    assert bundle.metadata["filter"]["status"] == "not_run"
     attempts = bundle.metadata["generation_attempts"]
     assert attempts["total_attempts"] >= 1
     assert attempts["retry_count"] == int(attempts["total_attempts"]) - 1
-    assert attempts["filter_attempts"] >= 1
+    assert attempts["filter_attempts"] == 0
     assert attempts["filter_rejections"] == 0
-    assert float(attempts["filter_rejection_rate"]) == pytest.approx(0.0)
+    assert attempts["filter_rejection_rate"] is None
 
 
-def test_generation_attempt_metadata_tracks_filter_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = {"count": 0}
-
-    def _stub_filter(*_args, **_kwargs):
-        calls["count"] += 1
-        if calls["count"] == 1:
-            return False, {"wins_ratio": 0.0, "n_valid_oob": 128}
-        return True, {"wins_ratio": 1.0, "n_valid_oob": 128}
-
-    monkeypatch.setattr("dagzoo.core.generation_engine.apply_extra_trees_filter", _stub_filter)
+def test_generate_rejects_inline_filter_enabled() -> None:
     cfg = _tiny_config()
     cfg.filter.enabled = True
-    cfg.filter.max_attempts = 3
-
-    bundle = generate_one(cfg, seed=1122, device="cpu")
-    attempts = bundle.metadata["generation_attempts"]
-    assert attempts["total_attempts"] == 2
-    assert attempts["retry_count"] == 1
-    assert attempts["filter_attempts"] == 2
-    assert attempts["filter_rejections"] == 1
-    assert float(attempts["filter_rejection_rate"]) == pytest.approx(0.5)
+    with pytest.raises(ValueError, match="Inline filtering has been removed from generate"):
+        _ = generate_one(cfg, seed=1122, device="cpu")
 
 
 def test_auto_retries_on_cpu_when_mps_fails(monkeypatch: pytest.MonkeyPatch) -> None:

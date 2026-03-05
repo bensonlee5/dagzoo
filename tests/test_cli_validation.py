@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -69,6 +71,83 @@ def test_generate_cli_rejects_oversized_seed() -> None:
             ]
         )
     assert int(exc.value.code) == 2
+
+
+def test_generate_cli_rejects_inline_filter_enabled(tmp_path) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.filter.enabled = True
+    config_path = tmp_path / "inline_filter.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                str(config_path),
+                "--num-datasets",
+                "1",
+                "--device",
+                "cpu",
+                "--hardware-policy",
+                "none",
+                "--no-dataset-write",
+            ]
+        )
+    assert int(exc.value.code) == 2
+
+
+def test_filter_cli_rejects_invalid_n_jobs() -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "filter",
+                "--in",
+                "input",
+                "--out",
+                "out",
+                "--n-jobs",
+                "0",
+            ]
+        )
+    assert int(exc.value.code) == 2
+
+
+def test_filter_cli_invokes_deferred_runner(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _Result:
+        manifest_path = Path("manifest.ndjson")
+        summary_path = Path("summary.json")
+        total_datasets = 2
+        accepted_datasets = 1
+        rejected_datasets = 1
+        datasets_per_minute = 42.0
+        curated_out_dir = None
+        curated_accepted_datasets = 0
+
+    def _stub_run_deferred_filter(**kwargs):
+        captured.update(kwargs)
+        return _Result()
+
+    monkeypatch.setattr("dagzoo.cli.run_deferred_filter", _stub_run_deferred_filter)
+    out_dir = tmp_path / "filter_out"
+    code = main(
+        [
+            "filter",
+            "--in",
+            "input_shards",
+            "--out",
+            str(out_dir),
+            "--n-jobs",
+            "4",
+        ]
+    )
+
+    assert code == 0
+    assert captured["in_dir"] == "input_shards"
+    assert str(captured["out_dir"]) == str(out_dir)
+    assert captured["n_jobs_override"] == 4
 
 
 def test_generate_cli_uses_default_config_without_noise_overrides(
@@ -250,8 +329,8 @@ def test_generate_cli_many_class_preset_end_to_end_no_write(
         assert 2 <= int(class_structure["n_classes_realized"]) <= 32
         filter_metadata = metadata["filter"]
         assert isinstance(filter_metadata, dict)
-        assert filter_metadata["enabled"] is False
-        assert "accepted" not in filter_metadata
+        assert filter_metadata["mode"] == "deferred"
+        assert filter_metadata["status"] == "not_run"
 
 
 @pytest.mark.parametrize(

@@ -69,15 +69,15 @@ flowchart LR
   independent column noise.
 - Reproducible: deterministic seed fan-out and effective-config trace artifacts
   make runs auditable.
-- Stress-testable: shift, noise, missingness, and filter controls let you probe
+- Stress-testable: shift, noise, missingness, and deferred filter controls let you probe
   model robustness under controlled distribution changes.
 - Operationally scalable: fixed-layout generation and benchmark guardrails
   support repeatable high-throughput workflows.
 
 Recommended first reads after this README:
 
-- [docs/how-it-works.md](docs/how-it-works.md): End-to-end runtime model and terminology.
-- [docs/development/transforms.html](docs/development/transforms.html): Canonical formal transform math, notation, and operator definitions.
+- [How It Works](https://bensonlee5.github.io/dagzoo/docs/how-it-works/): End-to-end runtime model and terminology.
+- [Transforms (Canonical Math)](https://bensonlee5.github.io/dagzoo/docs/transforms/): Canonical formal transform math, notation, and operator definitions.
 
 ## Quick Start
 
@@ -102,6 +102,14 @@ dagzoo generate --config configs/default.yaml --num-datasets 10 --out data/run1
 
 Each generate run writes `effective_config.yaml` and `effective_config_trace.yaml`
 in the resolved output directory.
+Generation no longer runs inline filtering; run `dagzoo filter` as a separate
+stage for acceptance decisions.
+
+Run deferred filtering on generated shards:
+
+```bash
+dagzoo filter --in data/run1 --out data/run1_filter
+```
 
 Run a smoke benchmark:
 
@@ -120,6 +128,7 @@ View help and available options for commands:
 ```bash
 dagzoo --help
 dagzoo generate --help
+dagzoo filter --help
 dagzoo benchmark --help
 ```
 
@@ -134,23 +143,27 @@ dagzoo benchmark --help
 
 ## Documentation (End Users)
 
+Primary docs site:
+
+- [https://bensonlee5.github.io/dagzoo/docs/](https://bensonlee5.github.io/dagzoo/docs/)
+
 Next reads for end users:
 
-- [docs/how-it-works.md](docs/how-it-works.md): System flow and terminology.
-- [docs/development/transforms.html](docs/development/transforms.html): Canonical formal mathematical specification of transforms.
+- [How It Works](https://bensonlee5.github.io/dagzoo/docs/how-it-works/): System flow and terminology.
+- [Transforms (Canonical Math)](https://bensonlee5.github.io/dagzoo/docs/transforms/): Canonical formal mathematical specification of transforms.
 
 Then explore features and workflows in the usage guide and feature docs:
 
-- [docs/usage-guide.md](docs/usage-guide.md): Primary workflow hub.
-- [docs/config-resolution.md](docs/config-resolution.md): Effective config precedence and trace artifacts.
-- [docs/output-format.md](docs/output-format.md): Output schema and artifacts.
+- [Usage Guide](https://bensonlee5.github.io/dagzoo/docs/usage-guide/): Primary workflow hub.
+- [Config Resolution](https://github.com/bensonlee5/dagzoo/blob/main/docs/development/config-resolution.md): Effective config precedence and trace artifacts.
+- [Output Format](https://bensonlee5.github.io/dagzoo/docs/output-format/): Output schema and artifacts.
 - Feature guides:
-  [diagnostics](docs/features/diagnostics.md),
-  [missingness](docs/features/missingness.md),
-  [many-class](docs/features/many-class.md),
-  [shift](docs/features/shift.md),
-  [noise](docs/features/noise.md),
-  [benchmark guardrails](docs/features/benchmark-guardrails.md)
+  [diagnostics](https://bensonlee5.github.io/dagzoo/docs/features/diagnostics/),
+  [missingness](https://bensonlee5.github.io/dagzoo/docs/features/missingness/),
+  [many-class](https://bensonlee5.github.io/dagzoo/docs/features/many-class/),
+  [shift](https://bensonlee5.github.io/dagzoo/docs/features/shift/),
+  [noise](https://bensonlee5.github.io/dagzoo/docs/features/noise/),
+  [benchmark guardrails](https://bensonlee5.github.io/dagzoo/docs/features/benchmark-guardrails/)
 
 ## Codebase Navigation
 
@@ -172,12 +185,12 @@ print(bundle.X_train.shape, bundle.y_train.shape)
 ```
 
 For command-line and workflow details, use
-[docs/usage-guide.md](docs/usage-guide.md).
+[Usage Guide](https://bensonlee5.github.io/dagzoo/docs/usage-guide/).
 
 ## Roadmap and Development
 
 - [docs/development/roadmap.md](docs/development/roadmap.md)
 - [docs/development/backlog_decision_rules.md](docs/development/backlog_decision_rules.md)
-- [docs/design-decisions.md](docs/design-decisions.md)
+- [docs/development/design-decisions.md](docs/development/design-decisions.md)
 - [docs/development/codebase-navigation.md](docs/development/codebase-navigation.md)
 - [reference/literature_evidence_2026.md](reference/literature_evidence_2026.md)

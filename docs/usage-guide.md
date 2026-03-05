@@ -34,10 +34,23 @@ dagzoo generate --config configs/default.yaml --num-datasets 10 --out data/run1
 
 Each generate run writes `effective_config.yaml` and `effective_config_trace.yaml`
 under the resolved output directory.
+Generation does not run inline filtering; keep `filter.enabled: false` for
+generate flows.
 
 ______________________________________________________________________
 
-## 2. Total-row control (`dataset.rows` / `--rows`)
+## 2. Deferred filtering (`dagzoo filter`)
+
+Run acceptance filtering as a separate CPU stage over persisted shards:
+
+```bash
+dagzoo filter --in data/run1 --out data/run1_filter
+dagzoo filter --in data/run1 --out data/run1_filter --curated-out data/run1_curated
+```
+
+______________________________________________________________________
+
+## 3. Total-row control (`dataset.rows` / `--rows`)
 
 Use `dataset.rows` (or CLI `--rows`) to control total rows with one field:
 
@@ -57,7 +70,7 @@ Historical curriculum shell workflows are retired. To migrate prior train-row st
 
 ______________________________________________________________________
 
-## 3. Diagnostics
+## 4. Diagnostics
 
 Use diagnostics to emit per-dataset observability artifacts.
 
@@ -75,7 +88,7 @@ Detailed guides:
 
 ______________________________________________________________________
 
-## 4. Fixed-layout batch generation (Python API)
+## 5. Fixed-layout batch generation (Python API)
 
 Use a fixed layout plan when you want many datasets with consistent structure
 and aligned emitted columns across the batch.
@@ -98,7 +111,7 @@ raises and asks you to resample the plan.
 
 ______________________________________________________________________
 
-## 5. Missingness workflows
+## 6. Missingness workflows
 
 Use missingness workflows for MCAR/MAR/MNAR robustness regimes:
 
@@ -110,7 +123,7 @@ Detailed guide: [Missingness](features/missingness.md)
 
 ______________________________________________________________________
 
-## 6. Many-class workflows
+## 7. Many-class workflows
 
 Use many-class workflows to exercise the rollout envelope (`n_classes_max <= 32`).
 
@@ -129,7 +142,7 @@ Detailed guide: [Many-class](features/many-class.md)
 
 ______________________________________________________________________
 
-## 7. Shift workflows
+## 8. Shift workflows
 
 Use shift profiles for controlled graph/mechanism/noise drift:
 
@@ -141,7 +154,7 @@ Detailed guide: [Shift / Drift](features/shift.md)
 
 ______________________________________________________________________
 
-## 8. Noise workflows
+## 9. Noise workflows
 
 Use noise workflows for explicit Gaussian/Laplace/Student-t/mixture regimes:
 
@@ -153,7 +166,7 @@ Detailed guide: [Noise Diversification](features/noise.md)
 
 ______________________________________________________________________
 
-## 9. Benchmark workflows and guardrails
+## 10. Benchmark workflows and guardrails
 
 Use benchmark workflows for smoke checks, feature guardrails, and regression
 gating.
@@ -176,6 +189,6 @@ ______________________________________________________________________
   [noise](features/noise.md),
   [benchmark guardrails](features/benchmark-guardrails.md)
 - Output contract: [output-format.md](output-format.md)
-- Config precedence and trace artifacts: [config-resolution.md](config-resolution.md)
-- System guide and terminology: [how-it-works.md](how-it-works.md)
-- Architecture rationale and evolution policy: [design-decisions.md](design-decisions.md)
+- Config precedence and trace artifacts: [development/config-resolution.md](development/config-resolution.md)
+- System guide and terminology: [how-it-works.html](how-it-works.html)
+- Architecture rationale and evolution policy: [development/design-decisions.md](development/design-decisions.md)

@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-03-05
+
+### Added
+
+- Added a new deferred filtering CLI stage:
+  `dagzoo filter --in <shard_dir> --out <out_dir>` with optional
+  accepted-only curated shard output via `--curated-out`.
+- Added deferred filter manifest (`filter_manifest.ndjson`) and summary
+  (`filter_summary.json`) artifacts for acceptance auditing and throughput
+  reporting.
+
+### Changed
+
+- Generated bundle metadata now always marks deferred filter state using
+  `metadata.filter.mode` and `metadata.filter.status` (`not_run` immediately
+  after generation).
+- Benchmark filter stage throughput now replays deferred filtering over sampled
+  bundles and reports replay-derived filter attempts/rejections when the filter
+  stage is enabled.
+
+### Breaking
+
+- **BREAKING:** Inline filtering was removed from generation. `dagzoo generate`
+  now errors when `filter.enabled=true`; users must run `dagzoo filter` as a
+  separate stage.
+
 ## [0.4.9] - 2026-03-04
 
 ### Fixed
