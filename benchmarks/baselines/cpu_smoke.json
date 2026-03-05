@@ -7,9 +7,9 @@
   ],
   "presets": {
     "cpu": {
-      "datasets_per_minute": 2635.101083048862,
-      "generation_datasets_per_minute": 2635.101083048862,
-      "write_datasets_per_minute": 10211.85337721164
+      "datasets_per_minute": 1597.2166902981269,
+      "generation_datasets_per_minute": 1597.2166902981269,
+      "write_datasets_per_minute": 5181.408395352963
     }
   },
   "suite": "smoke",
