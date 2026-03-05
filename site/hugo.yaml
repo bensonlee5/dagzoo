@@ -1,0 +1,64 @@
+baseURL: https://bensonlee5.github.io/dagzoo/
+title: dagzoo Docs
+enableRobotsTXT: true
+enableGitInfo: true
+defaultContentLanguage: en
+defaultContentLanguageInSubdir: false
+
+module:
+  imports:
+    - path: github.com/google/docsy
+  mounts:
+    - source: content
+      target: content
+    - source: .generated/content
+      target: content
+    - source: static
+      target: static
+    - source: .generated/static
+      target: static
+    - source: assets
+      target: assets
+    - source: layouts
+      target: layouts
+    - source: data
+      target: data
+    - source: i18n
+      target: i18n
+    - source: archetypes
+      target: archetypes
+
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
+  tableOfContents:
+    startLevel: 2
+    endLevel: 3
+    ordered: false
+
+copyright: dagzoo contributors
+
+params:
+  description: "dagzoo — causal DAG-driven synthetic tabular data generation"
+  github_repo: https://github.com/bensonlee5/dagzoo
+  github_project_repo: https://github.com/bensonlee5/dagzoo
+  ui:
+    sidebar_search_disable: false
+    breadcrumb_disable: false
+    navbar_translucent_over_cover_disable: false
+  links:
+    user:
+      - name: GitHub
+        url: https://github.com/bensonlee5/dagzoo
+        icon: fab fa-github
+    developer:
+      - name: GitHub Issues
+        url: https://github.com/bensonlee5/dagzoo/issues
+        icon: fab fa-github
+
+menu:
+  main:
+    - name: Docs
+      url: /docs/
+      weight: 10

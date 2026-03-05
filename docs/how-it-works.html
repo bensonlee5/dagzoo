@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>How dagzoo Works</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="canonical.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script defer>
+  document.addEventListener("DOMContentLoaded", function () {
+    var preBlocks = Array.prototype.slice.call(document.querySelectorAll("pre"));
+    preBlocks.forEach(function (pre) {
+      var code = pre.querySelector("code");
+      var preClasses = Array.prototype.slice.call(pre.classList || []);
+      var codeClasses = code ? Array.prototype.slice.call(code.classList || []) : [];
+      var classes = preClasses.concat(codeClasses);
+      var isMermaid = classes.some(function (klass) {
+        return klass === "mermaid" || klass === "language-mermaid";
+      });
+      if (!isMermaid) {
+        return;
+      }
+
+      var source = (code ? code.textContent : pre.textContent) || "";
+      var diagram = document.createElement("div");
+      diagram.className = "mermaid";
+      diagram.textContent = source;
+
+      var replaceTarget = pre;
+      var parent = pre.parentElement;
+      if (parent && parent.classList && parent.classList.contains("sourceCode") && parent.childElementCount === 1) {
+        replaceTarget = parent;
+      }
+      replaceTarget.replaceWith(diagram);
+    });
+
+    if (window.mermaid) {
+      window.mermaid.initialize({
+        startOnLoad: false,
+        theme: "neutral",
+        securityLevel: "loose"
+      });
+      window.mermaid.run({ querySelector: ".mermaid" });
+    }
+  });
+  </script>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">How dagzoo Works</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#how-dagzoo-works" id="toc-how-dagzoo-works">How dagzoo
+Works</a>
+<ul>
+<li><a href="#who-this-is-for" id="toc-who-this-is-for">Who this is
+for</a></li>
+<li><a href="#mental-model-in-90-seconds"
+id="toc-mental-model-in-90-seconds">Mental model in 90 seconds</a></li>
+<li><a href="#core-concepts" id="toc-core-concepts">Core Concepts</a>
+<ul>
+<li><a href="#1-causal-dag-vs-tabular-layout"
+id="toc-1-causal-dag-vs-tabular-layout">1. Causal DAG vs tabular
+layout</a></li>
+<li><a href="#2-reproducibility-tree" id="toc-2-reproducibility-tree">2.
+Reproducibility tree</a></li>
+<li><a href="#3-split-validity-retries-and-deferred-filter-stage"
+id="toc-3-split-validity-retries-and-deferred-filter-stage">3. Split
+validity retries and deferred filter stage</a></li>
+<li><a href="#4-effective-config-and-traceability"
+id="toc-4-effective-config-and-traceability">4. Effective config and
+traceability</a></li>
+<li><a href="#5-hardware-aware-execution-semantics"
+id="toc-5-hardware-aware-execution-semantics">5. Hardware-aware
+execution semantics</a></li>
+</ul></li>
+<li><a href="#mathematical-foundations"
+id="toc-mathematical-foundations">Mathematical Foundations</a></li>
+<li><a href="#end-to-end-flow" id="toc-end-to-end-flow">End-to-end
+flow</a></li>
+<li><a href="#generation-pipeline-walkthrough"
+id="toc-generation-pipeline-walkthrough">Generation pipeline
+walkthrough</a>
+<ul>
+<li><a href="#1-entry-points-and-orchestration-boundaries"
+id="toc-1-entry-points-and-orchestration-boundaries">1) Entry points and
+orchestration boundaries</a></li>
+<li><a href="#2-layout-and-structure-sampling"
+id="toc-2-layout-and-structure-sampling">2) Layout and structure
+sampling</a></li>
+<li><a href="#3-node-execution-and-tensor-assembly"
+id="toc-3-node-execution-and-tensor-assembly">3) Node execution and
+tensor assembly</a></li>
+<li><a href="#4-quality-shiftnoise-controls-and-postprocessing"
+id="toc-4-quality-shiftnoise-controls-and-postprocessing">4) Quality,
+shift/noise controls, and postprocessing</a></li>
+<li><a href="#5-metadata-and-output-emission"
+id="toc-5-metadata-and-output-emission">5) Metadata and output
+emission</a></li>
+</ul></li>
+<li><a href="#dagnode-data-flow" id="toc-dagnode-data-flow">DAG/node
+data flow</a></li>
+<li><a href="#diagnostics-fixed-layout-and-benchmark-guardrails"
+id="toc-diagnostics-fixed-layout-and-benchmark-guardrails">Diagnostics,
+fixed layout, and benchmark guardrails</a></li>
+<li><a href="#glossary-quick-reference"
+id="toc-glossary-quick-reference">Glossary quick reference</a></li>
+<li><a href="#where-to-go-next" id="toc-where-to-go-next">Where to go
+next</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="how-dagzoo-works">How dagzoo Works</h1>
+<p>This guide explains <code>dagzoo</code> end-to-end with enough detail
+to reason about behavior without needing to jump between many
+documents.</p>
+<h2 id="who-this-is-for">Who this is for</h2>
+<ul>
+<li>End users running <code>dagzoo generate</code> and
+<code>dagzoo benchmark</code></li>
+<li>Contributors building a mental model before reading implementation
+files</li>
+</ul>
+<h2 id="mental-model-in-90-seconds">Mental model in 90 seconds</h2>
+<p><code>dagzoo</code> synthesizes tabular datasets by sampling causal
+structure, executing randomized mechanisms over that structure, and
+enforcing quality and realism controls.</p>
+<ol type="1">
+<li>Resolve config and hardware context for the command.</li>
+<li>Derive deterministic seeds for run, dataset, and component
+scopes.</li>
+<li>Sample a dataset layout (feature types, assignments, graph size
+bounds).</li>
+<li>Sample a DAG and node assignments.</li>
+<li>Execute node pipelines in topological order to produce latent
+outputs.</li>
+<li>Convert latent outputs into observable <code>X</code> and
+<code>y</code>.</li>
+<li>Apply split checks, postprocess transforms, and optional
+missingness.</li>
+<li>Emit <code>DatasetBundle</code> outputs; optionally persist shards
+and diagnostics.</li>
+<li>Optionally run <code>dagzoo filter</code> as a deferred acceptance
+stage over shards.</li>
+</ol>
+<h2 id="core-concepts">Core Concepts</h2>
+<h3 id="1-causal-dag-vs-tabular-layout">1. Causal DAG vs tabular
+layout</h3>
+<p>The generation graph is a latent DAG, while emitted columns are a
+tabular projection of that latent graph.</p>
+<ul>
+<li>Latent nodes represent abstract causal variables.</li>
+<li>Feature/target columns are assigned to nodes by sampled layout
+state.</li>
+<li>Multiple columns can map to one node, and one node can influence
+many columns.</li>
+<li>This decoupling allows rich causal interactions while preserving a
+clean acyclic execution graph.</li>
+</ul>
+<pre class="mermaid"><code>flowchart LR
+    %% Class Definitions
+    classDef latent fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b,stroke-dasharray: 5 5
+    classDef observable fill:#f5f5f5,stroke:#212121,stroke-width:2px,color:#212121
+
+    subgraph LatentSpace [Latent Causal DAG]
+        A((Node A)) --&gt; B((Node B))
+        A --&gt; C((Node C))
+    end
+
+    subgraph ObservableSpace [Tabular Layout]
+        F1[feature_0 num]
+        F2[feature_1 cat]
+        F3[feature_2 num]
+        T[target]
+    end
+
+    %% Mapping connections
+    A -. mapping .-&gt; F1
+    A -. mapping .-&gt; F2
+    B -. mapping .-&gt; F3
+    C -. mapping .-&gt; T
+
+    %% Assign Classes
+    class A,B,C latent
+    class F1,F2,F3,T observable
+
+    style LatentSpace fill:#f0faff,stroke:#01579b,stroke-dasharray: 5 5
+    style ObservableSpace fill:#fafafa,stroke:#212121</code></pre>
+<h3 id="2-reproducibility-tree">2. Reproducibility tree</h3>
+<p>Reproducibility is driven by deterministic seed derivation using
+<code>SeedManager</code> and explicit offset helpers.</p>
+<ul>
+<li>One run seed fans out into deterministic dataset/component
+seeds.</li>
+<li>Layout sampling, node-spec derivation, split permutation,
+missingness masks, and noise-family selection use isolated RNG
+streams.</li>
+<li>Changing one component path should not perturb unrelated component
+randomness.</li>
+</ul>
+<p>Illustrative derivation chain:</p>
+<pre class="text"><code>run_seed -&gt; child(&quot;dataset&quot;, i)
+         -&gt; child(&quot;data&quot;)
+         -&gt; attempt_seed(run_seed, attempt_idx)
+         -&gt; node_spec_seed(run_seed, node_idx)
+         -&gt; split_permutation_seed(run_seed, attempt_idx)</code></pre>
+<h3 id="3-split-validity-retries-and-deferred-filter-stage">3. Split
+validity retries and deferred filter stage</h3>
+<p>Generation retries cover split-validity and generation exceptions
+only.</p>
+<ul>
+<li>Retries are bounded by <code>filter.max_attempts</code> (retry
+budget reused from config).</li>
+<li>Emitted metadata records <code>attempt_used</code> and
+generation-attempt counters.</li>
+<li>Generated outputs mark <code>metadata.filter.mode=deferred</code>
+and <code>metadata.filter.status=not_run</code>.</li>
+</ul>
+<p>Data-quality acceptance is a separate stage:</p>
+<ul>
+<li>Run
+<code>dagzoo filter --in &lt;shard_dir&gt; --out &lt;out_dir&gt;</code>.</li>
+<li>Backend: CPU ExtraTrees-based wins-ratio filter.</li>
+<li>Deferred runs emit acceptance/rejection artifacts and optional
+curated shards.</li>
+</ul>
+<h3 id="4-effective-config-and-traceability">4. Effective config and
+traceability</h3>
+<p>Generation and benchmark commands resolve effective config through
+staged overrides, then validate constraints.</p>
+<p>Generate path (high-level):</p>
+<ol type="1">
+<li>Base config YAML</li>
+<li>Device override normalization</li>
+<li>Hardware policy application</li>
+<li>Missingness/diagnostics CLI overrides</li>
+<li>Final generation constraint validation</li>
+</ol>
+<p>Every run writes:</p>
+<ul>
+<li><code>effective_config.yaml</code></li>
+<li><code>effective_config_trace.yaml</code></li>
+</ul>
+<p>The trace is field-level provenance (<code>path</code>,
+<code>source</code>, <code>old_value</code>, <code>new_value</code>) for
+resolved settings.</p>
+<h3 id="5-hardware-aware-execution-semantics">5. Hardware-aware
+execution semantics</h3>
+<p><code>dagzoo</code> tracks three related but distinct runtime
+notions:</p>
+<ul>
+<li><code>requested_device</code>: normalized user intent
+(<code>auto</code>, <code>cpu</code>, <code>cuda</code>,
+<code>mps</code>)</li>
+<li><code>resolved_device</code>: backend selected from
+request/environment</li>
+<li><code>device</code>: backend used for dataset execution in that
+attempt</li>
+</ul>
+<p>Notable runtime behavior:</p>
+<ul>
+<li><code>auto</code> resolves to available accelerator first, else
+CPU.</li>
+<li><code>auto</code> + resolved <code>mps</code> has a guarded fallback
+path to CPU on runtime failure.</li>
+<li>Split/postprocess control RNG runs on CPU to avoid tiny-op
+accelerator overhead.</li>
+</ul>
+<h2 id="mathematical-foundations">Mathematical Foundations</h2>
+<p>Formal equations are canonicalized in <a
+href="transforms.html">transforms.html</a>.</p>
+<ul>
+<li>Canonical equations + implementation map: <a
+href="transforms.html">transforms.html</a></li>
+<li>Shared notation and symbol definitions: <a
+href="transforms.html#notation-and-symbols">transforms.html#notation-and-symbols</a></li>
+</ul>
+<p>Quick index to the formal sections:</p>
+<ol type="1">
+<li><strong>DAG sampling</strong>: strict upper-triangular Bernoulli
+sampling with Cauchy latent logits and shift-adjusted edge bias.</li>
+<li><strong>Mechanism-family sampling</strong>: family-mix weights plus
+mechanism logit tilt produce runtime family probabilities.</li>
+<li><strong>Node pipeline</strong>: root/parent composition, latent
+sanitization and weighting, converter slicing, and final scaling.</li>
+<li><strong>Converters and noise</strong>: numeric/categorical converter
+equations and dataset-level noise runtime selection (including
+mixture-mode behavior).</li>
+</ol>
+<h2 id="end-to-end-flow">End-to-end flow</h2>
+<p>This diagram shows command-level orchestration and where generation,
+benchmarking, and hardware inspection diverge.</p>
+<pre class="mermaid"><code>flowchart TB
+    %% Class Definitions
+    classDef cli fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b
+    classDef gen fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+    classDef bench fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#4a148c
+    classDef flt fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,color:#1b5e20
+    classDef hw fill:#f1f8e9,stroke:#33691e,stroke-width:2px,color:#33691e
+
+    CLI([&quot;dagzoo CLI&quot;])
+
+    CLI --&gt; GenCfg
+    CLI --&gt; BenchCfg
+    CLI --&gt; Detect
+
+    subgraph GeneratePath [generate]
+        direction TB
+        subgraph Setup [&quot; &quot;]
+            GenCfg[load + resolve config] --&gt; Loop[generate_batch_iter]
+            Loop --&gt; Seed[derive dataset/component seeds]
+        end
+        subgraph Sampling [&quot; &quot;]
+            Seed --&gt; Layout[sample layout]
+            Layout --&gt; DAG[sample DAG + assignments]
+            DAG --&gt; Resolve[resolve shift + noise]
+        end
+        subgraph Execution [&quot; &quot;]
+            Resolve --&gt; Exec[run node pipelines]
+        end
+        subgraph Emission [&quot; &quot;]
+            Exec --&gt; Post[postprocess]
+            Post --&gt; Missing[optional missingness]
+            Missing --&gt; Bundle[[emit DatasetBundle]]
+        end
+    end
+
+    subgraph FilterPath [filter]
+        direction TB
+        FilterCmd[dagzoo filter] --&gt; Replay[replay ExtraTrees over shards]
+        Replay --&gt; FilterArtifacts[write manifest + summary (+ optional curated shards)]
+    end
+    Bundle --&gt; FilterCmd
+
+    subgraph BenchmarkPath [benchmark]
+        direction TB
+        BenchCfg[resolve preset/suite configs] --&gt; Runs[run benchmark suite]
+        Runs --&gt; Guards[emit guardrails]
+        Guards --&gt; Reports[write summary]
+    end
+
+    subgraph HardwarePath [hardware]
+        direction TB
+        Detect[detect_hardware] --&gt; Print[print backend/tier]
+    end
+
+    %% Assign Classes
+    class CLI cli
+    class GenCfg,Loop,Seed,Layout,DAG,Resolve,Exec,Post,Missing,Bundle gen
+    class FilterCmd,Replay,FilterArtifacts flt
+    class BenchCfg,Runs,Guards,Reports bench
+    class Detect,Print hw
+
+    style Setup fill:transparent,stroke:none
+    style Sampling fill:transparent,stroke:none
+    style Execution fill:transparent,stroke:none
+    style Emission fill:transparent,stroke:none</code></pre>
+<h2 id="generation-pipeline-walkthrough">Generation pipeline
+walkthrough</h2>
+<p>This section maps the runtime to module boundaries and data flow.</p>
+<h3 id="1-entry-points-and-orchestration-boundaries">1) Entry points and
+orchestration boundaries</h3>
+<ul>
+<li>Public generation APIs live in
+<code>src/dagzoo/core/dataset.py</code>.</li>
+<li><code>dataset.py</code> is a façade over focused internals:
+<ul>
+<li><code>generation_context.py</code>: seed/split/device/dtype
+helpers</li>
+<li><code>generation_engine.py</code>: torch generation loop and
+retries</li>
+<li><code>noise_runtime.py</code>: per-dataset noise runtime
+selection</li>
+<li><code>fixed_layout.py</code>: fixed-layout plan/compatibility
+execution</li>
+</ul></li>
+</ul>
+<h3 id="2-layout-and-structure-sampling">2) Layout and structure
+sampling</h3>
+<ul>
+<li><code>_sample_layout</code> samples feature counts/types, class
+bounds, and feature/target-to-node assignments.</li>
+<li><code>sample_dag</code> samples strict upper-triangular
+adjacency.</li>
+<li>Adjacency convention is <code>adjacency[src, dst]</code>; parents of
+node <code>j</code> are read from column
+<code>adjacency[:, j]</code>.</li>
+</ul>
+<h3 id="3-node-execution-and-tensor-assembly">3) Node execution and
+tensor assembly</h3>
+<ul>
+<li>Nodes execute in index/topological order.</li>
+<li>Root nodes sample latent points directly.</li>
+<li>Child nodes consume parent outputs using multi-parent composition:
+<ul>
+<li>50% path: concatenate parents and apply one mechanism</li>
+<li>50% path: apply per-parent mechanisms, then aggregate via
+<code>sum | product | max | logsumexp</code></li>
+</ul></li>
+<li>Converter specs slice latent columns and emit feature/target
+values.</li>
+<li>Unassigned feature slots are filled with sampled noise.</li>
+</ul>
+<h3 id="4-quality-shiftnoise-controls-and-postprocessing">4) Quality,
+shift/noise controls, and postprocessing</h3>
+<ul>
+<li>Shift runtime params modulate graph/mechanism/noise behavior when
+enabled.</li>
+<li>Noise runtime resolution picks one family per dataset in mixture
+mode, then propagates through node-level samplers.</li>
+<li>Split, postprocess, and missingness run in-generation.</li>
+<li>Classification split validity is enforced before bundle
+emission.</li>
+</ul>
+<p>Mode-specific postprocess behavior:</p>
+<ul>
+<li>Standard generation can remove constant columns and permute feature
+columns.</li>
+<li>Fixed-layout generation preserves emitted schema across the
+batch.</li>
+</ul>
+<h3 id="5-metadata-and-output-emission">5) Metadata and output
+emission</h3>
+<p>Each bundle includes runtime metadata for lineage, deferred-filter
+status, shift, noise distribution, and resolved config snapshot.</p>
+<ul>
+<li><code>lineage</code> aligns emitted columns with DAG node
+assignments.</li>
+<li><code>requested_device</code>, <code>resolved_device</code>, and
+optional fallback reason are emitted for runtime observability.</li>
+<li>Fixed-layout batches add <code>layout_mode</code>,
+<code>layout_plan_seed</code>, and <code>layout_signature</code>.</li>
+</ul>
+<h2 id="dagnode-data-flow">DAG/node data flow</h2>
+<p>This diagram focuses on node-level execution mechanics inside the
+generation engine.</p>
+<pre class="mermaid"><code>flowchart TB
+    %% Class Definitions
+    classDef setup fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b
+    classDef loop fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+    classDef pipe fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#4a148c
+    classDef out fill:#f1f8e9,stroke:#33691e,stroke-width:2px,color:#33691e
+
+    Setup[layout + DAG + node specs] --&gt; Walk[for node in topological order]
+    Walk --&gt; Root{root node?}
+
+    Root -- yes --&gt; RootSample[sample_random_points]
+    Root -- no --&gt; ParentMix[compose parent outputs]
+
+    RootSample --&gt; Pipe
+    ParentMix --&gt; Pipe
+
+    subgraph Pipe [apply_node_pipeline]
+        Clean[nan_to_num + clamp] --&gt; Std[standardize]
+        Std --&gt; Weight[random weights + normalize]
+        Weight --&gt; Slice[slice latent per spec]
+        Slice --&gt; Convert[apply converter]
+        Convert --&gt; Feedback[write output back]
+        Feedback --&gt; Scale[final scaling]
+    end
+
+    Pipe --&gt; Emit[emit node output + extracted values]
+    Emit --&gt; Walk
+    Emit --&gt; Assemble[assemble final X/y]
+    Assemble --&gt; Out[[return tensors + deferred filter metadata]]
+
+    %% Assign Classes
+    class Setup setup
+    class Walk,Root,RootSample,ParentMix loop
+    class Clean,Std,Weight,Slice,Convert,Feedback,Scale,Pipe pipe
+    class Emit,Assemble,Out out</code></pre>
+<h2 id="diagnostics-fixed-layout-and-benchmark-guardrails">Diagnostics,
+fixed layout, and benchmark guardrails</h2>
+<p>These are related but distinct runtime surfaces.</p>
+<ul>
+<li>Fixed-layout generation controls structural consistency across
+emitted datasets.</li>
+<li>Diagnostics aggregates observability metrics across emitted
+bundles.</li>
+<li>Benchmark guardrails evaluate runtime/metadata regressions in suite
+runs.</li>
+</ul>
+<h2 id="glossary-quick-reference">Glossary quick reference</h2>
+<ul>
+<li><strong>layout</strong>: sampled feature/task/assignment scaffold
+for one dataset.</li>
+<li><strong>DAG adjacency</strong>: upper-triangular parent-child
+matrix, <code>src -&gt; dst</code>.</li>
+<li><strong>node pipeline</strong>: per-node transform and converter
+execution path.</li>
+<li><strong>converter spec</strong>: instruction for extracting
+observable feature/target slices.</li>
+<li><strong>deferred filter</strong>: ExtraTrees-based post-generation
+gate for signal quality.</li>
+<li><strong>wins ratio</strong>: bootstrap fraction where model beats
+baseline.</li>
+<li><strong>shift runtime params</strong>: resolved
+graph/mechanism/noise drift controls.</li>
+<li><strong>noise runtime selection</strong>: per-dataset resolved noise
+family/params.</li>
+<li><strong>fixed-layout plan</strong>: reusable sampled layout with
+compatibility snapshot.</li>
+<li><strong>layout signature</strong>: deterministic hash fingerprint of
+a sampled layout.</li>
+<li><strong>DatasetBundle</strong>: in-memory output container with
+tensors + metadata.</li>
+<li><strong>effective config trace</strong>: field-level override
+provenance artifact.</li>
+</ul>
+<h2 id="where-to-go-next">Where to go next</h2>
+<ul>
+<li>Canonical transform equations and symbol definitions:
+<code>docs/transforms.html</code></li>
+<li>Output schema and metadata contract:
+<code>docs/output-format.md</code></li>
+<li>Config precedence and trace details:
+<code>docs/development/config-resolution.md</code></li>
+<li>CLI workflow examples: <code>docs/usage-guide.md</code></li>
+<li>Architecture rationale:
+<code>docs/development/design-decisions.md</code></li>
+</ul>
+</body>
+</html>

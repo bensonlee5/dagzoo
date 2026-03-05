@@ -1,0 +1,66 @@
+.canonical-doc-frame {
+  width: 100%;
+  min-height: 82vh;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.canonical-doc-note {
+  margin-bottom: 0.75rem;
+}
+
+// --- Typography ---
+
+h1, h2, h3, h4 {
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  padding-top: 1.25rem;
+  margin-top: 2.5rem;
+}
+
+// --- Code blocks ---
+
+pre {
+  border-left: 3px solid $primary;
+  border-radius: 6px;
+}
+
+code:not(pre code) {
+  background: rgba($primary, 0.08);
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+
+// --- Section index entries ---
+
+.td-content .section-index {
+  h5 {
+    border-left: 3px solid $primary;
+    padding-left: 0.75rem;
+  }
+
+  td:first-child {
+    transition: background 0.15s;
+    &:hover {
+      background: rgba($primary, 0.04);
+    }
+  }
+}
+
+// --- Horizontal rules ---
+
+hr {
+  opacity: 0.35;
+  margin: 2rem 0;
+}
+
+// --- Navbar ---
+
+.td-navbar .navbar-brand {
+  font-weight: 700;
+}
