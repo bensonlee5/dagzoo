@@ -2,6 +2,7 @@ import queue
 import threading
 import time
 
+import dagzoo.core.parallel_generation as parallel_generation_mod
 import pytest
 
 from dagzoo.config import GeneratorConfig
@@ -222,3 +223,57 @@ def test_generate_parallel_batch_iter_bounds_faster_worker_runahead(
     assert not consumer_thread.is_alive()
     assert next_result.get_nowait() == seed0
     iterator.close()
+
+
+def test_generate_parallel_batch_iter_preserves_original_worker_exception_on_timeout_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 0
+    cfg.runtime.device = "cpu"
+
+    manager = SeedManager(777)
+    seed1 = manager.child("dataset", 1)
+    bundle_get_calls = 0
+    target_wait_started = threading.Event()
+    original_queue_get = parallel_generation_mod.queue.Queue.get
+
+    def _patched_queue_get(self, block: bool = True, timeout: float | None = None):
+        nonlocal bundle_get_calls
+        if timeout == 0.05 and self.maxsize == 1:
+            bundle_get_calls += 1
+            if bundle_get_calls == 2:
+                target_wait_started.set()
+        return original_queue_get(self, block=block, timeout=timeout)
+
+    def _stub_generate_one_seeded(
+        config, *, seed: int, requested_device: str, resolved_device: str
+    ):
+        _ = config
+        _ = requested_device
+        _ = resolved_device
+        if seed == seed1:
+            assert target_wait_started.wait(timeout=1.0)
+            raise RuntimeError("boom")
+        return seed
+
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation.queue.Queue.get",
+        _patched_queue_get,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation._generation_engine._generate_one_seeded",
+        _stub_generate_one_seeded,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        list(
+            generate_parallel_batch_iter(
+                cfg,
+                num_datasets=4,
+                seed=777,
+                device="cpu",
+                max_buffered_results=1,
+            )
+        )
