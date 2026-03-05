@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import math
 import time
 from typing import Any
 
@@ -325,6 +326,17 @@ def _generate_torch(
             shift_params=shift_params,
             function_family_mix=config.mechanism.function_family_mix,
         )
+        filter_metadata = aux_meta.get("filter", {})
+        runtime_metrics: dict[str, Any] = {}
+        if isinstance(filter_metadata, dict):
+            filter_metadata = dict(filter_metadata)
+            elapsed_seconds = filter_metadata.pop("elapsed_seconds", None)
+            if isinstance(elapsed_seconds, (int, float)):
+                elapsed = float(elapsed_seconds)
+                if math.isfinite(elapsed) and elapsed >= 0.0:
+                    runtime_metrics["filter_elapsed_seconds"] = elapsed
+        else:
+            filter_metadata = {}
 
         config_payload = asdict(config)
         dataset_payload = config_payload.get("dataset")
@@ -349,7 +361,7 @@ def _generate_torch(
             "lineage": _build_lineage_metadata(layout, feature_index_map=feature_index_map),
             "seed": seed,
             "attempt_used": attempt,
-            "filter": aux_meta.get("filter", {}),
+            "filter": filter_metadata,
             "shift": shift_metadata,
             "noise_distribution": _build_noise_distribution_metadata(noise_runtime_selection),
             "generation_attempts": {
@@ -376,6 +388,7 @@ def _generate_torch(
             y_test=y_test,
             feature_types=feature_types,
             metadata=metadata,
+            runtime_metrics=runtime_metrics,
         )
 
     raise ValueError(

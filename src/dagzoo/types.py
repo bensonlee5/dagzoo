@@ -16,3 +16,4 @@ class DatasetBundle:
     y_test: Any
     feature_types: list[str]
     metadata: dict[str, Any] = field(default_factory=dict)
+    runtime_metrics: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)

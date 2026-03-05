@@ -67,13 +67,10 @@ def measure_filter_datasets_per_minute(
     total_seconds = 0.0
     timed_bundles = 0
     for bundle in bundles:
-        metadata = bundle.metadata
-        if not isinstance(metadata, dict):
+        runtime_metrics = bundle.runtime_metrics
+        if not isinstance(runtime_metrics, dict):
             continue
-        filter_payload = metadata.get("filter")
-        if not isinstance(filter_payload, dict):
-            continue
-        elapsed = filter_payload.get("elapsed_seconds")
+        elapsed = runtime_metrics.get("filter_elapsed_seconds")
         if not isinstance(elapsed, (int, float)):
             continue
         elapsed_seconds = float(elapsed)

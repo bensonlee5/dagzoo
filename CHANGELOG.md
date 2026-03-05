@@ -16,9 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Benchmark stage-sample bundles are now released immediately after write/filter
   stage probes, reducing avoidable bundle/tensor retention before latency
   collection and guardrail control runs.
-- Filter stage throughput now uses generation-time filter runtime
-  (`metadata.filter.elapsed_seconds`) captured on pre-filter tensors, avoiding
-  replay skew from postprocessing and missingness-transformed outputs.
+- Filter stage throughput now uses benchmark-only runtime timing captured on
+  pre-filter tensors (`bundle.runtime_metrics.filter_elapsed_seconds`), keeping
+  emitted metadata deterministic while avoiding replay skew from postprocessing
+  and missingness-transformed outputs.
 
 ## [0.4.8] - 2026-03-04
 

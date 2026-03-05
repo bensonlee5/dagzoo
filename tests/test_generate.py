@@ -987,7 +987,8 @@ def test_torch_path_applies_filter_when_enabled(monkeypatch: pytest.MonkeyPatch)
     assert bundle.metadata["filter"]["threshold_policy"] == "class_aware_piecewise_v1"
     assert bundle.metadata["filter"]["class_bucket"] == "25-32"
     assert float(bundle.metadata["filter"]["threshold_effective"]) == pytest.approx(0.80)
-    assert float(bundle.metadata["filter"]["elapsed_seconds"]) >= 0.0
+    assert "elapsed_seconds" not in bundle.metadata["filter"]
+    assert float(bundle.runtime_metrics["filter_elapsed_seconds"]) >= 0.0
     assert called["n_jobs"] == int(cfg.filter.n_jobs)
     assert "reason" not in bundle.metadata["filter"]
     attempts = bundle.metadata["generation_attempts"]
