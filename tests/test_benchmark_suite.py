@@ -229,6 +229,274 @@ def test_run_benchmark_suite_emits_stage_and_filter_pressure_metrics(
     assert result["filter_retry_dataset_rate"] == pytest.approx(0.5)
 
 
+def test_run_benchmark_suite_filter_enabled_uses_filter_disabled_generation_config_everywhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_cpu_config()
+    cfg.filter.enabled = True
+    cfg.dataset.missing_rate = 0.25
+    cfg.dataset.missing_mechanism = "mcar"  # type: ignore[assignment]
+    cfg.shift.enabled = True
+    cfg.shift.mode = "mixed"
+    cfg.noise.family = "laplace"
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
+
+    throughput_filter_flags: list[bool] = []
+    latency_filter_flags: list[bool] = []
+    repro_filter_flags: list[bool] = []
+    micro_filter_flags: list[bool] = []
+    lineage_filter_flags: list[bool] = []
+
+    def _stub_throughput(
+        config,
+        *,
+        num_datasets: int,
+        warmup_datasets: int = 10,
+        device: str | None = None,
+        on_bundle=None,
+    ):
+        _ = warmup_datasets
+        _ = device
+        throughput_filter_flags.append(bool(config.filter.enabled))
+        dpm = 100.0
+        dps = dpm / 60.0
+        elapsed = (float(num_datasets) / dps) if dps > 0 else 0.0
+        if on_bundle is not None:
+            for i in range(num_datasets):
+                on_bundle(
+                    DatasetBundle(
+                        X_train=np.zeros((3, 4), dtype=np.float32),
+                        y_train=np.zeros(3, dtype=np.int64),
+                        X_test=np.zeros((1, 4), dtype=np.float32),
+                        y_test=np.zeros(1, dtype=np.int64),
+                        feature_types=["num", "num", "num", "num"],
+                        metadata={
+                            "seed": i,
+                            "attempt_used": 0,
+                            "generation_attempts": {
+                                "total_attempts": 1,
+                                "filter_attempts": 0,
+                                "filter_rejections": 0,
+                            },
+                            "missingness": {"missing_count_overall": 4},
+                            "graph_edge_density": 0.3,
+                            "shift": {
+                                "enabled": bool(config.shift.enabled),
+                                "edge_odds_multiplier": 1.0,
+                                "mechanism_nonlinear_mass": 0.6,
+                                "noise_variance_multiplier": 1.0,
+                            },
+                            "noise_distribution": {
+                                "family_requested": str(config.noise.family),
+                                "family_sampled": str(config.noise.family),
+                                "sampling_strategy": "dataset_level",
+                                "base_scale": float(config.noise.base_scale),
+                                "student_t_df": float(config.noise.student_t_df),
+                                "mixture_weights": None,
+                            },
+                        },
+                    )
+                )
+        return {
+            "preset": config.benchmark.preset_name,
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup_datasets,
+            "elapsed_seconds": elapsed,
+            "datasets_per_second": dps,
+            "datasets_per_minute": dpm,
+            "slo_pass_100_datasets_per_min": True,
+        }
+
+    def _stub_latency(config, *, device: str | None, num_samples: int) -> dict[str, float]:
+        _ = device
+        latency_filter_flags.append(bool(config.filter.enabled))
+        return {
+            "latency_samples": float(num_samples),
+            "latency_mean_ms": 1.0,
+            "latency_p95_ms": 1.0,
+            "latency_min_ms": 1.0,
+            "latency_max_ms": 1.0,
+        }
+
+    def _stub_repro(config, *, device: str | None, num_datasets: int) -> dict[str, object]:
+        _ = device
+        repro_filter_flags.append(bool(config.filter.enabled))
+        return {
+            "reproducibility_datasets": int(num_datasets),
+            "reproducibility_signature": "stub",
+            "reproducibility_match": True,
+        }
+
+    def _stub_micro(config, *, device: str | None, repeats: int) -> dict[str, float | int]:
+        _ = device
+        micro_filter_flags.append(bool(config.filter.enabled))
+        return {
+            "micro_repeats": int(repeats),
+            "micro_random_function_linear_ms": 1.0,
+            "micro_node_pipeline_ms": 1.0,
+            "micro_generate_one_ms": 1.0,
+        }
+
+    def _stub_lineage(
+        config,
+        *,
+        suite: str,
+        num_datasets: int,
+        device: str | None,
+        warn_threshold_pct: float,
+        fail_threshold_pct: float,
+    ) -> dict[str, object]:
+        _ = suite
+        _ = num_datasets
+        _ = device
+        _ = warn_threshold_pct
+        _ = fail_threshold_pct
+        lineage_filter_flags.append(bool(config.filter.enabled))
+        return {"enabled": False}
+
+    monkeypatch.setattr("dagzoo.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr("dagzoo.bench.suite._collect_latency", _stub_latency)
+    monkeypatch.setattr("dagzoo.bench.suite._collect_reproducibility", _stub_repro)
+    monkeypatch.setattr("dagzoo.bench.suite.run_microbenchmarks", _stub_micro)
+    monkeypatch.setattr("dagzoo.bench.suite._collect_lineage_guardrails", _stub_lineage)
+    monkeypatch.setattr(
+        "dagzoo.bench.suite.measure_filter_stage_metrics",
+        lambda bundles, *, config: SimpleNamespace(
+            datasets_per_minute=float(len(bundles)) * 10.0 + float(config.filter.n_jobs) * 0.0,
+            filter_attempts_total=int(len(bundles)),
+            filter_rejections_total=0,
+        ),
+    )
+
+    summary = run_benchmark_suite(
+        [spec],
+        suite="full",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+        baseline_payload=None,
+        num_datasets_override=1,
+        warmup_override=0,
+        collect_memory=False,
+        collect_reproducibility=False,
+        collect_diagnostics=False,
+        diagnostics_root_dir=None,
+        fail_on_regression=False,
+        hardware_policy="none",
+    )
+
+    result = summary["preset_results"][0]
+    assert result["filter_stage_enabled"] is True
+    assert len(throughput_filter_flags) == 4
+    assert throughput_filter_flags == [False, False, False, False]
+    assert latency_filter_flags == [False]
+    assert repro_filter_flags == [False]
+    assert micro_filter_flags == [False]
+    assert lineage_filter_flags == [False]
+
+
+def test_run_benchmark_suite_filter_retry_rate_uses_stage_sample_denominator_when_replayed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_cpu_config()
+    cfg.filter.enabled = True
+    cfg.benchmark.latency_num_samples = 2
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
+
+    def _stub_throughput(
+        config,
+        *,
+        num_datasets: int,
+        warmup_datasets: int = 10,
+        device: str | None = None,
+        on_bundle=None,
+    ):
+        _ = warmup_datasets
+        _ = device
+        assert bool(config.filter.enabled) is False
+        dpm = 120.0
+        dps = dpm / 60.0
+        elapsed = (float(num_datasets) / dps) if dps > 0 else 0.0
+        if on_bundle is not None:
+            for i in range(num_datasets):
+                on_bundle(
+                    DatasetBundle(
+                        X_train=np.zeros((3, 4), dtype=np.float32),
+                        y_train=np.zeros(3, dtype=np.int64),
+                        X_test=np.zeros((1, 4), dtype=np.float32),
+                        y_test=np.zeros(1, dtype=np.int64),
+                        feature_types=["num", "num", "num", "num"],
+                        metadata={
+                            "seed": i,
+                            "attempt_used": 0,
+                            "generation_attempts": {
+                                "total_attempts": 1,
+                                "retry_count": 0,
+                                "filter_attempts": 1,
+                                "filter_rejections": 0,
+                            },
+                        },
+                    )
+                )
+        return {
+            "preset": "cpu_test",
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup_datasets,
+            "elapsed_seconds": elapsed,
+            "datasets_per_second": dps,
+            "datasets_per_minute": dpm,
+            "slo_pass_100_datasets_per_min": True,
+        }
+
+    monkeypatch.setattr("dagzoo.bench.suite.run_throughput_benchmark", _stub_throughput)
+    monkeypatch.setattr(
+        "dagzoo.bench.suite._collect_latency",
+        lambda _cfg, *, device, num_samples: {
+            "latency_samples": float(num_samples) + (0.0 if device is None else 0.0),
+            "latency_mean_ms": 1.0,
+            "latency_p95_ms": 1.0,
+            "latency_min_ms": 1.0,
+            "latency_max_ms": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.suite.measure_filter_stage_metrics",
+        lambda bundles, *, config: SimpleNamespace(
+            datasets_per_minute=float(len(bundles)) * 20.0
+            + float(config.filter.n_estimators) * 0.0,
+            filter_attempts_total=int(len(bundles)),
+            filter_rejections_total=1,
+        ),
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.suite._collect_lineage_guardrails",
+        lambda *_args, **_kwargs: {"enabled": False},
+    )
+
+    summary = run_benchmark_suite(
+        [spec],
+        suite="smoke",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+        baseline_payload=None,
+        num_datasets_override=4,
+        warmup_override=0,
+        collect_memory=False,
+        collect_reproducibility=False,
+        collect_diagnostics=False,
+        diagnostics_root_dir=None,
+        fail_on_regression=False,
+        hardware_policy="none",
+    )
+
+    result = summary["preset_results"][0]
+    assert result["accepted_datasets_measured"] == 4
+    assert result["stage_sample_datasets"] == 2
+    assert result["filter_attempts_total"] == 2
+    assert result["filter_rejections_total"] == 1
+    assert result["filter_retry_dataset_count"] == 1
+    assert result["filter_retry_dataset_rate"] == pytest.approx(0.5)
+
+
 def test_missingness_control_run_uses_equivalent_callback_instrumentation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

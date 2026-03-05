@@ -369,6 +369,9 @@ def run_preset_benchmark(
     )
     stage_sample_cap = _latency_sample_count(config, suite, num_datasets)
 
+    generation_config = _copy_runtime_config(config)
+    generation_config.filter.enabled = False
+
     def _build_throughput_on_bundle_callback(
         *,
         diagnostics_aggregator: CoverageAggregator | None,
@@ -408,8 +411,6 @@ def run_preset_benchmark(
         noise_guardrails=noise_guardrails,
     )
 
-    generation_config = _copy_runtime_config(config)
-    generation_config.filter.enabled = False
     result = run_throughput_benchmark(
         generation_config,
         num_datasets=num_datasets,
@@ -443,9 +444,13 @@ def run_preset_benchmark(
     throughput_pressure_summary = throughput_pressure.build_summary()
     filter_attempts_total = int(throughput_pressure_summary["filter_attempts_total"])
     filter_rejections_total = int(throughput_pressure_summary["filter_rejections_total"])
+    filter_retry_dataset_count = int(throughput_pressure_summary["filter_retry_dataset_count"])
+    filter_retry_dataset_denominator = int(throughput_pressure_summary["datasets_seen"])
     if filter_stage_measurement is not None:
         filter_attempts_total = int(filter_stage_measurement.filter_attempts_total)
         filter_rejections_total = int(filter_stage_measurement.filter_rejections_total)
+        filter_retry_dataset_count = int(filter_stage_measurement.filter_rejections_total)
+        filter_retry_dataset_denominator = int(stage_sample_datasets)
 
     accepted_datasets_measured = int(throughput_pressure_summary["datasets_seen"])
     filter_rejection_rate_attempt_level = (
@@ -453,10 +458,9 @@ def run_preset_benchmark(
         if filter_attempts_total > 0
         else None
     )
-    filter_retry_dataset_count = int(filter_rejections_total)
     filter_retry_dataset_rate = (
-        float(filter_retry_dataset_count) / float(accepted_datasets_measured)
-        if accepted_datasets_measured > 0 and filter_attempts_total > 0
+        float(filter_retry_dataset_count) / float(filter_retry_dataset_denominator)
+        if filter_retry_dataset_denominator > 0 and filter_attempts_total > 0
         else None
     )
 
@@ -502,7 +506,7 @@ def run_preset_benchmark(
     sampled_bundles.clear()
 
     latency_stats = _collect_latency(
-        config,
+        generation_config,
         device=requested_device,
         num_samples=_latency_sample_count(config, suite, num_datasets),
     )
@@ -522,7 +526,7 @@ def run_preset_benchmark(
         repro_n = min(num_datasets, max(1, int(config.benchmark.reproducibility_num_datasets)))
         result.update(
             _collect_reproducibility(
-                config,
+                generation_config,
                 device=requested_device,
                 num_datasets=repro_n,
             )
@@ -530,11 +534,15 @@ def run_preset_benchmark(
 
     if include_micro:
         result.update(
-            run_microbenchmarks(config, device=requested_device, repeats=MICROBENCH_REPEATS)
+            run_microbenchmarks(
+                generation_config,
+                device=requested_device,
+                repeats=MICROBENCH_REPEATS,
+            )
         )
 
     if missingness_enabled and missingness_acceptance is not None:
-        baseline_config = _copy_runtime_config(config)
+        baseline_config = _copy_runtime_config(generation_config)
         baseline_config.dataset.missing_rate = 0.0
         baseline_config.dataset.missing_mechanism = MISSINGNESS_MECHANISM_NONE
         missingness_baseline_diagnostics_aggregator: CoverageAggregator | None = None
@@ -620,7 +628,7 @@ def run_preset_benchmark(
 
     if shift_enabled and shift_guardrails is not None:
         shift_params = resolve_shift_runtime_params(config)
-        baseline_config = _copy_runtime_config(config)
+        baseline_config = _copy_runtime_config(generation_config)
         baseline_config.shift.enabled = False
         baseline_config.shift.mode = SHIFT_MODE_OFF
         baseline_config.shift.graph_scale = None
@@ -802,7 +810,7 @@ def run_preset_benchmark(
         }
 
     if noise_enabled and noise_guardrails is not None:
-        baseline_config = _copy_runtime_config(config)
+        baseline_config = _copy_runtime_config(generation_config)
         baseline_config.noise.family = NOISE_FAMILY_GAUSSIAN
         baseline_config.noise.base_scale = 1.0
         baseline_config.noise.student_t_df = 5.0
@@ -899,7 +907,7 @@ def run_preset_benchmark(
         }
 
     result["lineage_guardrails"] = _collect_lineage_guardrails(
-        config,
+        generation_config,
         suite=suite,
         num_datasets=num_datasets,
         device=requested_device,
