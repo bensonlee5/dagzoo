@@ -1,3 +1,10 @@
+// =============================================================================
+// dagzoo — Scientific Editorial theme
+// Loaded after Docsy/Bootstrap SCSS. All values reference $variables_project vars.
+// =============================================================================
+
+// --- Canonical iframe wrapper (unchanged) ---
+
 .canonical-doc-frame {
   width: 100%;
   min-height: 82vh;
@@ -10,38 +17,295 @@
   margin-bottom: 0.75rem;
 }
 
-// --- Typography ---
 
-h1, h2, h3, h4 {
-  letter-spacing: -0.01em;
+// =============================================================================
+// TYPOGRAPHY — Scientific Editorial
+// =============================================================================
+
+h1, h2, h3, h4, h5, h6 {
+  letter-spacing: -0.02em;
+  font-variant-numeric: oldstyle-nums;
+}
+
+.td-content > h1 {
+  padding-top: 0.5rem;
+  margin-bottom: 1.75rem;
 }
 
 h2 {
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
-  padding-top: 1.25rem;
-  margin-top: 2.5rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.10);
+  padding-top: 1.5rem;
+  margin-top: 3rem;
+  font-weight: 500;
 }
 
-// --- Code blocks ---
+h3 {
+  font-weight: 600;
+  margin-top: 2rem;
+}
+
+.td-content > .lead,
+.td-content > p:first-of-type {
+  font-size: 1.1rem;
+  color: rgba($body-color, 0.85);
+  line-height: 1.75;
+}
+
+
+// =============================================================================
+// NAVBAR — Scientific Editorial
+// =============================================================================
+
+.td-navbar {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+
+  .navbar-brand__name {
+    font-family: $font-family-serif;
+    font-weight: 700;
+    font-size: 1.15rem;
+    letter-spacing: -0.01em;
+  }
+
+  .nav-link {
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+  }
+}
+
+
+// =============================================================================
+// HERO / COVER BLOCK — Scientific Editorial
+// =============================================================================
+
+.td-cover-block {
+  box-shadow: inset 0 -3px 0 0 rgba($primary, 0.4);
+}
+
+.td-cover-block .td-overlay__inner {
+  padding-bottom: 3rem;
+}
+
+.td-cover-block h1 {
+  font-family: $font-family-serif;
+  font-weight: 300;
+  font-size: clamp(3rem, 8vw, 5.5rem);
+  letter-spacing: -0.04em;
+  line-height: 1.0;
+  color: #ffffff;
+}
+
+.td-cover-block p.lead {
+  font-family: $font-family-sans-serif;
+  font-size: clamp(1rem, 2vw, 1.3rem);
+  font-weight: 300;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.80);
+  margin: 0.5rem auto 2rem;
+  max-width: 52ch;
+}
+
+.td-cover-block .btn-primary {
+  font-family: $font-family-sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  padding: 0.6rem 1.5rem;
+  border-radius: 2px;
+}
+
+.td-cover-block .btn-secondary {
+  font-family: $font-family-sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  padding: 0.6rem 1.5rem;
+  border-radius: 2px;
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #fff;
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.8);
+  }
+}
+
+// DAG motif — inline SVG pseudo-element
+.td-cover-block::before {
+  content: '';
+  position: absolute;
+  right: 8%;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 280px;
+  height: 200px;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 280 200'%3E%3Ccircle cx='40' cy='100' r='18' fill='%23fff'/%3E%3Ccircle cx='140' cy='40' r='18' fill='%23fff'/%3E%3Ccircle cx='140' cy='160' r='18' fill='%23fff'/%3E%3Ccircle cx='240' cy='100' r='18' fill='%23fff'/%3E%3Cline x1='58' y1='100' x2='122' y2='47' stroke='%23fff' stroke-width='2'/%3E%3Cline x1='58' y1='100' x2='122' y2='153' stroke='%23fff' stroke-width='2'/%3E%3Cline x1='158' y1='47' x2='222' y2='93' stroke='%23fff' stroke-width='2'/%3E%3Cline x1='158' y1='153' x2='222' y2='107' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: contain;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.td-cover-block .container {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 767px) {
+  .td-cover-block::before {
+    display: none;
+  }
+}
+
+
+// =============================================================================
+// FEATURE TRIPTYCH SECTIONS
+// =============================================================================
+
+// Feature section containers need flex row behavior
+// (Docsy puts .col-lg-4 directly in .container without a .row wrapper)
+.td-box--white > .col > .container,
+.td-box--primary > .col > .container {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.td-box--white {
+  background-color: $body-bg;
+  border-top: 3px solid $primary;
+}
+
+.td-box--primary {
+  h2, h3, p, a {
+    color: #ffffff;
+  }
+}
+
+.td-default main section .col-lg-4 .fas,
+.td-default main section .col-lg-4 .fab {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+  opacity: 0.9;
+}
+
+.td-default main section .col-lg-4 h2 {
+  font-family: $font-family-serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0.5rem;
+}
+
+.td-default main section .col-lg-4 p {
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.td-default main section .col-lg-4 a:not(.btn) {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+
+// =============================================================================
+// DOCS READING EXPERIENCE
+// =============================================================================
+
+.td-content {
+  font-size: 1rem;
+  line-height: 1.75;
+
+  > p {
+    margin-bottom: 1.25rem;
+  }
+
+  table {
+    font-size: 0.9rem;
+  }
+}
 
 pre {
   border-left: 3px solid $primary;
-  border-radius: 6px;
-}
-
-code:not(pre code) {
-  background: rgba($primary, 0.08);
-  padding: 0.15em 0.35em;
   border-radius: 4px;
   font-size: 0.875em;
 }
 
-// --- Section index entries ---
+code:not(pre code) {
+  background: rgba($primary, 0.07);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  font-size: 0.875em;
+}
+
+.td-content blockquote {
+  border-left: 3px solid rgba($primary, 0.3);
+  padding-left: 1.25rem;
+  color: rgba($body-color, 0.70);
+  font-style: italic;
+  margin: 2rem 0;
+}
+
+
+// =============================================================================
+// SIDEBAR
+// =============================================================================
+
+.td-sidebar-nav {
+  font-size: 0.875rem;
+
+  .td-sidebar-nav__section-title {
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    color: rgba($body-color, 0.50);
+    margin-top: 1.5rem;
+  }
+
+  .td-sidebar-link.tree-link--active {
+    color: $primary;
+    font-weight: 600;
+    border-left: 2px solid $primary;
+    padding-left: calc(0.75rem - 2px);
+  }
+}
+
+.td-toc {
+  font-size: 0.8rem;
+  line-height: 1.5;
+
+  li {
+    margin: 0.15rem 0;
+  }
+
+  a {
+    color: rgba($body-color, 0.55);
+    &:hover, &.active {
+      color: $primary;
+    }
+  }
+}
+
+
+// =============================================================================
+// SECTION INDEX
+// =============================================================================
 
 .td-content .section-index {
   h5 {
+    font-family: $font-family-serif;
+    font-weight: 600;
+    font-size: 1.1rem;
     border-left: 3px solid $primary;
     padding-left: 0.75rem;
+    margin-top: 2rem;
   }
 
   td:first-child {
@@ -52,21 +316,42 @@ code:not(pre code) {
   }
 }
 
-// --- Horizontal rules ---
+
+// =============================================================================
+// HORIZONTAL RULES
+// =============================================================================
 
 hr {
-  opacity: 0.35;
-  margin: 2rem 0;
+  opacity: 0.25;
+  margin: 2.5rem 0;
+  border-color: $primary;
+  border-width: 0.5px;
 }
 
-// --- Navbar ---
 
-.td-navbar .navbar-brand {
-  font-weight: 700;
-}
+// =============================================================================
+// FOOTER
+// =============================================================================
 
-// --- Footer ---
+.td-footer {
+  border-top: 3px solid $primary !important;
 
-.td-footer .text-muted {
-  color: rgba(255, 255, 255, 0.85) !important;
+  .td-footer__center {
+    font-family: $font-family-sans-serif;
+    font-size: 0.8rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55) !important;
+  }
+
+  .text-muted {
+    color: rgba(255, 255, 255, 0.55) !important;
+  }
+
+  a {
+    color: rgba(255, 255, 255, 0.75) !important;
+    &:hover {
+      color: #fff !important;
+    }
+  }
 }

@@ -11,3 +11,18 @@ $yellow: #f1bc42;
 $red:    #d95140;
 
 $dark: #1e2a3a;  // blue-gray tint for hero cover
+
+// Typography
+$font-family-sans-serif: 'DM Sans', system-ui, -apple-system, sans-serif;
+$font-family-base:       $font-family-sans-serif;
+$font-family-serif:      'Source Serif 4', Georgia, 'Times New Roman', serif;
+$headings-font-family:   $font-family-serif;
+$headings-font-weight:   600;
+
+// Reading comfort
+$line-height-base: 1.65;
+
+// Warm paper tone
+$body-bg:    #fafaf8;
+$body-color: #1a1f2e;
+$link-color: #4a6baa;
