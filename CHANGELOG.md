@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `runtime.worker_index == 0` and the resolved preset device is CPU.
 - Benchmark reproducibility checks now use the same local multi-worker
   generation path as throughput runs when multi-worker benchmark mode is active.
+- Local multi-worker benchmark runs now size their executor and Torch CPU thread
+  cap from the number of dataset partitions that actually have work, avoiding
+  false failures on very small benchmark batches.
+- Multi-worker benchmark summaries now mark end-to-end latency stats and
+  `micro_generate_one_ms` as unavailable instead of mixing single-worker
+  `generate_one()` measurements into parallel benchmark results.
 
 ### Breaking
 

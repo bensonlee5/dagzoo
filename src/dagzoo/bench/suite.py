@@ -389,6 +389,7 @@ def run_preset_benchmark(
 
     generation_config = _copy_runtime_config(config)
     generation_config.filter.enabled = False
+    multi_worker_benchmark = int(generation_config.runtime.worker_count) > 1
 
     def _build_throughput_on_bundle_callback(
         *,
@@ -523,11 +524,20 @@ def run_preset_benchmark(
     # control-run guardrail benchmarks to avoid unnecessary memory retention.
     sampled_bundles.clear()
 
-    latency_stats = _collect_latency(
-        generation_config,
-        device=requested_device,
-        num_samples=_latency_sample_count(config, suite, num_datasets),
-    )
+    if multi_worker_benchmark:
+        latency_stats = {
+            "latency_samples": None,
+            "latency_mean_ms": None,
+            "latency_p95_ms": None,
+            "latency_min_ms": None,
+            "latency_max_ms": None,
+        }
+    else:
+        latency_stats = _collect_latency(
+            generation_config,
+            device=requested_device,
+            num_samples=_latency_sample_count(config, suite, num_datasets),
+        )
     result.update(latency_stats)
 
     if collect_memory:
@@ -551,13 +561,14 @@ def run_preset_benchmark(
         )
 
     if include_micro:
-        result.update(
-            run_microbenchmarks(
-                generation_config,
-                device=requested_device,
-                repeats=MICROBENCH_REPEATS,
-            )
+        microbench = run_microbenchmarks(
+            generation_config,
+            device=requested_device,
+            repeats=MICROBENCH_REPEATS,
         )
+        if multi_worker_benchmark:
+            microbench["micro_generate_one_ms"] = None
+        result.update(microbench)
 
     if missingness_enabled and missingness_acceptance is not None:
         baseline_config = _copy_runtime_config(generation_config)

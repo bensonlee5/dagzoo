@@ -340,7 +340,7 @@ def test_run_throughput_benchmark_rejects_thread_limited_multi_worker_cpu(
 
     with pytest.raises(
         ParallelGenerationConfigError,
-        match=r"torch\.get_num_threads\(\) >= runtime\.worker_count",
+        match=r"active worker count",
     ):
         run_throughput_benchmark(
             cfg,
@@ -348,4 +348,43 @@ def test_run_throughput_benchmark_rejects_thread_limited_multi_worker_cpu(
             warmup_datasets=0,
             device="cpu",
         )
+    assert set_calls == []
+
+
+def test_run_throughput_benchmark_allows_small_multi_worker_batch_on_thread_limited_cpu(
+    monkeypatch,
+) -> None:
+    cfg = GeneratorConfig()
+    cfg.runtime.worker_count = 4
+    cfg.runtime.worker_index = 0
+    cfg.runtime.device = "cpu"
+
+    monkeypatch.setattr(
+        parallel_generation_mod.torch,
+        "get_num_threads",
+        lambda: 1,
+    )
+    set_calls: list[int] = []
+    monkeypatch.setattr(
+        parallel_generation_mod.torch,
+        "set_num_threads",
+        lambda value: set_calls.append(int(value)),
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation._generation_engine._generate_one_seeded",
+        lambda _config, *, seed, requested_device, resolved_device: int(seed),
+    )
+
+    observed: list[int] = []
+    result = run_throughput_benchmark(
+        cfg,
+        num_datasets=1,
+        warmup_datasets=1,
+        device="cpu",
+        on_bundle=lambda bundle: observed.append(int(bundle)),
+    )
+
+    assert observed
+    assert result["num_datasets"] == 1
+    assert result["warmup_datasets"] == 1
     assert set_calls == []

@@ -1011,12 +1011,18 @@ def _print_preset_result_line(result: dict[str, Any]) -> None:
         if isinstance(filter_retry_ratio, (int, float))
         else " filter_retry_dataset_pct=-"
     )
+    latency_p95 = result.get("latency_p95_ms")
+    latency_hint = (
+        f"latency_p95_ms={float(latency_p95):.2f}"
+        if isinstance(latency_p95, (int, float))
+        else "latency_p95_ms=-"
+    )
 
     print(
         f"[{result.get('preset_key')}] device={result.get('device')} "
         f"backend={result.get('hardware_backend')} "
         f"datasets/min={float(result.get('datasets_per_minute', 0.0)):.2f} "
-        f"latency_p95_ms={float(result.get('latency_p95_ms', 0.0)):.2f}"
+        f"{latency_hint}"
         f"{stage_hint}{filter_stage_hint}{filter_reject_hint}{filter_retry_hint}"
         f"{diagnostics_hint}{missingness_hint}{lineage_hint}{shift_hint}{noise_hint}"
     )

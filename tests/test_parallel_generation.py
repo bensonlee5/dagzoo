@@ -206,7 +206,7 @@ def test_generate_parallel_batch_iter_rejects_non_cpu_resolved_device(
         list(generate_parallel_batch_iter(cfg, num_datasets=2, seed=7, device="auto"))
 
 
-def test_generate_parallel_batch_iter_rejects_thread_limited_cpu_environment(
+def test_generate_parallel_batch_iter_rejects_thread_limited_active_worker_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
@@ -214,7 +214,7 @@ def test_generate_parallel_batch_iter_rejects_thread_limited_cpu_environment(
     cfg.runtime.worker_index = 0
     cfg.runtime.device = "cpu"
 
-    set_calls = _patch_torch_thread_settings(monkeypatch, num_threads=1)
+    set_calls = _patch_torch_thread_settings(monkeypatch, num_threads=2)
 
     monkeypatch.setattr(
         "dagzoo.core.parallel_generation._generation_engine._generate_one_seeded",
@@ -223,9 +223,9 @@ def test_generate_parallel_batch_iter_rejects_thread_limited_cpu_environment(
 
     with pytest.raises(
         ParallelGenerationConfigError,
-        match=r"torch\.get_num_threads\(\) >= runtime\.worker_count",
+        match=r"active worker count",
     ):
-        list(generate_parallel_batch_iter(cfg, num_datasets=1, seed=777, device="cpu"))
+        list(generate_parallel_batch_iter(cfg, num_datasets=3, seed=777, device="cpu"))
     assert set_calls == []
 
 
@@ -236,8 +236,16 @@ def test_generate_parallel_batch_iter_handles_single_dataset_with_many_workers(
     cfg.runtime.worker_count = 4
     cfg.runtime.worker_index = 0
     cfg.runtime.device = "cpu"
+    set_calls = _patch_torch_thread_settings(monkeypatch, num_threads=1)
 
     observed_seeds: list[int] = []
+    deepcopy_calls = 0
+    original_deepcopy = parallel_generation_mod.copy.deepcopy
+
+    def _patched_deepcopy(value):
+        nonlocal deepcopy_calls
+        deepcopy_calls += 1
+        return original_deepcopy(value)
 
     def _stub_generate_one_seeded(
         config, *, seed: int, requested_device: str, resolved_device: str
@@ -252,6 +260,10 @@ def test_generate_parallel_batch_iter_handles_single_dataset_with_many_workers(
         "dagzoo.core.parallel_generation._generation_engine._generate_one_seeded",
         _stub_generate_one_seeded,
     )
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation.copy.deepcopy",
+        _patched_deepcopy,
+    )
 
     expected_seed = SeedManager(777).child("dataset", 0)
 
@@ -259,6 +271,8 @@ def test_generate_parallel_batch_iter_handles_single_dataset_with_many_workers(
         expected_seed
     ]
     assert observed_seeds == [expected_seed]
+    assert deepcopy_calls == 1
+    assert set_calls == []
 
 
 def test_generate_parallel_batch_iter_close_does_not_hang_with_full_queue(
