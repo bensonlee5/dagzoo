@@ -1,7 +1,9 @@
 import queue
 import threading
+from types import SimpleNamespace
 
 import dagzoo.core.parallel_generation as parallel_generation_mod
+import numpy as np
 import pytest
 
 from dagzoo.bench.metrics import reproducibility_signature
@@ -28,6 +30,93 @@ def _tiny_parallel_config() -> GeneratorConfig:
     cfg.filter.enabled = False
     cfg.benchmark.preset_name = "parallel_test"
     return cfg
+
+
+def _ipc_bundle_payload(value: int) -> dict[str, object]:
+    return {
+        "X_train": np.full((2, 2), float(value), dtype=np.float32),
+        "y_train": np.array([0, 1], dtype=np.int64),
+        "X_test": np.full((1, 2), float(value), dtype=np.float32),
+        "y_test": np.array([1], dtype=np.int64),
+        "feature_types": ["num", "num"],
+        "metadata": {"seed": value, "attempt_used": 0},
+    }
+
+
+class _FakeEvent:
+    def __init__(self) -> None:
+        self._is_set = False
+
+    def is_set(self) -> bool:
+        return self._is_set
+
+    def set(self) -> None:
+        self._is_set = True
+
+
+class _FakeSemaphore:
+    def __init__(self) -> None:
+        self.release_calls = 0
+
+    def release(self) -> None:
+        self.release_calls += 1
+
+
+class _FakeResultQueue:
+    def __init__(self, semaphore: _FakeSemaphore) -> None:
+        self._messages = [
+            parallel_generation_mod._WorkerResultMessage(
+                worker_index=1,
+                dataset_index=1,
+                bundle_payload=_ipc_bundle_payload(1),
+            ),
+            parallel_generation_mod._WorkerResultMessage(
+                worker_index=0,
+                dataset_index=0,
+                bundle_payload=_ipc_bundle_payload(0),
+            ),
+        ]
+        self._get_calls = 0
+        self._semaphore = semaphore
+
+    def get(self, timeout: float | None = None):
+        _ = timeout
+        if self._get_calls == 1 and self._semaphore.release_calls == 0:
+            raise AssertionError("result slot should be released immediately after dequeue")
+        self._get_calls += 1
+        if not self._messages:
+            raise queue.Empty
+        return self._messages.pop(0)
+
+
+class _FakeControlQueue:
+    def get_nowait(self):
+        raise queue.Empty
+
+
+class _FakeSpawnContext:
+    def __init__(
+        self,
+        *,
+        result_queue: _FakeResultQueue,
+        control_queue: _FakeControlQueue,
+        semaphore: _FakeSemaphore,
+        event: _FakeEvent,
+    ) -> None:
+        self._result_queue = result_queue
+        self._control_queue = control_queue
+        self._semaphore = semaphore
+        self._event = event
+
+    def Queue(self, maxsize: int | None = None):
+        return self._result_queue if maxsize is not None else self._control_queue
+
+    def BoundedSemaphore(self, value: int):
+        _ = value
+        return self._semaphore
+
+    def Event(self):
+        return self._event
 
 
 def test_generate_parallel_batch_iter_matches_serial_output_and_seed_order() -> None:
@@ -146,6 +235,52 @@ def test_generate_parallel_batch_iter_handles_single_dataset_with_many_workers(
     assert len(produced) == 1
     assert int(produced[0].metadata["seed"]) == int(serial[0].metadata["seed"])
     assert spawned_worker_counts == [1]
+
+
+def test_generate_parallel_batch_iter_releases_result_slots_before_in_order_yield(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_parallel_config()
+    semaphore = _FakeSemaphore()
+    result_queue = _FakeResultQueue(semaphore)
+    control_queue = _FakeControlQueue()
+    event = _FakeEvent()
+    ctx = _FakeSpawnContext(
+        result_queue=result_queue,
+        control_queue=control_queue,
+        semaphore=semaphore,
+        event=event,
+    )
+
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation._build_spawn_context",
+        lambda: ctx,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation._spawn_parallel_workers",
+        lambda **_kwargs: [SimpleNamespace(exitcode=0), SimpleNamespace(exitcode=0)],
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation._terminate_processes",
+        lambda _processes: None,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.parallel_generation._close_process_queue",
+        lambda _queue: None,
+    )
+
+    produced = list(
+        generate_parallel_batch_iter(
+            cfg,
+            num_datasets=2,
+            seed=777,
+            device="cpu",
+            max_buffered_results=1,
+        )
+    )
+
+    assert [int(bundle.metadata["seed"]) for bundle in produced] == [0, 1]
+    assert semaphore.release_calls == 2
 
 
 def test_generate_parallel_batch_iter_close_does_not_hang() -> None:

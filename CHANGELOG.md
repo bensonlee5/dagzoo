@@ -25,12 +25,19 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
   active.
 - Local multi-worker benchmark fan-out now caps to host CPU capacity before the
   benchmark coordinator spawns worker processes and bounded IPC queues.
+- The process-based local multi-worker coordinator now releases buffered-result
+  slots as soon as the parent dequeues them, avoiding hangs when faster
+  workers finish later dataset indexes before the next in-order dataset is
+  ready.
 - True local multi-worker benchmark runs now coerce `runtime.device: auto` to
   CPU after effective fan-out resolution, while effectively single-worker runs
   keep their requested device behavior.
 - Multi-worker benchmark summaries now report latency fields and
   `micro_generate_one_ms` as unavailable when the run actually uses multiple
   active worker partitions, avoiding misleading single-worker timings.
+- True local multi-worker benchmark summaries now also report memory fields as
+  unavailable, because coordinator-only RSS and CUDA counters do not represent
+  child worker processes.
 - Effectively single-worker benchmark runs now stay on the sequential
   generation path for both warmup and measured passes even when
   `runtime.worker_count > 1`, avoiding unnecessary coordinator overhead for

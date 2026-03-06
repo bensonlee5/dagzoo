@@ -165,6 +165,58 @@ def test_run_benchmark_suite_marks_latency_unavailable_for_multi_worker_cpu(
     assert result["latency_max_ms"] is None
 
 
+def test_run_benchmark_suite_marks_memory_unavailable_for_multi_worker_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_cpu_config()
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 0
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
+
+    monkeypatch.setattr(
+        "dagzoo.bench.suite.run_throughput_benchmark",
+        lambda config, *, num_datasets, warmup_datasets=10, device=None, on_bundle=None: {
+            "preset": config.benchmark.preset_name,
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup_datasets,
+            "elapsed_seconds": 1.0,
+            "datasets_per_second": float(num_datasets),
+            "datasets_per_minute": float(num_datasets) * 60.0,
+            "slo_pass_100_datasets_per_min": True,
+        },
+    )
+    monkeypatch.setattr("dagzoo.bench.suite._peak_rss_mb", lambda: 10.0)
+    monkeypatch.setattr(
+        "dagzoo.bench.suite._collect_latency",
+        lambda *_args, **_kwargs: pytest.fail("latency should be skipped for multi-worker"),
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.suite._collect_lineage_guardrails",
+        lambda *_args, **_kwargs: {"enabled": False},
+    )
+
+    summary = run_benchmark_suite(
+        [spec],
+        suite="smoke",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+        baseline_payload=None,
+        num_datasets_override=2,
+        warmup_override=0,
+        collect_memory=True,
+        collect_reproducibility=False,
+        collect_diagnostics=False,
+        diagnostics_root_dir=None,
+        fail_on_regression=False,
+        hardware_policy="none",
+    )
+
+    result = summary["preset_results"][0]
+    assert result["peak_rss_mb"] is None
+    assert result["peak_cuda_allocated_mb"] is None
+    assert result["peak_cuda_reserved_mb"] is None
+
+
 def test_run_benchmark_suite_marks_generate_one_micro_unavailable_for_multi_worker_cpu(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -288,6 +340,65 @@ def test_run_benchmark_suite_keeps_latency_for_tiny_multi_worker_run(
     assert result["latency_p95_ms"] == pytest.approx(2.0)
     assert result["latency_min_ms"] == pytest.approx(0.5)
     assert result["latency_max_ms"] == pytest.approx(3.0)
+
+
+def test_run_benchmark_suite_keeps_memory_for_tiny_multi_worker_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_cpu_config()
+    cfg.runtime.worker_count = 4
+    cfg.runtime.worker_index = 0
+    spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
+    rss_values = iter((10.0, 14.0))
+
+    monkeypatch.setattr(
+        "dagzoo.bench.suite.run_throughput_benchmark",
+        lambda config, *, num_datasets, warmup_datasets=10, device=None, on_bundle=None: {
+            "preset": config.benchmark.preset_name,
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup_datasets,
+            "elapsed_seconds": 1.0,
+            "datasets_per_second": float(num_datasets),
+            "datasets_per_minute": float(num_datasets) * 60.0,
+            "slo_pass_100_datasets_per_min": True,
+        },
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.suite._collect_latency",
+        lambda _config, *, device=None, num_samples=1: {
+            "latency_samples": float(num_samples),
+            "latency_mean_ms": 1.0,
+            "latency_p95_ms": 2.0,
+            "latency_min_ms": 0.5,
+            "latency_max_ms": 3.0,
+        },
+    )
+    monkeypatch.setattr("dagzoo.bench.suite._peak_rss_mb", lambda: next(rss_values))
+    monkeypatch.setattr(
+        "dagzoo.bench.suite._collect_lineage_guardrails",
+        lambda *_args, **_kwargs: {"enabled": False},
+    )
+
+    summary = run_benchmark_suite(
+        [spec],
+        suite="smoke",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+        baseline_payload=None,
+        num_datasets_override=1,
+        warmup_override=0,
+        collect_memory=True,
+        collect_reproducibility=False,
+        collect_diagnostics=False,
+        diagnostics_root_dir=None,
+        fail_on_regression=False,
+        hardware_policy="none",
+    )
+
+    result = summary["preset_results"][0]
+    assert result["peak_rss_mb"] == pytest.approx(4.0)
+    assert "peak_cuda_allocated_mb" not in result
+    assert "peak_cuda_reserved_mb" not in result
 
 
 def test_run_benchmark_suite_keeps_single_worker_metrics_when_local_worker_cap_is_one(

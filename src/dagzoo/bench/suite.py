@@ -582,14 +582,19 @@ def run_preset_benchmark(
     result.update(latency_stats)
 
     if collect_memory:
-        result["peak_rss_mb"] = max(0.0, _peak_rss_mb() - rss_before)
-        if hw.backend == "cuda" and torch.cuda.is_available():
-            try:
-                result["peak_cuda_allocated_mb"] = torch.cuda.max_memory_allocated() / MIB
-                result["peak_cuda_reserved_mb"] = torch.cuda.max_memory_reserved() / MIB
-            except Exception:
-                result["peak_cuda_allocated_mb"] = None
-                result["peak_cuda_reserved_mb"] = None
+        if multi_worker_benchmark:
+            result["peak_rss_mb"] = None
+            result["peak_cuda_allocated_mb"] = None
+            result["peak_cuda_reserved_mb"] = None
+        else:
+            result["peak_rss_mb"] = max(0.0, _peak_rss_mb() - rss_before)
+            if hw.backend == "cuda" and torch.cuda.is_available():
+                try:
+                    result["peak_cuda_allocated_mb"] = torch.cuda.max_memory_allocated() / MIB
+                    result["peak_cuda_reserved_mb"] = torch.cuda.max_memory_reserved() / MIB
+                except Exception:
+                    result["peak_cuda_allocated_mb"] = None
+                    result["peak_cuda_reserved_mb"] = None
 
     if collect_reproducibility:
         repro_n = min(num_datasets, max(1, int(config.benchmark.reproducibility_num_datasets)))

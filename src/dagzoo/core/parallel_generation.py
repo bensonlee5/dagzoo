@@ -533,6 +533,7 @@ def generate_parallel_batch_iter(
                     )
                     continue
 
+                _release_result_slot(result_slots)
                 if not isinstance(message, _WorkerResultMessage):
                     raise RuntimeError(
                         "Parallel generation received an unexpected result message "
@@ -554,7 +555,6 @@ def generate_parallel_batch_iter(
                 )
 
             bundle = pending_results.pop(next_dataset_index)
-            _release_result_slot(result_slots)
             yield bundle
     finally:
         stop_event.set()
