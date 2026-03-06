@@ -117,6 +117,10 @@ Run a smoke benchmark:
 dagzoo benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
 ```
 
+`--device` is a single-preset benchmark override. For multi-preset benchmark
+runs, set the device in each preset/config instead of passing one shared CLI
+override.
+
 Inspect detected hardware tier:
 
 ```bash

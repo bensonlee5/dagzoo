@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate internal links in built Hugo output.
 
-Checks all HTML files in a built output directory (for example `public/`) and
+Checks all HTML files in a built output directory (for example `site/public/`) and
 fails when:
 - absolute internal links ignore the configured base path
 - internal links point to non-existent files/routes in the built output
@@ -118,7 +118,7 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     parser.add_argument(
         "output_dir",
         nargs="?",
-        default="public",
+        default="site/public",
         help="Directory containing built Hugo output.",
     )
     return parser.parse_args(list(argv))

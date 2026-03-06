@@ -1,0 +1,197 @@
+from pathlib import Path
+
+import pytest
+
+from dagzoo.cli import main
+
+
+def test_generate_cli_prints_effective_config_and_resolution_trace(
+    tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _stub_generate_batch_iter(
+        _config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        _ = seed
+        _ = device
+        for _ in range(num_datasets):
+            yield object()
+
+    monkeypatch.setattr("dagzoo.cli.generate_batch_iter", _stub_generate_batch_iter)
+
+    code = main(
+        [
+            "generate",
+            "--config",
+            "configs/default.yaml",
+            "--out",
+            str(tmp_path / "generate"),
+            "--num-datasets",
+            "1",
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
+            "--no-dataset-write",
+            "--print-effective-config",
+            "--print-resolution-trace",
+        ]
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "Effective config:" in captured.out
+    assert "Resolution trace:" in captured.out
+
+
+def test_filter_cli_prints_curated_output_summary(
+    tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Result:
+        manifest_path = Path("manifest.ndjson")
+        summary_path = Path("summary.json")
+        total_datasets = 2
+        accepted_datasets = 1
+        rejected_datasets = 1
+        datasets_per_minute = 42.0
+        curated_out_dir = Path("curated")
+        curated_accepted_datasets = 1
+
+    monkeypatch.setattr("dagzoo.cli.run_deferred_filter", lambda **kwargs: _Result())
+
+    code = main(
+        [
+            "filter",
+            "--in",
+            "input_shards",
+            "--out",
+            str(tmp_path / "filter_out"),
+            "--curated-out",
+            str(tmp_path / "curated_out"),
+        ]
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "Wrote curated accepted-only shards:" in captured.out
+
+
+def test_benchmark_cli_prints_configs_and_writes_baseline(
+    tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    summary = {
+        "preset_results": [
+            {
+                "preset_key": "custom",
+                "effective_config": {"runtime": {"device": "cpu"}},
+                "effective_config_trace": [
+                    {
+                        "path": "runtime.device",
+                        "source": "config",
+                        "old_value": "auto",
+                        "new_value": "cpu",
+                    }
+                ],
+                "datasets_per_minute": 1.0,
+                "latency_p95_ms": 1.0,
+            }
+        ],
+        "regression": {"status": "pass", "issues": [], "hard_fail": False},
+    }
+
+    monkeypatch.setattr("dagzoo.cli.run_benchmark_suite", lambda *args, **kwargs: summary)
+    monkeypatch.setattr("dagzoo.cli.write_suite_json", lambda _summary, path: Path(path))
+    monkeypatch.setattr(
+        "dagzoo.cli._print_preset_result_line",
+        lambda _result: None,
+    )
+    monkeypatch.setattr("dagzoo.cli.build_baseline_payload", lambda _summary: {"schema_version": 1})
+    monkeypatch.setattr("dagzoo.cli.write_baseline", lambda _payload, path: Path(path))
+
+    code = main(
+        [
+            "benchmark",
+            "--config",
+            "configs/default.yaml",
+            "--preset",
+            "custom",
+            "--suite",
+            "smoke",
+            "--json-out",
+            str(tmp_path / "summary.json"),
+            "--save-baseline",
+            str(tmp_path / "baseline.json"),
+            "--print-effective-config",
+            "--print-resolution-trace",
+            "--no-memory",
+        ]
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "Effective config [custom]:" in captured.out
+    assert "Resolution trace [custom]:" in captured.out
+    assert "Wrote benchmark baseline:" in captured.out
+
+
+def test_diversity_audit_cli_writes_baseline_and_regression_summary(
+    tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report = {
+        "scale_report": {"schema_version": 1},
+        "regression": {"status": "warn", "issues": ["delta"]},
+    }
+
+    monkeypatch.setattr("dagzoo.cli.run_effective_diversity_audit", lambda **kwargs: report)
+    monkeypatch.setattr(
+        "dagzoo.cli.write_effective_diversity_run_artifacts",
+        lambda _report, out_dir: {"summary": Path(out_dir) / "summary.json"},
+    )
+    monkeypatch.setattr(
+        "dagzoo.cli.build_effective_diversity_baseline_payload",
+        lambda _scale_report: {"schema_version": 1},
+    )
+    monkeypatch.setattr(
+        "dagzoo.cli.write_effective_diversity_baseline_payload",
+        lambda _payload, path: Path(path),
+    )
+
+    code = main(
+        [
+            "diversity-audit",
+            "--config",
+            "configs/default.yaml",
+            "--out-dir",
+            str(tmp_path / "diversity"),
+            "--save-baseline",
+            str(tmp_path / "diversity_baseline.json"),
+        ]
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "Wrote diversity baseline:" in captured.out
+    assert "Diversity regression status=warn issues=1" in captured.out
+
+
+def test_hardware_cli_prints_detected_hardware(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Hardware:
+        backend = "cpu"
+        device_name = "cpu"
+        tier = "cpu"
+        total_memory_gb = 8.0
+        peak_flops = 1.23e12
+
+    monkeypatch.setattr("dagzoo.cli.detect_hardware", lambda _device: _Hardware())
+
+    code = main(["hardware", "--device", "cpu"])
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "backend=cpu" in captured.out
+    assert "tier=cpu" in captured.out

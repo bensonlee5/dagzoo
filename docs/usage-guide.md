@@ -175,6 +175,10 @@ gating.
 dagzoo benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
 ```
 
+`--device` is a single-preset override. When you run multiple `--preset`
+values in one command, set device selection in each preset/config instead of
+passing a shared CLI device override.
+
 Detailed guide: [Benchmark Workflows and Guardrails](features/benchmark-guardrails.md)
 
 ______________________________________________________________________

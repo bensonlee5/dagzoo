@@ -52,6 +52,10 @@ Each preset in `dagzoo benchmark` resolves independently in this order:
 Runtime count overrides (`--num-datasets`, `--warmup`) are benchmark execution controls and do
 not mutate the preset effective config payload.
 
+`dagzoo benchmark` rejects `--device` when multiple presets are selected. Use
+per-preset config/device settings for multi-preset runs instead of a shared CLI
+override.
+
 `dagzoo benchmark` currently rejects configs that set `dataset.rows`; benchmark paths still require explicit split sizing (`dataset.n_train`/`dataset.n_test`).
 
 ______________________________________________________________________

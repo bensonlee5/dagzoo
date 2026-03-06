@@ -250,6 +250,38 @@ def test_benchmark_cli_rejects_worker_partition_config(tmp_path) -> None:
     assert int(exc.value.code) == 2
 
 
+def test_benchmark_cli_rejects_device_override_with_multiple_presets(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "dagzoo.cli.run_benchmark_suite",
+        lambda *args, **kwargs: pytest.fail("run_benchmark_suite should not be called"),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "benchmark",
+                "--config",
+                "configs/default.yaml",
+                "--preset",
+                "cpu",
+                "--preset",
+                "custom",
+                "--device",
+                "mps",
+                "--suite",
+                "smoke",
+                "--no-memory",
+            ]
+        )
+
+    assert int(exc.value.code) == 2
+    captured = capsys.readouterr()
+    assert "--device" in captured.err
+    assert "multiple --preset values" in captured.err
+
+
 def test_diversity_audit_cli_rejects_worker_partition_config(tmp_path) -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     cfg.runtime.worker_count = 2
