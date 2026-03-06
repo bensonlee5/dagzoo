@@ -5,8 +5,8 @@ This script keeps canonical docs in `docs/` and renders generated site inputs
 under `site/.generated/`:
 
 - Markdown user guides -> `site/.generated/content/docs/**`
-- Canonical HTML docs  -> `site/.generated/static/canonical/**`
-- Wrapper pages + development links page -> `site/.generated/content/docs/**`
+- Hugo-rendered reference docs -> `site/.generated/content/docs/**`
+- Development links page -> `site/.generated/content/docs/development.md`
 
 Use `--check` in CI to fail when generated site inputs are out of date.
 """
@@ -14,29 +14,31 @@ Use `--check` in CI to fail when generated site inputs are out of date.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
 import posixpath
 import re
+import shutil
 import sys
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 from urllib.parse import urlparse
+
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS_ROOT = REPO_ROOT / "docs"
 SITE_ROOT = REPO_ROOT / "site"
 GENERATED_ROOT = SITE_ROOT / ".generated"
 CONTENT_DOCS_ROOT = GENERATED_ROOT / "content" / "docs"
-STATIC_CANONICAL_ROOT = GENERATED_ROOT / "static" / "canonical"
+LEGACY_GENERATED_PATHS = [
+    GENERATED_ROOT / "static" / "canonical",
+]
 
 GITHUB_DEV_DOCS_BASE = "https://github.com/bensonlee5/dagzoo/blob/main/docs/development"
 
-CANONICAL_FILES = [
-    "how-it-works.html",
-    "transforms.html",
-    "canonical.css",
-]
-
 USER_MD_SOURCES = [
+    "how-it-works.md",
+    "transforms.md",
     "usage-guide.md",
     "output-format.md",
     "features/diagnostics.md",
@@ -47,40 +49,59 @@ USER_MD_SOURCES = [
     "features/benchmark-guardrails.md",
 ]
 
-MD_DESCRIPTIONS: dict[str, str] = {
-    "usage-guide.md": "Command workflows and practical usage patterns for generation and benchmarking.",
-    "output-format.md": "Artifact schema, metadata contract, and shard layout.",
-    "features/diagnostics.md": "Runtime observability metrics and diagnostic outputs.",
-    "features/missingness.md": "Controlled injection of missing values into generated datasets.",
-    "features/many-class.md": "Multi-class target generation with configurable class counts.",
-    "features/shift.md": "Distribution-shift controls for graph, mechanism, and noise.",
-    "features/noise.md": "Noise family selection, mixture modes, and per-dataset resolution.",
-    "features/benchmark-guardrails.md": "Automated quality checks for benchmark suite runs.",
-}
 
-MD_WEIGHTS: dict[str, int] = {
-    "usage-guide.md": 30,
-    "output-format.md": 40,
-    "features/diagnostics.md": 60,
-    "features/missingness.md": 61,
-    "features/many-class.md": 62,
-    "features/shift.md": 63,
-    "features/noise.md": 64,
-    "features/benchmark-guardrails.md": 65,
-}
+@dataclass(frozen=True, slots=True)
+class PageMeta:
+    weight: int
+    description: str | None = None
+    aliases: tuple[str, ...] = ()
+    params: dict[str, Any] = field(default_factory=dict)
 
-WRAPPER_PAGES: dict[str, tuple[str, int, str, str]] = {
-    "how-it-works.md": (
-        "How It Works",
-        10,
-        "/canonical/how-it-works.html",
-        "End-to-end runtime behavior, core concepts, and pipeline walkthrough.",
+
+PAGE_METADATA: dict[str, PageMeta] = {
+    "how-it-works.md": PageMeta(
+        weight=10,
+        description="End-to-end runtime behavior, core concepts, and pipeline walkthrough.",
+        aliases=("/canonical/how-it-works.html",),
+        params={"mermaid": True},
     ),
-    "transforms.md": (
-        "Transforms (Math Reference)",
-        20,
-        "/canonical/transforms.html",
-        "Mathematical reference for generation transforms.",
+    "transforms.md": PageMeta(
+        weight=20,
+        description="Mathematical reference for generation transforms.",
+        aliases=("/canonical/transforms.html",),
+        params={"math": True},
+    ),
+    "usage-guide.md": PageMeta(
+        weight=30,
+        description="Command workflows and practical usage patterns for generation and benchmarking.",
+    ),
+    "output-format.md": PageMeta(
+        weight=40,
+        description="Artifact schema, metadata contract, and shard layout.",
+    ),
+    "features/diagnostics.md": PageMeta(
+        weight=60,
+        description="Runtime observability metrics and diagnostic outputs.",
+    ),
+    "features/missingness.md": PageMeta(
+        weight=61,
+        description="Controlled injection of missing values into generated datasets.",
+    ),
+    "features/many-class.md": PageMeta(
+        weight=62,
+        description="Multi-class target generation with configurable class counts.",
+    ),
+    "features/shift.md": PageMeta(
+        weight=63,
+        description="Distribution-shift controls for graph, mechanism, and noise.",
+    ),
+    "features/noise.md": PageMeta(
+        weight=64,
+        description="Noise family selection, mixture modes, and per-dataset resolution.",
+    ),
+    "features/benchmark-guardrails.md": PageMeta(
+        weight=65,
+        description="Automated quality checks for benchmark suite runs.",
     ),
 }
 
@@ -105,7 +126,9 @@ def _title_from_markdown(content: str, fallback: str) -> str:
     for line in content.splitlines():
         stripped = line.strip()
         if stripped.startswith("# "):
-            return stripped[2:].strip()
+            title = stripped[2:].strip()
+            title = re.sub(r"\s+\{#.*\}\s*$", "", title)
+            return title
     return fallback
 
 
@@ -117,6 +140,7 @@ def _strip_matching_h1(content: str, title: str) -> str:
 
     if idx < len(lines) and lines[idx].strip().startswith("# "):
         heading = lines[idx].strip()[2:].strip()
+        heading = re.sub(r"\s+\{#.*\}\s*$", "", heading)
         if heading.lower() == title.lower():
             del lines[idx]
             if idx < len(lines) and not lines[idx].strip():
@@ -130,14 +154,21 @@ def _slug_title(slug: str) -> str:
     return slug.replace("-", " ").replace("_", " ").title()
 
 
-def _front_matter(title: str, weight: int, description: str | None = None) -> str:
-    safe_title = title.replace('"', '\\"')
-    lines = [f'title: "{safe_title}"']
-    if description:
-        safe_desc = description.replace('"', '\\"')
-        lines.append(f'description: "{safe_desc}"')
-    lines.append(f"weight: {weight}")
-    return "---\n" + "\n".join(lines) + "\n---\n\n"
+def _front_matter(
+    title: str,
+    meta: PageMeta,
+) -> str:
+    payload: dict[str, Any] = {
+        "title": title,
+        "weight": meta.weight,
+    }
+    if meta.description:
+        payload["description"] = meta.description
+    if meta.aliases:
+        payload["aliases"] = list(meta.aliases)
+    payload.update(meta.params)
+    text = yaml.safe_dump(payload, sort_keys=False, allow_unicode=False).strip()
+    return f"---\n{text}\n---\n\n"
 
 
 def _normalize_link(source_rel: str, target: str) -> str:
@@ -189,28 +220,29 @@ def _sync_text(path: Path, expected: str, check: bool, changed: list[Path]) -> N
         path.write_text(expected, encoding="utf-8")
 
 
-def _sync_bytes(path: Path, expected: bytes, check: bool, changed: list[Path]) -> None:
-    _ensure_parent(path)
-    current = path.read_bytes() if path.exists() else None
-    if current == expected:
+def _remove_stale_path(path: Path, check: bool, changed: list[Path]) -> None:
+    if not path.exists():
         return
     changed.append(path)
-    if not check:
-        path.write_bytes(expected)
+    if check:
+        return
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
 
 
 def _build_route_map(base_path: str) -> dict[str, str]:
     route_map: dict[str, str] = {
-        "how-it-works.html": f"{base_path}/canonical/how-it-works.html",
-        "transforms.html": f"{base_path}/canonical/transforms.html",
+        "how-it-works.html": f"{base_path}/docs/how-it-works/",
+        "transforms.html": f"{base_path}/docs/transforms/",
     }
 
     for rel in USER_MD_SOURCES:
+        slug = Path(rel).stem
         if rel.startswith("features/"):
-            slug = Path(rel).stem
             route_map[rel] = f"{base_path}/docs/features/{slug}/"
         else:
-            slug = Path(rel).stem
             route_map[rel] = f"{base_path}/docs/{slug}/"
 
     return route_map
@@ -227,49 +259,11 @@ def _sync_user_markdown(route_map: dict[str, str], check: bool, changed: list[Pa
 
         title = _title_from_markdown(rewritten, fallback=_slug_title(Path(rel).stem))
         rewritten = _strip_matching_h1(rewritten, title=title)
-        weight = MD_WEIGHTS.get(rel, 100)
-        description = MD_DESCRIPTIONS.get(rel)
-        out_text = _front_matter(title=title, weight=weight, description=description) + rewritten
+        meta = PAGE_METADATA.get(rel, PageMeta(weight=100))
+        out_text = _front_matter(title=title, meta=meta) + rewritten
 
         dest = CONTENT_DOCS_ROOT / rel
         _sync_text(dest, out_text, check=check, changed=changed)
-
-
-def _sync_canonical_assets(check: bool, changed: list[Path]) -> None:
-    for rel in CANONICAL_FILES:
-        src = DOCS_ROOT / rel
-        if not src.exists():
-            raise FileNotFoundError(f"Missing canonical file: {src}")
-        dest = STATIC_CANONICAL_ROOT / rel
-        _sync_bytes(dest, src.read_bytes(), check=check, changed=changed)
-
-
-def _render_wrapper_page(
-    title: str, weight: int, canonical_url: str, description: str | None = None
-) -> str:
-    fm = _front_matter(title=title, weight=weight, description=description)
-    body = (
-        "Canonical source page:\n\n"
-        f"- [Open in full view]({canonical_url})\n\n"
-        '<p class="canonical-doc-note">'
-        "Use the embedded view below for inline reading, or open the full page if you prefer a standalone tab."
-        "</p>\n\n"
-        f'<iframe class="canonical-doc-frame" src="{canonical_url}" loading="lazy"></iframe>\n'
-    )
-    return fm + body
-
-
-def _sync_wrapper_pages(base_path: str, check: bool, changed: list[Path]) -> None:
-    for filename, (title, weight, canonical_url, description) in WRAPPER_PAGES.items():
-        dest = CONTENT_DOCS_ROOT / filename
-        prefixed_url = f"{base_path}{canonical_url}"
-        content = _render_wrapper_page(
-            title=title,
-            weight=weight,
-            canonical_url=prefixed_url,
-            description=description,
-        )
-        _sync_text(dest, content, check=check, changed=changed)
 
 
 def _humanize_dev_name(filename: str) -> str:
@@ -283,7 +277,7 @@ def _sync_development_links_page(check: bool, changed: list[Path]) -> None:
         raise FileNotFoundError(f"No development docs found in: {dev_dir}")
 
     lines: list[str] = [
-        _front_matter(title="Development References", weight=90),
+        _front_matter(title="Development References", meta=PageMeta(weight=90)),
         "Phase 1 keeps development docs canonical in repo Markdown and links them directly from the docs site.\n",
         "",
     ]
@@ -302,10 +296,10 @@ def sync(check: bool) -> list[Path]:
     base_path = _read_base_path()
     route_map = _build_route_map(base_path)
 
-    _sync_canonical_assets(check=check, changed=changed)
-    _sync_wrapper_pages(base_path=base_path, check=check, changed=changed)
     _sync_user_markdown(route_map=route_map, check=check, changed=changed)
     _sync_development_links_page(check=check, changed=changed)
+    for path in LEGACY_GENERATED_PATHS:
+        _remove_stale_path(path, check=check, changed=changed)
 
     return changed
 

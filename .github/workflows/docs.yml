@@ -75,10 +75,10 @@ jobs:
           extended: true
 
       - name: Build site
-        run: hugo --source site --minify --gc --destination ../public
+        run: hugo --source site --minify --gc --destination public
 
       - name: Check built-output links
-        run: uv run python scripts/docs/check_built_output_links.py public
+        run: uv run python scripts/docs/check_built_output_links.py site/public
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -137,12 +137,12 @@ jobs:
           extended: true
 
       - name: Build site
-        run: hugo --source site --minify --gc --destination ../public
+        run: hugo --source site --minify --gc --destination public
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: public
+          path: site/public
 
       - name: Deploy to GitHub Pages
         id: deployment

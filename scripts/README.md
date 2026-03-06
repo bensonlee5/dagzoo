@@ -1,6 +1,8 @@
-# Generation Scripts
+# Repository Scripts
 
-These wrappers run `dagzoo` from the repo root (typically via `uv run`).
+Run these wrappers and helper scripts from the repo root. CLI-oriented entries
+typically use `uv run dagzoo ...`; docs and maintenance helpers are invoked
+directly.
 
 ## Scripts
 
@@ -19,7 +21,9 @@ These wrappers run `dagzoo` from the repo root (typically via `uv run`).
 - `scripts/generate-missingness.sh [mechanism] [missing_rate] [num_datasets] [device] [out_dir] [seed]`
   - Runs generation with CLI-level missingness overrides (`mcar`, `mar`, `mnar`).
 - `scripts/fetch-additional-references.sh`
-  - Downloads the additional arXiv papers listed in `reference/ADDITIONAL_PAPERS.md`.
+  - Downloads a curated hardcoded list of additional arXiv papers used for local reference refreshes.
+- `scripts/effective_diversity_audit.py`
+  - Convenience wrapper that forwards to `dagzoo diversity-audit`; the packaged CLI is the canonical interface.
 - `scripts/benchmark-suite.sh [suite] [preset] [out_dir] [diagnostics] [diagnostics_out_dir]`
   - Runs `dagzoo benchmark` with suite/preset selection and optional diagnostics.
 - `scripts/benchmark-smoke.sh [preset] [diagnostics] [diagnostics_out_dir]`
@@ -28,6 +32,8 @@ These wrappers run `dagzoo` from the repo root (typically via `uv run`).
   - Runs the issue #148 prioritization benchmark/profiling matrix for CUDA desktop hosts and writes a verdict report under a `/tmp/issue148_cuda_desktop_*` artifact root.
 - `scripts/bump-version.sh <major|minor|patch> [--dry-run] [--tag]`
   - Bump the semver version in `pyproject.toml`. Use `--tag` to commit and create a git tag.
+- `scripts/cleanup_local_artifacts.py [--group runtime|docs|all] [--apply]`
+  - Dry-run or remove ignored local runtime/docs outputs (`data/`, `benchmarks/results/`, `site/public/`, etc.) without touching tracked files.
 - `scripts/docs/sync_hugo_content.py [--check]`
   - Sync canonical docs from `docs/` into generated Hugo inputs under `site/.generated/` (single-source docs model).
 - `scripts/docs/check_links.py [roots...]`
@@ -57,7 +63,9 @@ These wrappers run `dagzoo` from the repo root (typically via `uv run`).
 ./.venv/bin/python scripts/docs/sync_hugo_content.py
 ./.venv/bin/python scripts/docs/sync_hugo_content.py --check
 ./.venv/bin/python scripts/docs/check_links.py
-./.venv/bin/python scripts/docs/check_built_output_links.py public
+./.venv/bin/python scripts/docs/check_built_output_links.py site/public
+./.venv/bin/python scripts/cleanup_local_artifacts.py --group all
+./.venv/bin/python scripts/cleanup_local_artifacts.py --group runtime --apply
 uv run dagzoo generate --config configs/preset_diagnostics_on.yaml --num-datasets 25 --diagnostics --out data/run_diag
 uv run dagzoo generate --config configs/default.yaml --rows 1024 --num-datasets 25 --out data/run_rows_1024
 uv run dagzoo generate --config configs/default.yaml --rows 400..60000 --num-datasets 50 --no-dataset-write
@@ -77,6 +85,10 @@ When diagnostics is enabled for benchmark scripts, coverage artifacts are writte
 - `<out_dir>/diagnostics/<sanitized_preset_key>_<hash>/coverage_summary.md`
 
 The diagnostics preset directory is sanitized and hash-suffixed (for example, `cpu_ca49ca4b`) to keep paths unique and filesystem-safe.
+
+Docs workflow note: built Hugo output is `site/public/`. For the full
+single-source docs/rendered-reference model, see
+`docs/development/design-decisions.md` and `site/README.md`.
 
 When missingness is enabled in benchmark configs, summary JSON includes
 `preset_results[*].missingness_guardrails` and may escalate regression status via runtime or acceptance issues.

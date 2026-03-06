@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Historical note: entries below are ordered by release version. This file also
+contains imported legacy history, so date order is not strictly monotonic:
+`0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
+records the later `dagsynth -> dagzoo` rename on the current release line.
+
+## [0.5.4] - 2026-03-06
+
+### Changed
+
+- `dagzoo benchmark` now rejects `--device` when multiple `--preset` values are
+  selected instead of silently ignoring the override.
+- Docs tooling now treats `site/public/` as the canonical built Hugo output in
+  local workflows and CI, removing the previous `public/` vs `site/public/`
+  ambiguity.
+- Developer docs now explicitly document the docs wrapper model, current
+  coverage-report omission for `src/dagzoo/bench/*`, and the current
+  MPS-to-CPU hardware-tier mapping.
+- Coverage reporting now includes `src/dagzoo/cli.py`; only `src/dagzoo/bench/*`
+  remains omitted in this pass.
+- Script documentation now matches the actual reference-fetch workflow and
+  documents the standalone effective-diversity audit helper.
+- Added a safe local-artifact cleanup helper for ignored runtime/docs outputs.
+
 ## [0.5.3] - 2026-03-05
 
 ### Added
@@ -62,6 +85,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** Inline filtering was removed from generation. `dagzoo generate`
   now errors when `filter.enabled=true`; users must run `dagzoo filter` as a
   separate stage.
+
+## [0.5.0] - 2026-03-03
+
+### Changed
+
+- **BREAKING:** Renamed package from `dagsynth` to `dagzoo`. All imports change
+  from `from dagsynth ...` to `from dagzoo ...`.
+- **BREAKING:** Lineage schema name changed from `dagsynth.dag_lineage` to
+  `dagzoo.dag_lineage`. Existing Parquet files with the old schema name will not
+  validate against the new constant.
 
 ## [0.4.9] - 2026-03-04
 
@@ -154,16 +187,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING:** Curriculum shell users must migrate to `dataset.rows` /
   `--rows` workflows for staged row-envelope generation.
-
-## [0.5.0] - 2026-03-03
-
-### Changed
-
-- **BREAKING:** Renamed package from `dagsynth` to `dagzoo`. All imports change
-  from `from dagsynth ...` to `from dagzoo ...`.
-- **BREAKING:** Lineage schema name changed from `dagsynth.dag_lineage` to
-  `dagzoo.dag_lineage`. Existing Parquet files with the old schema name will not
-  validate against the new constant.
 
 ## [0.4.5] - 2026-03-04
 

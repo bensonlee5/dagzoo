@@ -5,7 +5,6 @@ Checks local links in:
 - `docs/**`
 - `site/content/**`
 - `site/.generated/content/**`
-- `site/.generated/static/canonical/**`
 
 Validation includes:
 - file/route existence checks for local links
@@ -31,7 +30,6 @@ DEFAULT_ROOTS = [
     "docs",
     "site/content",
     "site/.generated/content",
-    "site/.generated/static/canonical",
 ]
 
 # Markdown inline links/images: [label](target) / ![alt](target)
@@ -112,13 +110,6 @@ def _route_candidates(route: str) -> list[Path]:
             REPO_ROOT / "site/.generated/content/_index.md",
         ]
 
-    if route.startswith("canonical/"):
-        remainder = route.removeprefix("canonical/")
-        return [
-            REPO_ROOT / "site/static/canonical" / remainder,
-            REPO_ROOT / "site/.generated/static/canonical" / remainder,
-        ]
-
     candidates: list[Path] = []
     for content_root in (REPO_ROOT / "site/content", REPO_ROOT / "site/.generated/content"):
         route_path = content_root / route
@@ -181,7 +172,10 @@ def _exists_target(source: Path, target: str) -> bool:
 
 def _collect_targets(line: str, suffix: str) -> list[str]:
     if suffix == ".md":
-        return [match.group(1) for match in MD_LINK_RE.finditer(line)]
+        targets = [match.group(1) for match in MD_LINK_RE.finditer(line)]
+        for match in HTML_LINK_RE.finditer(line):
+            targets.append(match.group(1) or match.group(2) or match.group(3) or "")
+        return targets
 
     targets: list[str] = []
     for match in HTML_LINK_RE.finditer(line):

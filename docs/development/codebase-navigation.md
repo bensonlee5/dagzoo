@@ -47,6 +47,21 @@ Infrastructure that ensures reproducibility, deterministic behavior, and data qu
 - [`src/dagzoo/io/`](../../src/dagzoo/io/): Parquet shard writer, lineage bit-packing and schema.
 - [`src/dagzoo/bench/`](../../src/dagzoo/bench/): Benchmark suite orchestration, guardrails (missingness/lineage/shift/noise), baseline regression.
 
+## 6. Current Developer Notes
+
+- Docs source of truth:
+  - canonical details live in [`design-decisions.md`](design-decisions.md)
+  - built Hugo output is `site/public/`; top-level `public/` is stale local output from the older build flow
+- Docs architecture:
+  - `docs/how-it-works.md` and `docs/transforms.md` are canonical reference docs rendered as normal Hugo pages
+- Coverage reporting:
+  - CLI and benchmark orchestration are now part of the headline coverage threshold
+- Hardware policy nuance:
+  - `runtime.device: mps` is detected and preserved as an MPS backend
+  - hardware tiering still maps MPS to the `cpu` tier because only CUDA has tiered policy rules today
+- Local cleanup:
+  - use `scripts/cleanup_local_artifacts.py` to dry-run or remove ignored runtime/docs outputs without touching tracked files
+
 ______________________________________________________________________
 
 ### Tip: Audit via Verification

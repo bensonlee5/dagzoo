@@ -3,18 +3,11 @@
 // Loaded after Docsy/Bootstrap SCSS. All values reference $variables_project vars.
 // =============================================================================
 
-// --- Canonical iframe wrapper (unchanged) ---
+// --- Hugo-rendered technical docs ---
 
-.canonical-doc-frame {
-  width: 100%;
-  min-height: 82vh;
-  border: 1px solid #d0d7de;
-  border-radius: 6px;
-  background: #ffffff;
-}
-
-.canonical-doc-note {
-  margin-bottom: 0.75rem;
+.mermaid {
+  margin: 1.5rem 0;
+  text-align: center;
 }
 
 

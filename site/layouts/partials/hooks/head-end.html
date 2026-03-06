@@ -1,3 +1,48 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=Source+Serif+4:ital,opsz,wght@0,8..60,300..900;1,8..60,300..900&display=swap" rel="stylesheet">
+{{ with .Page }}
+{{ if .Params.math }}
+<script>
+  window.MathJax = {
+    tex: {
+      inlineMath: [["\\(", "\\)"]],
+      displayMath: [["\\[", "\\]"]],
+      processEscapes: true
+    }
+  };
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"></script>
+{{ end }}
+{{ if .Params.mermaid }}
+<script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  window.addEventListener("load", function () {
+    var mermaidBlocks = Array.prototype.slice.call(
+      document.querySelectorAll("pre.mermaid, pre code.language-mermaid")
+    );
+    mermaidBlocks.forEach(function (node) {
+      var pre = node.tagName === "PRE" ? node : node.closest("pre");
+      if (!pre) {
+        return;
+      }
+      var code = pre.tagName === "PRE" ? pre.querySelector("code") : node;
+      var source = (code ? code.textContent : pre.textContent) || "";
+      var diagram = document.createElement("div");
+      diagram.className = "mermaid";
+      diagram.textContent = source;
+      pre.replaceWith(diagram);
+    });
+
+    if (window.mermaid) {
+      window.mermaid.initialize({
+        startOnLoad: false,
+        theme: "neutral",
+        securityLevel: "loose"
+      });
+      window.mermaid.run({ querySelector: ".mermaid" });
+    }
+  });
+</script>
+{{ end }}
+{{ end }}

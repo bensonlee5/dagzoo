@@ -1004,6 +1004,11 @@ def _run_benchmark(args: argparse.Namespace) -> int:
     )
     for spec in preset_specs:
         _raise_if_worker_partitioning_unsupported(spec.config, command="benchmark")
+    if args.device and len(preset_specs) > 1:
+        _raise_usage_error(
+            "benchmark --device cannot be combined with multiple --preset values; "
+            "the override would be ambiguous."
+        )
     if args.device and len(preset_specs) == 1:
         preset_specs[0].device = args.device
 

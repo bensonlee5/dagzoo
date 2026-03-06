@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dagzoo"
-version = "0.5.3"
+version = "0.5.4"
 description = "High-performance synthetic tabular data generator"
 readme = "README.md"
 license = "MIT"
@@ -50,9 +50,7 @@ target-version = "py313"
 [tool.coverage.run]
 source = ["dagzoo"]
 omit = [
-  "src/dagzoo/cli.py",
   "src/dagzoo/__main__.py",
-  "src/dagzoo/bench/*",
 ]
 
 [tool.coverage.report]

@@ -32,6 +32,12 @@ dagzoo benchmark \
   --out-dir benchmarks/results/smoke_cpu_diag
 ```
 
+Device override note:
+
+- `--device` only applies when a benchmark run selects exactly one `--preset`.
+- Multi-preset runs must encode device choice in each preset/config; the CLI now
+  rejects ambiguous shared `--device` overrides.
+
 ______________________________________________________________________
 
 ## Feature-specific guardrail runs

@@ -1,71 +1,9 @@
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head>
-  <meta charset="utf-8" />
-  <meta name="generator" content="pandoc" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>Dagzoo Functional Transforms (Math Reference)</title>
-  <style>
-    /* Default styles provided by pandoc.
-    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
-    */
-    code{white-space: pre-wrap;}
-    span.smallcaps{font-variant: small-caps;}
-    div.columns{display: flex; gap: min(4vw, 1.5em);}
-    div.column{flex: auto; overflow-x: auto;}
-    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
-    /* The extra [class] is a hack that increases specificity enough to
-       override a similar rule in reveal.js */
-    ul.task-list[class]{list-style: none;}
-    ul.task-list li input[type="checkbox"] {
-      font-size: inherit;
-      width: 0.8em;
-      margin: 0 0.8em 0.2em -1.6em;
-      vertical-align: middle;
-    }
-  </style>
-  <link rel="stylesheet" href="canonical.css" />
-  <script defer=""
-  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"
-  type="text/javascript"></script>
-</head>
-<body>
-<h1 id="dagzoo-functional-transforms-math-reference">Dagzoo Functional
-Transforms (Math Reference)</h1>
+# Dagzoo Functional Transforms (Math Reference)
+
 <p>This document is the mathematical reference for the
 generation transforms used by <code>dagzoo</code>. Equations are
 implementation-faithful to the current runtime in
 <code>src/dagzoo</code>.</p>
-<nav id="toc" class="doc-toc" aria-label="Table of contents">
-<h2>Table of Contents</h2>
-<ul>
-<li><a href="#notation-and-symbols">Notation and Symbols</a></li>
-<li><a href="#operator-reference">Operator Reference</a></li>
-<li><a href="#end-to-end-primary-variable-map">End-to-End Primary Variable Map</a></li>
-<li><a href="#1-dag-structure-sampling">1. DAG Structure Sampling</a></li>
-<li><a href="#2-shift-runtime-parameters">2. Shift Runtime Parameters</a></li>
-<li><a href="#3-mechanism-family-sampling-with-mix--tilt">3. Mechanism Family Sampling with Mix + Tilt</a></li>
-<li><a href="#4-node-generation-pipeline">4. Node Generation Pipeline</a></li>
-<li><a href="#41-root-node-base-sampling">4.1 Root-node Base Sampling</a></li>
-<li><a href="#42-parent-composition-non-root-nodes">4.2 Parent Composition (Non-root Nodes)</a></li>
-<li><a href="#43-latent-post-processing-and-converter-slicing">4.3 Latent Post-processing and Converter Slicing</a></li>
-<li><a href="#5-mechanism-family-definitions">5. Mechanism Family Definitions</a></li>
-<li><a href="#51-linear">5.1 Linear</a></li>
-<li><a href="#52-quadratic">5.2 Quadratic</a></li>
-<li><a href="#53-neural-network">5.3 Neural Network</a></li>
-<li><a href="#54-tree-ensemble-oblivious-decision-trees">5.4 Tree Ensemble</a></li>
-<li><a href="#55-discretization">5.5 Discretization</a></li>
-<li><a href="#56-gprff-approximation">5.6 GP/RFF Approximation</a></li>
-<li><a href="#57-em-style-assignment">5.7 EM-style Assignment</a></li>
-<li><a href="#58-product-family">5.8 Product Family</a></li>
-<li><a href="#6-converter-definitions">6. Converter Definitions</a></li>
-<li><a href="#61-numeric-converter">6.1 Numeric Converter</a></li>
-<li><a href="#62-categorical-converter">6.2 Categorical Converter</a></li>
-<li><a href="#7-noise-sampling-and-runtime-selection">7. Noise Sampling and Runtime Selection</a></li>
-<li><a href="#71-primitive-family-samplers">7.1 Primitive Family Samplers</a></li>
-<li><a href="#72-dataset-level-noise-family-resolution">7.2 Dataset-level Noise-family Resolution</a></li>
-</ul>
-</nav>
 <h2 id="notation-and-symbols">Notation and Symbols</h2>
 <p><strong>Primary Variable:</strong> Symbol map (this section's
 notation table).<br> <strong>Dependency Map:</strong> all symbols used
@@ -1449,5 +1387,3 @@ equals requested family.</li>
 base scale for all downstream draws in the attempt. Shift noise drift
 applies through multiplicative scale factor <span
 class="math inline">\(\gamma_\sigma\)</span>.</p>
-</body>
-</html>
