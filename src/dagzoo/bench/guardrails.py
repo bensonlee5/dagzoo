@@ -22,7 +22,7 @@ from dagzoo.bench.constants import (
 from dagzoo.bench.metrics import degradation_percent
 from dagzoo.config import GeneratorConfig
 from dagzoo.core.dataset import generate_batch_iter
-from dagzoo.core.parallel_generation import generate_parallel_batch_iter
+from dagzoo.core.parallel_generation import active_worker_count, generate_parallel_batch_iter
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 from dagzoo.math_utils import to_numpy as _to_numpy
 from dagzoo.rng import offset_seed32
@@ -139,7 +139,7 @@ def _stage_lineage_trial_bundles(
     current_stage_dir.mkdir(parents=True, exist_ok=True)
     generator = (
         generate_parallel_batch_iter
-        if int(config.runtime.worker_count) > 1
+        if active_worker_count(int(config.runtime.worker_count), sample_n) > 1
         else generate_batch_iter
     )
 

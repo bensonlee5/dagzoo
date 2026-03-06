@@ -14,7 +14,7 @@ from dagzoo.bench.constants import (
 )
 from dagzoo.config import GeneratorConfig
 from dagzoo.core.dataset import generate_batch_iter
-from dagzoo.core.parallel_generation import generate_parallel_batch_iter
+from dagzoo.core.parallel_generation import active_worker_count, generate_parallel_batch_iter
 from dagzoo.rng import offset_seed32
 from dagzoo.types import DatasetBundle
 
@@ -31,7 +31,7 @@ def _consume_generation(
 
     generator = (
         generate_parallel_batch_iter
-        if int(config.runtime.worker_count) > 1
+        if active_worker_count(int(config.runtime.worker_count), num_datasets) > 1
         else generate_batch_iter
     )
     for bundle in generator(

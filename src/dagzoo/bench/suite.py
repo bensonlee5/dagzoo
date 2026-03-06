@@ -193,7 +193,7 @@ def _collect_reproducibility(
     run_seed = offset_seed32(config.seed, REPRODUCIBILITY_SEED_OFFSET)
     generator = (
         generate_parallel_batch_iter
-        if int(config.runtime.worker_count) > 1
+        if active_worker_count(int(config.runtime.worker_count), n) > 1
         else generate_batch_iter
     )
     sig_a = reproducibility_signature(
@@ -223,6 +223,19 @@ def _artifact_pointer(path: Path) -> str:
     """Return a summary-safe pointer for diagnostics artifacts."""
 
     return str(path.resolve())
+
+
+def _normalize_multi_worker_benchmark_requested_device(
+    config: GeneratorConfig,
+    *,
+    requested_device: str | None,
+) -> str:
+    """Normalize multi-worker benchmark device requests before hardware resolution."""
+
+    normalized = (requested_device or config.runtime.device or "auto").lower()
+    if int(config.runtime.worker_count) > 1 and normalized == "auto":
+        return "cpu"
+    return normalized
 
 
 def _build_diagnostics_aggregator(config: GeneratorConfig) -> CoverageAggregator:
@@ -328,10 +341,14 @@ def run_preset_benchmark(
 ) -> dict[str, Any]:
     """Run one benchmark preset and collect throughput, latency, and optional diagnostics."""
 
+    normalized_preset_device = _normalize_multi_worker_benchmark_requested_device(
+        spec.config,
+        requested_device=spec.device,
+    )
     resolved_preset = resolve_benchmark_preset_config(
         preset_key=spec.key,
         config=spec.config,
-        preset_device=spec.device,
+        preset_device=normalized_preset_device,
         suite=suite,
         hardware_policy=hardware_policy,
         smoke_caps=BenchmarkSmokeCaps(

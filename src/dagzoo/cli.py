@@ -671,8 +671,7 @@ def _raise_if_worker_partitioning_unsupported(
 def _raise_if_benchmark_multi_worker_preflight_invalid(
     config: GeneratorConfig,
     *,
-    device_override: str | None = None,
-    preset_device: str | None = None,
+    requested_device: str,
 ) -> None:
     """Reject benchmark worker configs that cannot be orchestrated locally."""
 
@@ -684,12 +683,25 @@ def _raise_if_benchmark_multi_worker_preflight_invalid(
             f"Got worker_index={int(config.runtime.worker_index)} with "
             f"worker_count={int(config.runtime.worker_count)}."
         )
-    requested_device = (device_override or preset_device or config.runtime.device or "auto").lower()
-    if requested_device not in {"auto", "cpu"}:
+    if requested_device != "cpu":
         _raise_usage_error(
             "dagzoo benchmark multi-worker mode is CPU-only in issue #81. "
             f"Got device='{requested_device}'."
         )
+
+
+def _normalized_benchmark_requested_device(
+    config: GeneratorConfig,
+    *,
+    device_override: str | None = None,
+    preset_device: str | None = None,
+) -> str:
+    """Normalize benchmark device selection for local multi-worker mode."""
+
+    requested_device = (device_override or preset_device or config.runtime.device or "auto").lower()
+    if int(config.runtime.worker_count) > 1 and requested_device == "auto":
+        return "cpu"
+    return requested_device
 
 
 def _raise_if_benchmark_multi_worker_config_is_ignored(
@@ -1063,13 +1075,17 @@ def _run_benchmark(args: argparse.Namespace) -> int:
     )
     effective_device_override = args.device if args.device and len(preset_specs) == 1 else None
     for spec in preset_specs:
-        _raise_if_benchmark_multi_worker_preflight_invalid(
+        normalized_requested_device = _normalized_benchmark_requested_device(
             spec.config,
             device_override=effective_device_override,
             preset_device=spec.device,
         )
-    if effective_device_override is not None:
-        preset_specs[0].device = effective_device_override
+        _raise_if_benchmark_multi_worker_preflight_invalid(
+            spec.config,
+            requested_device=normalized_requested_device,
+        )
+        if int(spec.config.runtime.worker_count) > 1 or effective_device_override is not None:
+            spec.device = normalized_requested_device
 
     baseline_payload = load_baseline(args.baseline) if args.baseline else None
 

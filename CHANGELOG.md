@@ -23,9 +23,14 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
 - Benchmark throughput, reproducibility, and lineage guardrail generation paths
   now use the local multi-worker iterator when multi-worker benchmark mode is
   active.
+- Multi-worker benchmark mode now coerces `runtime.device: auto` to CPU before
+  benchmark resolution, keeping the default config usable on accelerator hosts.
 - Multi-worker benchmark summaries now report latency fields and
   `micro_generate_one_ms` as unavailable when the run actually uses multiple
   active worker partitions, avoiding misleading single-worker timings.
+- Effectively single-worker benchmark runs now stay on the sequential
+  generation path even when `runtime.worker_count > 1`, avoiding unnecessary
+  coordinator overhead for tiny runs.
 
 ### Breaking
 
