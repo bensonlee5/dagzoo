@@ -120,6 +120,10 @@ def generate_parallel_batch_iter(
         queue.Queue[_BundleResult](maxsize=per_worker_capacity)
         for _ in range(active_worker_count_value)
     ]
+    queue_slots = [
+        threading.BoundedSemaphore(value=per_worker_capacity)
+        for _ in range(active_worker_count_value)
+    ]
     # Each worker writes its own slot at most once; the consumer only reads stable references.
     worker_errors: list[BaseException | None] = [None] * active_worker_count_value
     first_recorded_error: list[BaseException | None] = [None]
@@ -134,11 +138,31 @@ def generate_parallel_batch_iter(
     def _first_recorded_worker_error() -> BaseException | None:
         return first_recorded_error[0]
 
-    def _try_get_buffered_item(target_queue: queue.Queue[_BundleResult]) -> _BundleResult | None:
+    def _release_queue_slot(worker_index: int) -> None:
+        queue_slots[worker_index].release()
+
+    def _try_get_buffered_item(
+        target_worker_index: int, target_queue: queue.Queue[_BundleResult]
+    ) -> _BundleResult | None:
         try:
-            return target_queue.get_nowait()
+            item = target_queue.get_nowait()
         except queue.Empty:
             return None
+        _release_queue_slot(target_worker_index)
+        return item
+
+    def _get_buffered_item(
+        target_worker_index: int,
+        target_queue: queue.Queue[_BundleResult],
+        *,
+        timeout: float,
+    ) -> _BundleResult | None:
+        try:
+            item = target_queue.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        _release_queue_slot(target_worker_index)
+        return item
 
     def _bundle_from_item(
         item: _BundleResult,
@@ -154,15 +178,25 @@ def generate_parallel_batch_iter(
             )
         return item.bundle
 
-    def _put_bundle(worker_index: int, item: _BundleResult) -> bool:
+    def _reserve_queue_slot(worker_index: int) -> bool:
+        worker_slots = queue_slots[worker_index]
         while True:
-            if consumer_closed_event.is_set():
+            if consumer_closed_event.is_set() or stop_event.is_set():
                 return False
-            try:
-                bundle_queues[worker_index].put(item, timeout=0.05)
+            if worker_slots.acquire(timeout=0.05):
                 return True
-            except queue.Full:
-                continue
+
+    def _put_bundle(worker_index: int, item: _BundleResult) -> bool:
+        if consumer_closed_event.is_set():
+            return False
+        try:
+            bundle_queues[worker_index].put_nowait(item)
+        except queue.Full as exc:  # pragma: no cover - defensive invariant
+            raise RuntimeError(
+                "Parallel generation queue reservation invariant violated for worker "
+                f"{worker_index}."
+            ) from exc
+        return True
 
     def _run_worker(local_worker_index: int) -> None:
         try:
@@ -175,17 +209,28 @@ def generate_parallel_batch_iter(
             ):
                 if stop_event.is_set():
                     break
-                bundle = _generation_engine._generate_one_seeded(
-                    worker_config,
-                    seed=dataset_seed,
-                    requested_device=requested_device,
-                    resolved_device=resolved_device,
-                )
-                if not _put_bundle(
-                    local_worker_index,
-                    _BundleResult(dataset_index=dataset_index, bundle=bundle),
-                ):
+                if not _reserve_queue_slot(local_worker_index):
                     break
+                slot_reserved = True
+                try:
+                    bundle = _generation_engine._generate_one_seeded(
+                        worker_config,
+                        seed=dataset_seed,
+                        requested_device=requested_device,
+                        resolved_device=resolved_device,
+                    )
+                    if not _put_bundle(
+                        local_worker_index,
+                        _BundleResult(dataset_index=dataset_index, bundle=bundle),
+                    ):
+                        _release_queue_slot(local_worker_index)
+                        slot_reserved = False
+                        break
+                    slot_reserved = False
+                except BaseException:
+                    if slot_reserved:
+                        _release_queue_slot(local_worker_index)
+                    raise
         except BaseException as exc:  # pragma: no cover - exercised via consumer raise path
             worker_errors[local_worker_index] = exc
             with first_recorded_error_lock:
@@ -208,7 +253,7 @@ def generate_parallel_batch_iter(
                     target_queue = bundle_queues[target_worker_index]
                     target_future = futures[target_worker_index]
                     while True:
-                        item = _try_get_buffered_item(target_queue)
+                        item = _try_get_buffered_item(target_worker_index, target_queue)
                         if item is not None:
                             yield _bundle_from_item(
                                 item,
@@ -219,10 +264,13 @@ def generate_parallel_batch_iter(
                         target_worker_error = _target_worker_error(target_worker_index)
                         if target_worker_error is not None:
                             raise target_worker_error
-                        try:
-                            item = target_queue.get(timeout=0.05)
-                        except queue.Empty:
-                            item = _try_get_buffered_item(target_queue)
+                        item = _get_buffered_item(
+                            target_worker_index,
+                            target_queue,
+                            timeout=0.05,
+                        )
+                        if item is None:
+                            item = _try_get_buffered_item(target_worker_index, target_queue)
                             if item is not None:
                                 yield _bundle_from_item(
                                     item,
@@ -234,7 +282,7 @@ def generate_parallel_batch_iter(
                             if target_worker_error is not None:
                                 raise target_worker_error
                             if target_future.done():
-                                item = _try_get_buffered_item(target_queue)
+                                item = _try_get_buffered_item(target_worker_index, target_queue)
                                 if item is not None:
                                     yield _bundle_from_item(
                                         item,

@@ -419,6 +419,7 @@ def test_generate_parallel_batch_iter_bounds_faster_worker_runahead(
 
     observed_seeds: list[int] = []
     worker_zero_started = threading.Event()
+    worker_one_first_started = threading.Event()
     worker_one_second_started = threading.Event()
     release_worker_zero = threading.Event()
 
@@ -432,6 +433,8 @@ def test_generate_parallel_batch_iter_bounds_faster_worker_runahead(
         if seed == seed0:
             worker_zero_started.set()
             assert release_worker_zero.wait(timeout=1.0)
+        if seed == seed1:
+            worker_one_first_started.set()
         if seed == seed3:
             worker_one_second_started.set()
         return seed
@@ -460,9 +463,10 @@ def test_generate_parallel_batch_iter_bounds_faster_worker_runahead(
     consumer_thread.start()
 
     assert worker_zero_started.wait(timeout=1.0)
-    assert worker_one_second_started.wait(timeout=1.0)
+    assert worker_one_first_started.wait(timeout=1.0)
     assert seed1 in observed_seeds
-    assert seed3 in observed_seeds
+    assert not worker_one_second_started.wait(timeout=0.1)
+    assert seed3 not in observed_seeds
     assert seed5 not in observed_seeds
     assert consumer_thread.is_alive()
 
@@ -471,6 +475,7 @@ def test_generate_parallel_batch_iter_bounds_faster_worker_runahead(
 
     assert not consumer_thread.is_alive()
     assert next_result.get_nowait() == seed0
+    assert not worker_one_second_started.is_set()
     iterator.close()
 
 
