@@ -172,6 +172,7 @@ def test_run_benchmark_suite_marks_generate_one_micro_unavailable_for_multi_work
     cfg.runtime.worker_count = 2
     cfg.runtime.worker_index = 0
     spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
+    include_generate_one_flags: list[bool] = []
 
     monkeypatch.setattr(
         "dagzoo.bench.suite.run_throughput_benchmark",
@@ -191,12 +192,15 @@ def test_run_benchmark_suite_marks_generate_one_micro_unavailable_for_multi_work
     )
     monkeypatch.setattr(
         "dagzoo.bench.suite.run_microbenchmarks",
-        lambda _config, *, device=None, repeats=1: {
-            "micro_repeats": int(repeats),
-            "micro_random_function_linear_ms": 1.0,
-            "micro_node_pipeline_ms": 2.0,
-            "micro_generate_one_ms": 3.0,
-        },
+        lambda _config, *, device=None, repeats=1, include_generate_one=True: (
+            include_generate_one_flags.append(bool(include_generate_one))
+            or {
+                "micro_repeats": int(repeats),
+                "micro_random_function_linear_ms": 1.0,
+                "micro_node_pipeline_ms": 2.0,
+                "micro_generate_one_ms": 3.0 if include_generate_one else None,
+            }
+        ),
     )
     monkeypatch.setattr(
         "dagzoo.bench.suite._collect_lineage_guardrails",
@@ -224,6 +228,7 @@ def test_run_benchmark_suite_marks_generate_one_micro_unavailable_for_multi_work
     assert result["micro_random_function_linear_ms"] == pytest.approx(1.0)
     assert result["micro_node_pipeline_ms"] == pytest.approx(2.0)
     assert result["micro_generate_one_ms"] is None
+    assert include_generate_one_flags == [False]
 
 
 def test_run_benchmark_suite_emits_stage_and_filter_pressure_metrics(
@@ -441,8 +446,15 @@ def test_run_benchmark_suite_filter_enabled_uses_filter_disabled_generation_conf
             "reproducibility_match": True,
         }
 
-    def _stub_micro(config, *, device: str | None, repeats: int) -> dict[str, float | int]:
+    def _stub_micro(
+        config,
+        *,
+        device: str | None,
+        repeats: int,
+        include_generate_one: bool = True,
+    ) -> dict[str, float | int | None]:
         _ = device
+        _ = include_generate_one
         micro_filter_flags.append(bool(config.filter.enabled))
         return {
             "micro_repeats": int(repeats),
@@ -1816,6 +1828,77 @@ def test_collect_lineage_guardrails_reports_unavailable_for_non_runtime_persiste
     assert "codec unavailable" in guardrails["detail"]
 
 
+def test_collect_lineage_guardrails_uses_parallel_generation_when_multi_worker_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_cpu_config()
+    cfg.runtime.worker_count = 2
+    cfg.runtime.worker_index = 0
+
+    def _stub_generate_parallel_batch_iter(
+        _config,
+        *,
+        num_datasets: int,
+        seed: int | None = None,
+        device: str | None = None,
+    ):
+        _ = seed
+        _ = device
+        for i in range(num_datasets):
+            yield DatasetBundle(
+                X_train=np.zeros((3, 4), dtype=np.float32),
+                y_train=np.zeros(3, dtype=np.int64),
+                X_test=np.zeros((1, 4), dtype=np.float32),
+                y_test=np.zeros(1, dtype=np.int64),
+                feature_types=["num", "num", "num", "num"],
+                metadata={
+                    "seed": i,
+                    "attempt_used": 0,
+                    "lineage": {"schema_name": "dagzoo.dag_lineage"},
+                },
+            )
+
+    trial_values = iter([100.0, 90.0, 100.0, 90.0, 100.0, 90.0])
+
+    def _stub_measure(
+        _bundles,
+        *,
+        config: GeneratorConfig,
+        num_bundles: int,
+    ) -> float:
+        _ = config
+        assert num_bundles > 0
+        return float(next(trial_values))
+
+    monkeypatch.setattr(
+        "dagzoo.bench.guardrails.generate_parallel_batch_iter",
+        _stub_generate_parallel_batch_iter,
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.guardrails.generate_batch_iter",
+        lambda *_args, **_kwargs: pytest.fail(
+            "sequential generator should not be used for multi-worker lineage guardrails"
+        ),
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.guardrails._measure_persistence_datasets_per_minute",
+        _stub_measure,
+    )
+
+    guardrails = guardrails_mod._collect_lineage_guardrails(
+        cfg,
+        suite="standard",
+        num_datasets=4,
+        device="cpu",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+    )
+
+    assert guardrails["enabled"] is True
+    assert guardrails["sample_datasets"] == 2
+    assert guardrails["runtime_with_lineage_datasets_per_minute"] == pytest.approx(90.0)
+
+
 def test_measure_lineage_persistence_trials_replays_staged_bundles_without_generation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1883,6 +1966,23 @@ def test_run_microbenchmarks_returns_expected_keys() -> None:
     assert "micro_random_function_linear_ms" in res
     assert "micro_node_pipeline_ms" in res
     assert "micro_generate_one_ms" in res
+
+
+def test_run_microbenchmarks_can_skip_generate_one_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_cpu_config()
+
+    monkeypatch.setattr(
+        "dagzoo.bench.micro.generate_one",
+        lambda *_args, **_kwargs: pytest.fail("generate_one should be skipped"),
+    )
+
+    res = run_microbenchmarks(cfg, device="cpu", repeats=1, include_generate_one=False)
+    assert res["micro_repeats"] == 1
+    assert isinstance(res["micro_random_function_linear_ms"], float)
+    assert isinstance(res["micro_node_pipeline_ms"], float)
+    assert res["micro_generate_one_ms"] is None
 
 
 def test_collect_reproducibility_uses_streaming_generation(

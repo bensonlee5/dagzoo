@@ -565,9 +565,8 @@ def run_preset_benchmark(
             generation_config,
             device=requested_device,
             repeats=MICROBENCH_REPEATS,
+            include_generate_one=not multi_worker_benchmark,
         )
-        if multi_worker_benchmark:
-            microbench["micro_generate_one_ms"] = None
         result.update(microbench)
 
     if missingness_enabled and missingness_acceptance is not None:
