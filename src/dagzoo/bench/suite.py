@@ -10,7 +10,7 @@ import re
 import resource
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -527,6 +527,7 @@ def run_preset_benchmark(
     # control-run guardrail benchmarks to avoid unnecessary memory retention.
     sampled_bundles.clear()
 
+    latency_stats: Mapping[str, float | None]
     if multi_worker_benchmark:
         latency_stats = {
             "latency_samples": None,
