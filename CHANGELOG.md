@@ -25,8 +25,9 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
   active.
 - Local multi-worker benchmark fan-out now caps to host CPU capacity before the
   benchmark coordinator allocates worker threads and queues.
-- Multi-worker benchmark mode now coerces `runtime.device: auto` to CPU before
-  benchmark resolution, keeping the default config usable on accelerator hosts.
+- True local multi-worker benchmark runs now coerce `runtime.device: auto` to
+  CPU after effective fan-out resolution, while effectively single-worker runs
+  keep their requested device behavior.
 - Multi-worker benchmark summaries now report latency fields and
   `micro_generate_one_ms` as unavailable when the run actually uses multiple
   active worker partitions, avoiding misleading single-worker timings.
@@ -37,8 +38,10 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
 
 ### Breaking
 
-- **BREAKING:** Multi-worker `dagzoo benchmark` remains CPU-only in this
-  release; explicit `cuda`/`mps` multi-worker benchmark runs are rejected.
+- **BREAKING:** True local multi-worker `dagzoo benchmark` runs remain CPU-only
+  in this release; effectively single-worker runs keep their requested device,
+  but explicit `cuda`/`mps` requests are still rejected once effective fan-out
+  exceeds one local worker.
 - **BREAKING:** `dagzoo generate` still does not orchestrate peer workers, and
   write-enabled multi-worker generate runs remain blocked until shard-writing
   coordination lands.

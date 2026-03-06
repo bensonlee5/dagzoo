@@ -266,7 +266,7 @@ def test_benchmark_cli_accepts_cpu_multi_worker_root_config(
     preset_specs = captured["preset_specs"]
     assert isinstance(preset_specs, list)
     assert len(preset_specs) == 1
-    assert getattr(preset_specs[0], "device", None) == "cpu"
+    assert getattr(preset_specs[0], "device", None) == "auto"
 
 
 def test_benchmark_cli_rejects_ignored_multi_worker_config_for_builtin_preset(
@@ -325,30 +325,49 @@ def test_benchmark_cli_rejects_multi_worker_nonzero_worker_index(tmp_path) -> No
     assert int(exc.value.code) == 2
 
 
-def test_benchmark_cli_rejects_multi_worker_explicit_cuda_device(tmp_path) -> None:
+def test_benchmark_cli_allows_multi_worker_explicit_cuda_preflight(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     cfg.runtime.worker_count = 2
     cfg.runtime.worker_index = 0
     cfg.runtime.device = "cpu"
     config_path = tmp_path / "benchmark_multi_worker_cuda.yaml"
     config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+    captured: dict[str, object] = {}
 
-    with pytest.raises(SystemExit) as exc:
-        main(
-            [
-                "benchmark",
-                "--config",
-                str(config_path),
-                "--preset",
-                "custom",
-                "--suite",
-                "smoke",
-                "--no-memory",
-                "--device",
-                "cuda",
-            ]
-        )
-    assert int(exc.value.code) == 2
+    def _stub_run_benchmark_suite(
+        preset_specs,
+        **kwargs,
+    ):
+        captured["preset_specs"] = preset_specs
+        captured.update(kwargs)
+        return {"preset_results": [], "regression": {"status": "pass", "issues": []}}
+
+    monkeypatch.setattr("dagzoo.cli.run_benchmark_suite", _stub_run_benchmark_suite)
+
+    code = main(
+        [
+            "benchmark",
+            "--config",
+            str(config_path),
+            "--preset",
+            "custom",
+            "--suite",
+            "smoke",
+            "--no-memory",
+            "--num-datasets",
+            "1",
+            "--device",
+            "cuda",
+        ]
+    )
+
+    assert code == 0
+    preset_specs = captured["preset_specs"]
+    assert isinstance(preset_specs, list)
+    assert len(preset_specs) == 1
+    assert getattr(preset_specs[0], "device", None) == "cuda"
 
 
 def test_benchmark_cli_rejects_device_override_with_multiple_presets(

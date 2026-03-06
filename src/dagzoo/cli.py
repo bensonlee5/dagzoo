@@ -670,8 +670,6 @@ def _raise_if_worker_partitioning_unsupported(
 
 def _raise_if_benchmark_multi_worker_preflight_invalid(
     config: GeneratorConfig,
-    *,
-    requested_device: str,
 ) -> None:
     """Reject benchmark worker configs that cannot be orchestrated locally."""
 
@@ -683,11 +681,6 @@ def _raise_if_benchmark_multi_worker_preflight_invalid(
             f"Got worker_index={int(config.runtime.worker_index)} with "
             f"worker_count={int(config.runtime.worker_count)}."
         )
-    if requested_device != "cpu":
-        _raise_usage_error(
-            "dagzoo benchmark multi-worker mode is CPU-only in issue #81. "
-            f"Got device='{requested_device}'."
-        )
 
 
 def _normalized_benchmark_requested_device(
@@ -698,10 +691,7 @@ def _normalized_benchmark_requested_device(
 ) -> str:
     """Normalize benchmark device selection for local multi-worker mode."""
 
-    requested_device = (device_override or preset_device or config.runtime.device or "auto").lower()
-    if int(config.runtime.worker_count) > 1 and requested_device == "auto":
-        return "cpu"
-    return requested_device
+    return (device_override or preset_device or config.runtime.device or "auto").lower()
 
 
 def _raise_if_benchmark_multi_worker_config_is_ignored(
@@ -1080,10 +1070,7 @@ def _run_benchmark(args: argparse.Namespace) -> int:
             device_override=effective_device_override,
             preset_device=spec.device,
         )
-        _raise_if_benchmark_multi_worker_preflight_invalid(
-            spec.config,
-            requested_device=normalized_requested_device,
-        )
+        _raise_if_benchmark_multi_worker_preflight_invalid(spec.config)
         if int(spec.config.runtime.worker_count) > 1 or effective_device_override is not None:
             spec.device = normalized_requested_device
 

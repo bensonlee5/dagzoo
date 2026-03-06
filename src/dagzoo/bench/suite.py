@@ -230,12 +230,9 @@ def _normalize_multi_worker_benchmark_requested_device(
     *,
     requested_device: str | None,
 ) -> str:
-    """Normalize multi-worker benchmark device requests before hardware resolution."""
+    """Normalize benchmark device requests before preset resolution."""
 
-    normalized = (requested_device or config.runtime.device or "auto").lower()
-    if int(config.runtime.worker_count) > 1 and normalized == "auto":
-        return "cpu"
-    return normalized
+    return (requested_device or config.runtime.device or "auto").lower()
 
 
 def _build_diagnostics_aggregator(config: GeneratorConfig) -> CoverageAggregator:
@@ -341,36 +338,29 @@ def run_preset_benchmark(
 ) -> dict[str, Any]:
     """Run one benchmark preset and collect throughput, latency, and optional diagnostics."""
 
+    def _resolve_preset_for_requested_device(requested_device: str):
+        return resolve_benchmark_preset_config(
+            preset_key=spec.key,
+            config=spec.config,
+            preset_device=requested_device,
+            suite=suite,
+            hardware_policy=hardware_policy,
+            smoke_caps=BenchmarkSmokeCaps(
+                n_train=SMOKE_N_TRAIN_CAP,
+                n_test=SMOKE_N_TEST_CAP,
+                n_features=SMOKE_N_FEATURES_CAP,
+                n_nodes=SMOKE_N_NODES_CAP,
+            ),
+        )
+
     normalized_preset_device = _normalize_multi_worker_benchmark_requested_device(
         spec.config,
         requested_device=spec.device,
     )
-    resolved_preset = resolve_benchmark_preset_config(
-        preset_key=spec.key,
-        config=spec.config,
-        preset_device=normalized_preset_device,
-        suite=suite,
-        hardware_policy=hardware_policy,
-        smoke_caps=BenchmarkSmokeCaps(
-            n_train=SMOKE_N_TRAIN_CAP,
-            n_test=SMOKE_N_TEST_CAP,
-            n_features=SMOKE_N_FEATURES_CAP,
-            n_nodes=SMOKE_N_NODES_CAP,
-        ),
-    )
+    resolved_preset = _resolve_preset_for_requested_device(normalized_preset_device)
     config = resolved_preset.config
     requested_device = resolved_preset.requested_device
     hw = resolved_preset.hardware
-    explicit_requested_device = str(requested_device).strip().lower()
-    if int(config.runtime.worker_count) > 1 and (
-        hw.backend != "cpu" or explicit_requested_device in {"cuda", "mps"}
-    ):
-        raise ParallelGenerationConfigError(
-            "runtime.worker_count > 1 benchmark runs currently support resolved CPU presets only. "
-            f"Preset '{spec.key}' requested_device='{requested_device}' resolved backend "
-            f"'{hw.backend}'."
-        )
-
     num_datasets, warmup = _preset_counts(
         config,
         preset_key=spec.key,
@@ -378,6 +368,39 @@ def run_preset_benchmark(
         num_datasets_override=num_datasets_override,
         warmup_override=warmup_override,
     )
+    multi_worker_benchmark = (
+        effective_local_parallel_worker_count(int(config.runtime.worker_count), num_datasets) > 1
+    )
+
+    explicit_requested_device = str(requested_device).strip().lower()
+    if multi_worker_benchmark and explicit_requested_device in {"cuda", "mps"}:
+        raise ParallelGenerationConfigError(
+            "runtime.worker_count > 1 benchmark runs currently support resolved CPU presets only. "
+            f"Preset '{spec.key}' requested_device='{requested_device}' resolved backend "
+            f"'{hw.backend}'."
+        )
+    if multi_worker_benchmark and explicit_requested_device == "auto" and hw.backend != "cpu":
+        resolved_preset = _resolve_preset_for_requested_device("cpu")
+        config = resolved_preset.config
+        requested_device = resolved_preset.requested_device
+        hw = resolved_preset.hardware
+        num_datasets, warmup = _preset_counts(
+            config,
+            preset_key=spec.key,
+            suite=suite,
+            num_datasets_override=num_datasets_override,
+            warmup_override=warmup_override,
+        )
+        multi_worker_benchmark = (
+            effective_local_parallel_worker_count(int(config.runtime.worker_count), num_datasets)
+            > 1
+        )
+    if multi_worker_benchmark and hw.backend != "cpu":
+        raise ParallelGenerationConfigError(
+            "runtime.worker_count > 1 benchmark runs currently support resolved CPU presets only. "
+            f"Preset '{spec.key}' requested_device='{requested_device}' resolved backend "
+            f"'{hw.backend}'."
+        )
 
     rss_before = _peak_rss_mb() if collect_memory else 0.0
     if collect_memory and hw.backend == "cuda" and torch.cuda.is_available():
@@ -407,13 +430,6 @@ def run_preset_benchmark(
 
     generation_config = _copy_runtime_config(config)
     generation_config.filter.enabled = False
-    multi_worker_benchmark = (
-        effective_local_parallel_worker_count(
-            int(generation_config.runtime.worker_count),
-            num_datasets,
-        )
-        > 1
-    )
 
     def _build_throughput_on_bundle_callback(
         *,
