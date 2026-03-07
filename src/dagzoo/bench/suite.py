@@ -82,6 +82,7 @@ from dagzoo.core.config_resolution import (
 from dagzoo.core.dataset import generate_batch_iter, generate_one
 from dagzoo.core.fixed_layout import (
     FixedLayoutPlan,
+    _resolve_fixed_layout_batch_size,
     generate_batch_fixed_layout,
     generate_batch_fixed_layout_iter,
     sample_fixed_layout,
@@ -269,6 +270,7 @@ def _collect_reproducibility(
     device: str | None,
     num_datasets: int,
     fixed_layout_plan: FixedLayoutPlan | None = None,
+    fixed_layout_batch_size: int | None = None,
 ) -> dict[str, Any]:
     """Generate two deterministic runs and compare content digests."""
 
@@ -281,6 +283,7 @@ def _collect_reproducibility(
                 plan=fixed_layout_plan,
                 num_datasets=n,
                 seed=run_seed,
+                batch_size=fixed_layout_batch_size,
             )
         )
         sig_b = reproducibility_signature(
@@ -289,6 +292,7 @@ def _collect_reproducibility(
                 plan=fixed_layout_plan,
                 num_datasets=n,
                 seed=run_seed,
+                batch_size=fixed_layout_batch_size,
             )
         )
     else:
@@ -374,6 +378,22 @@ def _sample_benchmark_fixed_layout_plan(
         config,
         seed=offset_seed32(config.seed, FIXED_LAYOUT_PLAN_SEED_OFFSET),
         device=requested_device,
+    )
+
+
+def _resolve_benchmark_fixed_layout_batch_size(
+    *,
+    plan: FixedLayoutPlan | None,
+    num_datasets: int,
+) -> int | None:
+    """Pin one fixed-layout chunk size for benchmark stability."""
+
+    if plan is None:
+        return None
+    return _resolve_fixed_layout_batch_size(
+        plan,
+        num_datasets=max(1, int(num_datasets)),
+        batch_size=None,
     )
 
 
@@ -574,6 +594,10 @@ def run_preset_benchmark(
         hardware_backend=hw.backend,
         num_datasets=num_datasets,
     )
+    fixed_layout_batch_size = _resolve_benchmark_fixed_layout_batch_size(
+        plan=fixed_layout_plan,
+        num_datasets=num_datasets,
+    )
 
     def _build_throughput_on_bundle_callback(
         *,
@@ -622,6 +646,7 @@ def run_preset_benchmark(
     }
     if fixed_layout_plan is not None:
         throughput_kwargs["fixed_layout_plan"] = fixed_layout_plan
+        throughput_kwargs["fixed_layout_batch_size"] = fixed_layout_batch_size
     result = run_throughput_benchmark(generation_config, **throughput_kwargs)
     sampled_bundles = stage_sample_collector.bundles
     stage_sample_datasets = len(sampled_bundles)
@@ -756,6 +781,7 @@ def run_preset_benchmark(
         }
         if fixed_layout_plan is not None:
             reproducibility_kwargs["fixed_layout_plan"] = fixed_layout_plan
+            reproducibility_kwargs["fixed_layout_batch_size"] = fixed_layout_batch_size
         result.update(_collect_reproducibility(generation_config, **reproducibility_kwargs))
 
     if include_micro:
@@ -777,6 +803,10 @@ def run_preset_benchmark(
             config=baseline_config,
             requested_device=requested_device,
             hardware_backend=hw.backend,
+            num_datasets=num_datasets,
+        )
+        baseline_fixed_layout_batch_size = _resolve_benchmark_fixed_layout_batch_size(
+            plan=baseline_fixed_layout_plan,
             num_datasets=num_datasets,
         )
         missingness_baseline_diagnostics_aggregator: CoverageAggregator | None = None
@@ -812,6 +842,7 @@ def run_preset_benchmark(
         }
         if baseline_fixed_layout_plan is not None:
             baseline_throughput_kwargs["fixed_layout_plan"] = baseline_fixed_layout_plan
+            baseline_throughput_kwargs["fixed_layout_batch_size"] = baseline_fixed_layout_batch_size
         baseline_throughput = run_throughput_benchmark(
             baseline_config, **baseline_throughput_kwargs
         )
@@ -879,6 +910,10 @@ def run_preset_benchmark(
             hardware_backend=hw.backend,
             num_datasets=num_datasets,
         )
+        baseline_fixed_layout_batch_size = _resolve_benchmark_fixed_layout_batch_size(
+            plan=baseline_fixed_layout_plan,
+            num_datasets=num_datasets,
+        )
         shift_baseline_diagnostics_aggregator: CoverageAggregator | None = None
         if diagnostics_aggregator is not None:
             shift_baseline_diagnostics_aggregator = _build_diagnostics_aggregator(baseline_config)
@@ -911,6 +946,7 @@ def run_preset_benchmark(
         }
         if baseline_fixed_layout_plan is not None:
             baseline_throughput_kwargs["fixed_layout_plan"] = baseline_fixed_layout_plan
+            baseline_throughput_kwargs["fixed_layout_batch_size"] = baseline_fixed_layout_batch_size
         baseline_throughput = run_throughput_benchmark(
             baseline_config, **baseline_throughput_kwargs
         )
@@ -1071,6 +1107,10 @@ def run_preset_benchmark(
             hardware_backend=hw.backend,
             num_datasets=num_datasets,
         )
+        baseline_fixed_layout_batch_size = _resolve_benchmark_fixed_layout_batch_size(
+            plan=baseline_fixed_layout_plan,
+            num_datasets=num_datasets,
+        )
         noise_baseline_diagnostics_aggregator: CoverageAggregator | None = None
         if diagnostics_aggregator is not None:
             noise_baseline_diagnostics_aggregator = _build_diagnostics_aggregator(baseline_config)
@@ -1101,6 +1141,7 @@ def run_preset_benchmark(
         }
         if baseline_fixed_layout_plan is not None:
             baseline_throughput_kwargs["fixed_layout_plan"] = baseline_fixed_layout_plan
+            baseline_throughput_kwargs["fixed_layout_batch_size"] = baseline_fixed_layout_batch_size
         baseline_throughput = run_throughput_benchmark(
             baseline_config, **baseline_throughput_kwargs
         )
@@ -1175,6 +1216,7 @@ def run_preset_benchmark(
     }
     if fixed_layout_plan is not None:
         lineage_kwargs["fixed_layout_plan"] = fixed_layout_plan
+        lineage_kwargs["fixed_layout_batch_size"] = fixed_layout_batch_size
     result["lineage_guardrails"] = _collect_lineage_guardrails(generation_config, **lineage_kwargs)
 
     if (

@@ -822,6 +822,8 @@ def test_fixed_layout_plan_round_trips_via_dict() -> None:
     assert restored.node_plans == sampled.node_plans
     assert restored.compatibility_snapshot == sampled.compatibility_snapshot
     assert restored.plan_schema_version == sampled.plan_schema_version
+    assert restored.plan_schema_version == 3
+    assert restored.execution_contract == "chunk_batched_v1"
 
 
 def test_generate_batch_fixed_layout_iter_matches_materialized_ordering() -> None:
@@ -839,12 +841,12 @@ def test_generate_batch_fixed_layout_iter_matches_materialized_ordering() -> Non
         assert b.metadata["layout_mode"] == "fixed"
 
 
-def test_generate_batch_fixed_layout_is_batch_size_independent() -> None:
+def test_generate_batch_fixed_layout_is_deterministic_for_same_batch_size() -> None:
     cfg = _tiny_regression_config()
     plan = sample_fixed_layout(cfg, seed=78, device="cpu")
 
     batch_a = generate_batch_fixed_layout(cfg, plan=plan, num_datasets=3, seed=801, batch_size=1)
-    batch_b = generate_batch_fixed_layout(cfg, plan=plan, num_datasets=3, seed=801, batch_size=2)
+    batch_b = generate_batch_fixed_layout(cfg, plan=plan, num_datasets=3, seed=801, batch_size=1)
 
     assert len(batch_a) == len(batch_b)
     for left, right in zip(batch_a, batch_b, strict=True):
@@ -854,6 +856,8 @@ def test_generate_batch_fixed_layout_is_batch_size_independent() -> None:
         np.testing.assert_allclose(np.asarray(left.y_test), np.asarray(right.y_test), atol=1e-6)
         assert left.metadata["seed"] == right.metadata["seed"]
         assert left.metadata["layout_plan_signature"] == right.metadata["layout_plan_signature"]
+        assert left.metadata["layout_execution_contract"] == "chunk_batched_v1"
+        assert left.metadata["layout_plan_schema_version"] == 3
 
 
 def test_generate_batch_fixed_layout_enforces_layout_reuse() -> None:
@@ -871,6 +875,8 @@ def test_generate_batch_fixed_layout_enforces_layout_reuse() -> None:
         assert int(bundle.metadata["layout_plan_seed"]) == plan.plan_seed
         assert str(bundle.metadata["layout_signature"]) == layout_signature
         assert str(bundle.metadata["layout_plan_signature"]) == str(plan.plan_signature)
+        assert int(bundle.metadata["layout_plan_schema_version"]) == 3
+        assert str(bundle.metadata["layout_execution_contract"]) == "chunk_batched_v1"
         assert int(bundle.metadata["n_features"]) == n_features
         assert list(bundle.feature_types) == feature_types
         assert (

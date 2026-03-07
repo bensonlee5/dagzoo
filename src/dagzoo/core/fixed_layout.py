@@ -12,9 +12,11 @@ import torch
 
 from dagzoo.config import GeneratorConfig, dataset_rows_is_variable
 from dagzoo.core.fixed_layout_batched import (
+    _FIXED_LAYOUT_EXECUTION_CONTRACT,
     build_fixed_layout_execution_plans,
     fixed_layout_plan_signature,
     generate_fixed_layout_graph_batch,
+    normalize_fixed_layout_node_plans,
 )
 from dagzoo.core.generation_context import (
     _attempt_seed,
@@ -32,7 +34,7 @@ from dagzoo.rng import SeedManager
 from dagzoo.types import DatasetBundle
 
 _FIXED_LAYOUT_PLAN_SCHEMA_NAME = "dagzoo_fixed_layout_plan"
-_FIXED_LAYOUT_PLAN_SCHEMA_VERSION = 2
+_FIXED_LAYOUT_PLAN_SCHEMA_VERSION = 3
 _FIXED_LAYOUT_TARGET_CELLS = 4_000_000
 
 
@@ -50,6 +52,7 @@ class FixedLayoutPlan:
     compatibility_snapshot: dict[str, Any]
     node_plans: list[dict[str, Any]] | None = None
     plan_signature: str | None = None
+    execution_contract: str = _FIXED_LAYOUT_EXECUTION_CONTRACT
     plan_schema_version: int = _FIXED_LAYOUT_PLAN_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:
@@ -68,6 +71,7 @@ class FixedLayoutPlan:
             "compatibility_snapshot": dict(self.compatibility_snapshot),
             "node_plans": list(self.node_plans or []),
             "plan_signature": None if self.plan_signature is None else str(self.plan_signature),
+            "execution_contract": str(self.execution_contract),
         }
 
     @classmethod
@@ -110,6 +114,9 @@ class FixedLayoutPlan:
             node_plans=node_plans,
             plan_signature=(
                 None if data.get("plan_signature") is None else str(data["plan_signature"])
+            ),
+            execution_contract=str(
+                data.get("execution_contract", _FIXED_LAYOUT_EXECUTION_CONTRACT)
             ),
             plan_schema_version=int(schema_version),
         )
@@ -274,6 +281,7 @@ def sample_fixed_layout(
         ),
         node_plans=node_plans,
         plan_signature=fixed_layout_plan_signature(node_plans),
+        execution_contract=_FIXED_LAYOUT_EXECUTION_CONTRACT,
     )
 
 
@@ -281,6 +289,8 @@ def _annotate_fixed_layout_metadata(bundle: DatasetBundle, *, plan: FixedLayoutP
     bundle.metadata["layout_mode"] = "fixed"
     bundle.metadata["layout_plan_seed"] = int(plan.plan_seed)
     bundle.metadata["layout_signature"] = str(plan.layout_signature)
+    bundle.metadata["layout_plan_schema_version"] = int(plan.plan_schema_version)
+    bundle.metadata["layout_execution_contract"] = str(plan.execution_contract)
     if plan.plan_signature is not None:
         bundle.metadata["layout_plan_signature"] = str(plan.plan_signature)
 
@@ -337,7 +347,8 @@ def _validate_fixed_layout_plan_compatibility(
         raise ValueError(
             "Fixed-layout plan integrity mismatch: node_plans must be a non-empty list."
         )
-    computed_plan_signature = fixed_layout_plan_signature(plan.node_plans)
+    normalized_node_plans = normalize_fixed_layout_node_plans(plan.node_plans)
+    computed_plan_signature = fixed_layout_plan_signature(normalized_node_plans)
     if plan.plan_signature is None or str(plan.plan_signature) != computed_plan_signature:
         raise ValueError(
             "Fixed-layout plan integrity mismatch: plan_signature does not match node_plans."

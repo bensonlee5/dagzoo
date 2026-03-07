@@ -135,6 +135,7 @@ def _stage_lineage_trial_bundles(
     seed: int,
     device: str | None,
     fixed_layout_plan: FixedLayoutPlan | None,
+    fixed_layout_batch_size: int | None,
     baseline_stage_dir: Path,
     current_stage_dir: Path,
 ) -> tuple[int, int]:
@@ -150,6 +151,7 @@ def _stage_lineage_trial_bundles(
             plan=fixed_layout_plan,
             num_datasets=sample_n,
             seed=seed,
+            batch_size=fixed_layout_batch_size,
         )
     else:
         generator = (
@@ -303,6 +305,7 @@ def _collect_lineage_guardrails(
     num_datasets: int,
     device: str | None,
     fixed_layout_plan: FixedLayoutPlan | None = None,
+    fixed_layout_batch_size: int | None = None,
     warn_threshold_pct: float,
     fail_threshold_pct: float,
 ) -> dict[str, Any]:
@@ -323,6 +326,7 @@ def _collect_lineage_guardrails(
                 seed=sample_seed,
                 device=device,
                 fixed_layout_plan=fixed_layout_plan,
+                fixed_layout_batch_size=fixed_layout_batch_size,
                 baseline_stage_dir=baseline_stage_dir,
                 current_stage_dir=current_stage_dir,
             )

@@ -96,34 +96,36 @@ Each line contains:
 
 ### Top-level keys
 
-| Key                      | Type        | Description                                                                                        |
-| ------------------------ | ----------- | -------------------------------------------------------------------------------------------------- |
-| `backend`                | str         | Always `"torch"`                                                                                   |
-| `device`                 | str         | Compute device (e.g., `"cpu"`, `"cuda"`)                                                           |
-| `requested_device`       | str         | Requested runtime device after CLI/config normalization (for example `auto`, `cpu`, `cuda`, `mps`) |
-| `resolved_device`        | str         | Runtime backend selected from the requested device for generation                                  |
-| `device_fallback_reason` | str or null | Runtime fallback reason when execution backend is rewritten after resolution; `null` otherwise     |
-| `compute_backend`        | str         | Implementation variant identifier                                                                  |
-| `n_features`             | int         | Number of features                                                                                 |
-| `n_categorical_features` | int         | Number of categorical features                                                                     |
-| `n_classes`              | int or null | Realized class count in emitted labels (null for regression)                                       |
-| `graph_nodes`            | int         | Number of nodes in the DAG                                                                         |
-| `graph_edges`            | int         | Number of edges in the DAG                                                                         |
-| `graph_depth_nodes`      | int         | Longest path length in the DAG                                                                     |
-| `graph_edge_density`     | float       | Edge count / max possible edges                                                                    |
-| `seed`                   | int         | Base seed for this dataset                                                                         |
-| `attempt_used`           | int         | Generation attempt index (0-based)                                                                 |
-| `lineage`                | object      | DAG lineage record (see Lineage below)                                                             |
-| `shift`                  | object      | Resolved shift settings and realized observability signals                                         |
-| `noise_distribution`     | object      | Resolved noise-family selection and effective sampling params                                      |
-| `config`                 | object      | Full serialized generator configuration                                                            |
-| `filter`                 | object      | Filter results (see below)                                                                         |
-| `class_structure`        | object      | Present only for classification (see below)                                                        |
-| `missingness`            | object      | Present only when missingness is enabled                                                           |
-| `layout_mode`            | str         | Optional layout mode metadata (`"fixed"` for fixed-layout API)                                     |
-| `layout_plan_seed`       | int         | Optional fixed-layout plan seed                                                                    |
-| `layout_signature`       | str         | Optional deterministic fixed-layout fingerprint                                                    |
-| `layout_plan_signature`  | str         | Optional deterministic fingerprint for the frozen fixed-layout execution plan                      |
+| Key                          | Type        | Description                                                                                        |
+| ---------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| `backend`                    | str         | Always `"torch"`                                                                                   |
+| `device`                     | str         | Compute device (e.g., `"cpu"`, `"cuda"`)                                                           |
+| `requested_device`           | str         | Requested runtime device after CLI/config normalization (for example `auto`, `cpu`, `cuda`, `mps`) |
+| `resolved_device`            | str         | Runtime backend selected from the requested device for generation                                  |
+| `device_fallback_reason`     | str or null | Runtime fallback reason when execution backend is rewritten after resolution; `null` otherwise     |
+| `compute_backend`            | str         | Implementation variant identifier                                                                  |
+| `n_features`                 | int         | Number of features                                                                                 |
+| `n_categorical_features`     | int         | Number of categorical features                                                                     |
+| `n_classes`                  | int or null | Realized class count in emitted labels (null for regression)                                       |
+| `graph_nodes`                | int         | Number of nodes in the DAG                                                                         |
+| `graph_edges`                | int         | Number of edges in the DAG                                                                         |
+| `graph_depth_nodes`          | int         | Longest path length in the DAG                                                                     |
+| `graph_edge_density`         | float       | Edge count / max possible edges                                                                    |
+| `seed`                       | int         | Base seed for this dataset                                                                         |
+| `attempt_used`               | int         | Generation attempt index (0-based)                                                                 |
+| `lineage`                    | object      | DAG lineage record (see Lineage below)                                                             |
+| `shift`                      | object      | Resolved shift settings and realized observability signals                                         |
+| `noise_distribution`         | object      | Resolved noise-family selection and effective sampling params                                      |
+| `config`                     | object      | Full serialized generator configuration                                                            |
+| `filter`                     | object      | Filter results (see below)                                                                         |
+| `class_structure`            | object      | Present only for classification (see below)                                                        |
+| `missingness`                | object      | Present only when missingness is enabled                                                           |
+| `layout_mode`                | str         | Optional layout mode metadata (`"fixed"` for fixed-layout API)                                     |
+| `layout_plan_seed`           | int         | Optional fixed-layout plan seed                                                                    |
+| `layout_signature`           | str         | Optional deterministic fixed-layout fingerprint                                                    |
+| `layout_plan_signature`      | str         | Optional deterministic fingerprint for the frozen fixed-layout execution plan                      |
+| `layout_plan_schema_version` | int         | Optional fixed-layout plan schema version used to sample the shared plan                           |
+| `layout_execution_contract`  | str         | Optional fixed-layout execution contract for deterministic replay                                  |
 
 ### Shift sub-object
 
@@ -195,16 +197,21 @@ Present only for outputs emitted by fixed-layout batch APIs. These bundles
 share one sampled layout and preserve emitted column alignment (feature count,
 column order, and lineage feature-to-node mapping).
 
-| Key                     | Type | Description                                                   |
-| ----------------------- | ---- | ------------------------------------------------------------- |
-| `layout_mode`           | str  | `"fixed"`                                                     |
-| `layout_plan_seed`      | int  | Seed used to sample the shared fixed-layout plan              |
-| `layout_signature`      | str  | Stable fingerprint for the shared sampled layout              |
-| `layout_plan_signature` | str  | Stable fingerprint for the frozen node execution plan payload |
+| Key                          | Type | Description                                                   |
+| ---------------------------- | ---- | ------------------------------------------------------------- |
+| `layout_mode`                | str  | `"fixed"`                                                     |
+| `layout_plan_seed`           | int  | Seed used to sample the shared fixed-layout plan              |
+| `layout_signature`           | str  | Stable fingerprint for the shared sampled layout              |
+| `layout_plan_signature`      | str  | Stable fingerprint for the frozen node execution plan payload |
+| `layout_plan_schema_version` | int  | Serialized fixed-layout plan schema version                   |
+| `layout_execution_contract`  | str  | Fixed-layout execution contract (`chunk_batched_v1`)          |
 
 Fixed-layout APIs validate that the provided `config` remains compatible with
 the sampled plan before generation. This prevents plan-driven emitted tensors
 from disagreeing with `metadata.config` on layout-driving fields.
+Under `chunk_batched_v1`, fixed-layout outputs are deterministic for the same
+plan, run seed, and fixed-layout batch size; changing the batch size may change
+the emitted values.
 
 ### Missingness sub-object (optional)
 

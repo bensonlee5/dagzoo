@@ -134,10 +134,11 @@ def test_run_benchmark_suite_builtin_cpu_uses_fixed_layout_batched(
     )
     monkeypatch.setattr(
         "dagzoo.bench.suite.run_throughput_benchmark",
-        lambda config, *, num_datasets, warmup_datasets=10, device=None, fixed_layout_plan=None, on_bundle=None: (
+        lambda config, *, num_datasets, warmup_datasets=10, device=None, fixed_layout_plan=None, fixed_layout_batch_size=None, on_bundle=None: (
             captured.update(
                 {
                     "fixed_layout_plan": fixed_layout_plan,
+                    "fixed_layout_batch_size": fixed_layout_batch_size,
                     "device": device,
                     "num_datasets": num_datasets,
                 }
@@ -188,6 +189,7 @@ def test_run_benchmark_suite_builtin_cpu_uses_fixed_layout_batched(
     result = summary["preset_results"][0]
     assert result["generation_mode"] == "fixed_batched"
     assert captured["fixed_layout_plan"] is sampled_plan
+    assert captured["fixed_layout_batch_size"] is not None
 
 
 def test_resolve_preset_run_specs_expands_builtin_cpu_rows() -> None:

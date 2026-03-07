@@ -248,7 +248,8 @@ def test_fixed_layout_sample_cli_writes_plan_artifact(tmp_path: Path) -> None:
     assert code == 0
     payload = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
     assert payload["schema_name"] == "dagzoo_fixed_layout_plan"
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
+    assert payload["execution_contract"] == "chunk_batched_v1"
     assert isinstance(payload["node_plans"], list)
     assert payload["plan_signature"]
 

@@ -127,9 +127,12 @@ dagzoo fixed-layout generate \
   --out data/fixed_layout_run
 ```
 
-Saved plan artifacts now include frozen node execution plans and a
-`plan_signature`, so fixed-layout generation is deterministic across internal
-microbatch sizes as long as the plan and run seed stay the same.
+Saved plan artifacts now include frozen node execution plans, an
+`execution_contract`, and a `plan_signature`. Under the current
+`chunk_batched_v1` contract, fixed-layout generation is deterministic for the
+same `plan + run seed + batch_size`, but outputs may change if you change the
+fixed-layout batch size. Built-in CPU benchmarks pin one internal fixed-layout
+batch size per preset run so those benchmark artifacts stay stable.
 
 ______________________________________________________________________
 

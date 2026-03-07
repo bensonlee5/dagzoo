@@ -164,7 +164,9 @@ Default `generate_batch(_iter)` behavior remains layout-dynamic.
   columns (feature count/order and lineage mapping), so index-based downstream
   consumers can safely stack bundles.
 - **Deterministic reproducibility** — one plan seed yields one stable layout
-  signature, while dataset seeds still vary value realizations.
+  signature, while dataset seeds still vary value realizations. The current
+  fixed-layout execution contract is `chunk_batched_v1`, so emitted values are
+  deterministic for the same `plan + seed + batch_size`.
 
 ### Alternatives considered
 

@@ -48,6 +48,7 @@ def _consume_generation(
     seed: int,
     device: str | None,
     fixed_layout_plan: FixedLayoutPlan | None = None,
+    fixed_layout_batch_size: int | None = None,
     on_bundle: Callable[[DatasetBundle], object] | None = None,
 ) -> None:
     """Run generation for ``num_datasets`` items while discarding outputs."""
@@ -58,6 +59,8 @@ def _consume_generation(
     }
     if fixed_layout_plan is not None:
         generator_kwargs["plan"] = fixed_layout_plan
+        if fixed_layout_batch_size is not None:
+            generator_kwargs["batch_size"] = int(fixed_layout_batch_size)
     else:
         generator_kwargs["device"] = device
 
@@ -73,6 +76,7 @@ def run_throughput_benchmark(
     warmup_datasets: int = 10,
     device: str | None = None,
     fixed_layout_plan: FixedLayoutPlan | None = None,
+    fixed_layout_batch_size: int | None = None,
     on_bundle: Callable[[DatasetBundle], object] | None = None,
 ) -> dict[str, Any]:
     """Measure end-to-end generation throughput for a benchmark preset."""
@@ -90,6 +94,7 @@ def run_throughput_benchmark(
             seed=offset_seed32(config.seed, THROUGHPUT_WARMUP_SEED_OFFSET),
             device=device,
             fixed_layout_plan=fixed_layout_plan,
+            fixed_layout_batch_size=fixed_layout_batch_size,
         )
 
     start = time.perf_counter()
@@ -100,6 +105,7 @@ def run_throughput_benchmark(
         seed=offset_seed32(config.seed, THROUGHPUT_MEASURE_SEED_OFFSET),
         device=device,
         fixed_layout_plan=fixed_layout_plan,
+        fixed_layout_batch_size=fixed_layout_batch_size,
         on_bundle=on_bundle,
     )
     elapsed = time.perf_counter() - start

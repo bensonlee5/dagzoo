@@ -10,6 +10,26 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.5.8] - 2026-03-07
+
+### Changed
+
+- Fixed-layout raw generation now uses a chunk-scoped batched RNG contract and
+  grouped converter execution in the fixed-layout batched engine.
+- Built-in CPU benchmark fixed-layout runs now pin one internal fixed-layout
+  batch size per preset run so throughput, reproducibility, and lineage
+  guardrail generation use the same chunking contract.
+- Emitted fixed-layout bundles now include `metadata.layout_plan_schema_version`
+  and `metadata.layout_execution_contract`.
+
+### Breaking
+
+- **BREAKING:** Fixed-layout plan artifacts now serialize `schema_version: 3`
+  and `execution_contract: "chunk_batched_v1"`.
+- **BREAKING:** Fixed-layout outputs are no longer batch-size independent. The
+  current contract is deterministic for the same `plan + run seed + batch_size`,
+  but changing `batch_size` may change the emitted dataset values.
+
 ## [0.5.7] - 2026-03-07
 
 ### Added
