@@ -10,6 +10,35 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.6.0] - 2026-03-07
+
+### Changed
+
+- `generate_one`, `generate_batch`, and `generate_batch_iter` now sample one
+  internal fixed-layout plan per run and execute generation through the
+  fixed-layout engine instead of the old per-dataset dynamic layout path.
+- Variable `dataset.rows` modes now resolve once per run. All datasets emitted
+  from the same `generate` run share the same realized `n_train` / `n_test`
+  split, and `effective_config.yaml` records that realized split.
+- Single-worker benchmark generation now inherits the same canonical
+  fixed-layout generation path as `dagzoo generate`.
+- `dagzoo generate` and `dagzoo benchmark` now reject `runtime.worker_count > 1`
+  while parallel generation is temporarily removed from the active product
+  surface during fixed-layout batch optimization work.
+
+### Breaking
+
+- **BREAKING:** Public generation no longer samples a fresh layout per dataset.
+  One run now samples one fixed-layout plan and all emitted datasets in that run
+  share its layout lineage and execution-plan provenance.
+- **BREAKING:** `dataset.rows` `range` / `choices` no longer vary per dataset
+  within a run. They now realize once per run.
+- **BREAKING:** Generated bundles from the canonical `generate_*` APIs now carry
+  fixed-layout provenance metadata (`layout_mode`, `layout_signature`,
+  `layout_plan_seed`, `layout_plan_signature`, and execution-contract fields).
+- **BREAKING:** `runtime.worker_count > 1` is unsupported again for both
+  `dagzoo generate` and `dagzoo benchmark`.
+
 ## [0.5.7] - 2026-03-07
 
 ### Added

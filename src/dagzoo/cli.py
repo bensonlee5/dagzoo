@@ -28,7 +28,7 @@ from dagzoo.config import (
     MISSINGNESS_MECHANISM_NONE,
     normalize_missing_mechanism,
 )
-from dagzoo.core.dataset import generate_batch_iter, generate_worker_batch_iter
+from dagzoo.core.dataset import generate_batch_iter
 from dagzoo.core.parallel_generation import ParallelGenerationConfigError
 from dagzoo.core.config_resolution import (
     resolve_generate_config,
@@ -37,6 +37,7 @@ from dagzoo.core.config_resolution import (
 from dagzoo.core.fixed_layout import (
     FixedLayoutPlan,
     generate_batch_fixed_layout_iter,
+    realize_generation_config_for_run,
     sample_fixed_layout,
 )
 from dagzoo.diagnostics import (
@@ -784,23 +785,23 @@ def _raise_if_worker_partitioning_unsupported(
         return
     _raise_usage_error(
         f"runtime.worker_count > 1 is not supported for dagzoo {command}. "
-        "Worker partitioning currently applies only to `dagzoo generate --no-dataset-write`."
+        "Multi-worker generation is temporarily disabled while canonical fixed-layout "
+        "batch optimization is in progress."
     )
 
 
 def _raise_if_benchmark_multi_worker_preflight_invalid(
     config: GeneratorConfig,
 ) -> None:
-    """Reject benchmark worker configs that cannot be orchestrated locally."""
+    """Reject benchmark worker configs while local orchestration is disabled."""
 
     if int(config.runtime.worker_count) <= 1:
         return
-    if int(config.runtime.worker_index) != 0:
-        _raise_usage_error(
-            "dagzoo benchmark local multi-worker mode requires runtime.worker_index == 0. "
-            f"Got worker_index={int(config.runtime.worker_index)} with "
-            f"worker_count={int(config.runtime.worker_count)}."
-        )
+    _raise_usage_error(
+        "runtime.worker_count > 1 is not supported for dagzoo benchmark. "
+        "Local benchmark parallel generation is temporarily disabled while canonical "
+        "fixed-layout batch optimization is in progress."
+    )
 
 
 def _normalized_benchmark_requested_device(
@@ -853,31 +854,27 @@ def _run_generate(args: argparse.Namespace) -> int:
     except ValueError as exc:
         _raise_usage_error(str(exc))
 
-    config = resolved.config
+    seed = args.seed if args.seed is not None else resolved.config.seed
+    config, run_seed, requested_device, _resolved_device = realize_generation_config_for_run(
+        resolved.config,
+        seed=seed,
+        device=resolved.requested_device,
+    )
     if bool(config.filter.enabled):
         _raise_usage_error(
             "Inline filtering has been removed from generate. Set filter.enabled=false and run "
             "`dagzoo filter --in <shard_dir> --out <out_dir>` after generation."
         )
-    if int(config.runtime.worker_count) > 1 and not bool(args.no_dataset_write):
-        _raise_usage_error(
-            "runtime.worker_count > 1 currently supports generate --no-dataset-write only. "
-            "Parallel shard-writing coordination is not implemented yet; "
-            "set runtime.worker_count=1 for write-enabled runs."
-        )
+    _raise_if_worker_partitioning_unsupported(config, command="generate")
 
     hw = resolved.hardware
     trace_payload = serialize_resolution_events(resolved.trace_events)
-
-    seed = args.seed if args.seed is not None else config.seed
     out_dir = args.out or config.output.out_dir
     effective_config_root = out_dir
     if effective_config_root is None:
         effective_config_root = (
             args.diagnostics_out_dir or config.diagnostics.out_dir or "effective_config_artifacts"
         )
-    if int(config.runtime.worker_count) > 1:
-        effective_config_root = str(Path(effective_config_root) / _worker_artifact_dir(config))
     if args.print_effective_config:
         _print_effective_config(config, header="Effective config:")
 
@@ -902,8 +899,6 @@ def _run_generate(args: argparse.Namespace) -> int:
         if diagnostics_root is None:
             diagnostics_root = "diagnostics_artifacts"
         diagnostics_out_dir = Path(diagnostics_root)
-        if int(config.runtime.worker_count) > 1:
-            diagnostics_out_dir = diagnostics_out_dir / _worker_artifact_dir(config)
         diagnostics_aggregator = CoverageAggregator(
             build_diagnostics_aggregation_config(config.diagnostics)
         )
@@ -913,14 +908,11 @@ def _run_generate(args: argparse.Namespace) -> int:
         f"hardware_policy={args.hardware_policy}"
     )
 
-    stream_factory = (
-        generate_worker_batch_iter if int(config.runtime.worker_count) > 1 else generate_batch_iter
-    )
-    stream: Iterator[Any] = stream_factory(
+    stream: Iterator[Any] = generate_batch_iter(
         config,
         num_datasets=args.num_datasets,
-        seed=seed,
-        device=resolved.requested_device,
+        seed=run_seed,
+        device=requested_device,
     )
     if diagnostics_aggregator is not None:
         base_stream = stream
@@ -1278,6 +1270,7 @@ def _run_benchmark(args: argparse.Namespace) -> int:
     diagnostics_root_dir = _benchmark_diagnostics_root_dir(args, artifact_dir=artifact_dir)
 
     default_cfg = _default_benchmark_config(args)
+    _raise_if_benchmark_multi_worker_preflight_invalid(default_cfg)
     suite = (args.suite or default_cfg.benchmark.suite).strip().lower()
     warn_pct = (
         float(args.warn_threshold_pct)
@@ -1299,11 +1292,6 @@ def _run_benchmark(args: argparse.Namespace) -> int:
             "benchmark --device cannot be combined with multiple --preset values; "
             "the override would be ambiguous."
         )
-    _raise_if_benchmark_multi_worker_config_is_ignored(
-        default_cfg,
-        requested_preset_keys=args.preset,
-        config_path=args.config,
-    )
     effective_device_override = args.device if args.device and len(preset_specs) == 1 else None
     for spec in preset_specs:
         normalized_requested_device = _normalized_benchmark_requested_device(

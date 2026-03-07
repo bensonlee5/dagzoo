@@ -191,11 +191,12 @@ Present only for classification datasets.
 | `min_label`              | int or null | Minimum emitted class label                        |
 | `max_label`              | int or null | Maximum emitted class label                        |
 
-### Fixed-layout metadata (optional)
+### Fixed-layout metadata
 
-Present only for outputs emitted by fixed-layout batch APIs. These bundles
-share one sampled layout and preserve emitted column alignment (feature count,
-column order, and lineage feature-to-node mapping).
+Present for all canonical generation outputs. These bundles share one sampled
+layout per run and preserve emitted column alignment (feature count, column
+order, and lineage feature-to-node mapping) within that run. Explicit
+fixed-layout replay uses the same metadata contract.
 
 | Key                          | Type | Description                                                   |
 | ---------------------------- | ---- | ------------------------------------------------------------- |
@@ -206,9 +207,10 @@ column order, and lineage feature-to-node mapping).
 | `layout_plan_schema_version` | int  | Serialized fixed-layout plan schema version                   |
 | `layout_execution_contract`  | str  | Fixed-layout execution contract (`chunk_batched_v1`)          |
 
-Fixed-layout APIs validate that the provided `config` remains compatible with
-the sampled plan before generation. This prevents plan-driven emitted tensors
-from disagreeing with `metadata.config` on layout-driving fields.
+Explicit fixed-layout replay validates that the provided `config` remains
+compatible with the sampled plan before generation. This prevents plan-driven
+emitted tensors from disagreeing with `metadata.config` on layout-driving
+fields.
 Under `chunk_batched_v1`, fixed-layout outputs are deterministic for the same
 plan, run seed, and fixed-layout batch size; changing the batch size may change
 the emitted values. The plan's stored device fields are provenance; replay uses
@@ -329,12 +331,12 @@ protected by a SHA-256 checksum recorded in the metadata.
 
 **Postprocessing invariants**:
 
-- Standard generation (`generate_one`, `generate_batch`, `generate_batch_iter`)
-  removes constant columns and may permute feature columns during postprocess.
-- Fixed-layout generation (`generate_batch_fixed_layout`,
-  `generate_batch_fixed_layout_iter`) preserves emitted feature schema across
-  the batch: constant-column removal and feature-column permutation are
-  disabled.
+- Canonical generation (`generate_one`, `generate_batch`, `generate_batch_iter`)
+  is fixed-layout-backed and preserves emitted feature schema across the run:
+  constant-column removal and feature-column permutation are disabled.
+- Explicit fixed-layout generation (`generate_batch_fixed_layout`,
+  `generate_batch_fixed_layout_iter`) preserves the same emitted-schema contract
+  for saved-plan replay.
 - Numeric features are clipped and standardized (approximately zero mean,
   unit variance).
 - Classification target classes are randomly permuted (label indices carry

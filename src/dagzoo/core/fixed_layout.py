@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterator
 from dataclasses import dataclass
 import hashlib
@@ -10,7 +11,13 @@ from typing import Any, cast
 
 import torch
 
-from dagzoo.config import GeneratorConfig, dataset_rows_is_variable
+from dagzoo.config import (
+    DatasetRowsSpec,
+    GeneratorConfig,
+    dataset_rows_is_variable,
+    resolve_dataset_total_rows,
+)
+from dagzoo.core.constants import FIXED_LAYOUT_PLAN_SEED_OFFSET, ROWS_REALIZATION_SEED_OFFSET
 from dagzoo.core.fixed_layout_batched import (
     _FIXED_LAYOUT_EXECUTION_CONTRACT,
     build_fixed_layout_execution_plans,
@@ -30,7 +37,7 @@ from dagzoo.core.layout import _sample_layout
 from dagzoo.core.layout_types import FeatureType, LayoutPlan
 from dagzoo.core.noise_runtime import _noise_sampling_spec, _resolve_noise_runtime_selection
 from dagzoo.core.shift import resolve_shift_runtime_params
-from dagzoo.rng import SeedManager
+from dagzoo.rng import SeedManager, offset_seed32
 from dagzoo.types import DatasetBundle
 
 _FIXED_LAYOUT_PLAN_SCHEMA_NAME = "dagzoo_fixed_layout_plan"
@@ -133,6 +140,18 @@ class FixedLayoutPlan:
             execution_contract=execution_contract,
             plan_schema_version=int(schema_version),
         )
+
+
+@dataclass(slots=True)
+class CanonicalFixedLayoutRun:
+    """Prepared fixed-layout run context for canonical public generation."""
+
+    config: GeneratorConfig
+    plan: FixedLayoutPlan
+    run_seed: int
+    requested_device: str
+    resolved_device: str
+    batch_size: int
 
 
 _FIXED_LAYOUT_COMPAT_KEYS: tuple[str, ...] = (
@@ -261,35 +280,123 @@ def _resolve_fixed_layout_batch_size(
     return max(1, min(int(num_datasets), int(auto_batch)))
 
 
-def sample_fixed_layout(
+def realize_generation_config_for_run(
     config: GeneratorConfig,
     *,
     seed: int | None = None,
     device: str | None = None,
-) -> FixedLayoutPlan:
-    """Sample one reusable layout plan for fixed-layout batch generation."""
+) -> tuple[GeneratorConfig, int, str, str]:
+    """Resolve one canonical single-run config with rows fixed for the full run."""
 
     run_seed = _resolve_run_seed(config, seed)
-    _validate_fixed_layout_rows_mode(config)
     requested_device = (device or config.runtime.device or "auto").lower()
     resolved_device = _resolve_device(config, device)
-    manager = SeedManager(run_seed)
+
+    realized = copy.deepcopy(config)
+    rows_seed = offset_seed32(run_seed, ROWS_REALIZATION_SEED_OFFSET)
+    total_rows = resolve_dataset_total_rows(realized.dataset.rows, dataset_seed=rows_seed)
+    if total_rows is not None:
+        n_test = int(realized.dataset.n_test)
+        n_train = int(total_rows) - n_test
+        if n_train <= 0:
+            raise ValueError(
+                "Resolved rows split is invalid: total rows must be > dataset.n_test "
+                f"(total_rows={int(total_rows)}, n_test={n_test})."
+            )
+        realized.dataset.n_train = int(n_train)
+        realized.dataset.rows = DatasetRowsSpec(mode="fixed", value=int(total_rows))
+
+    return realized, int(run_seed), str(requested_device), str(resolved_device)
+
+
+def prepare_canonical_fixed_layout_run(
+    config: GeneratorConfig,
+    *,
+    num_datasets: int,
+    seed: int | None = None,
+    device: str | None = None,
+    batch_size: int | None = None,
+) -> CanonicalFixedLayoutRun:
+    """Prepare one internal fixed-layout run context for public generation APIs."""
+
+    if num_datasets < 0:
+        raise ValueError(f"num_datasets must be >= 0, got {num_datasets}")
+
+    realized_config, run_seed, requested_device, resolved_device = (
+        realize_generation_config_for_run(
+            config,
+            seed=seed,
+            device=device,
+        )
+    )
+    base_plan_seed = offset_seed32(run_seed, FIXED_LAYOUT_PLAN_SEED_OFFSET)
+    plan = sample_fixed_layout(
+        realized_config,
+        seed=base_plan_seed,
+        device=requested_device,
+    )
+    if str(realized_config.dataset.task) == "classification":
+        attempts = max(1, int(realized_config.filter.max_attempts))
+        for attempt in range(attempts):
+            if _fixed_layout_plan_supports_classification_replay(
+                realized_config,
+                plan=plan,
+                requested_device=requested_device,
+                validation_seed=run_seed,
+            ):
+                break
+            if attempt == attempts - 1:
+                raise ValueError(
+                    "Failed to prepare a replayable canonical fixed-layout classification run "
+                    f"after {attempts} attempts."
+                )
+            plan = sample_fixed_layout(
+                realized_config,
+                seed=_attempt_seed(base_plan_seed, attempt + 1),
+                device=requested_device,
+            )
+    effective_batch_size = _resolve_fixed_layout_batch_size(
+        plan,
+        num_datasets=max(1, int(num_datasets)),
+        batch_size=batch_size,
+    )
+    return CanonicalFixedLayoutRun(
+        config=realized_config,
+        plan=plan,
+        run_seed=int(run_seed),
+        requested_device=str(requested_device),
+        resolved_device=str(resolved_device),
+        batch_size=int(effective_batch_size),
+    )
+
+
+def _sample_fixed_layout_once(
+    config: GeneratorConfig,
+    *,
+    seed: int,
+    requested_device: str,
+    resolved_device: str,
+) -> FixedLayoutPlan:
+    """Sample one fixed-layout plan candidate without replay validation retries."""
+
+    _validate_fixed_layout_rows_mode(config)
+    manager = SeedManager(seed)
     layout_gen = manager.torch_rng("layout")
     layout = _sample_layout(config, layout_gen, "cpu")
-    n_train, n_test = _resolve_split_sizes(config, dataset_seed=run_seed)
+    n_train, n_test = _resolve_split_sizes(config, dataset_seed=seed)
     _validate_class_split_for_layout(config, layout=layout, n_train=n_train, n_test=n_test)
     shift_params = resolve_shift_runtime_params(config)
     node_plans = build_fixed_layout_execution_plans(
         config,
         layout,
-        plan_seed=run_seed,
+        plan_seed=seed,
         mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
     )
     return FixedLayoutPlan(
         layout=layout,
         requested_device=requested_device,
         resolved_device=resolved_device,
-        plan_seed=int(run_seed),
+        plan_seed=int(seed),
         n_train=int(n_train),
         n_test=int(n_test),
         layout_signature=_layout_signature(layout),
@@ -302,6 +409,78 @@ def sample_fixed_layout(
         node_plans=node_plans,
         plan_signature=fixed_layout_plan_signature(node_plans),
         execution_contract=_FIXED_LAYOUT_EXECUTION_CONTRACT,
+    )
+
+
+def _fixed_layout_plan_supports_classification_replay(
+    config: GeneratorConfig,
+    *,
+    plan: FixedLayoutPlan,
+    requested_device: str,
+    validation_seed: int,
+) -> bool:
+    """Return whether a classification plan can replay under the fixed-layout engine."""
+
+    try:
+        _ = next(
+            generate_batch_fixed_layout_iter(
+                config,
+                plan=plan,
+                num_datasets=1,
+                seed=validation_seed,
+                batch_size=1,
+                device=requested_device,
+            )
+        )
+    except ValueError as exc:
+        if "invalid_class_split" in str(exc):
+            return False
+        raise
+    return True
+
+
+def sample_fixed_layout(
+    config: GeneratorConfig,
+    *,
+    seed: int | None = None,
+    device: str | None = None,
+) -> FixedLayoutPlan:
+    """Sample one reusable layout plan for fixed-layout batch generation."""
+
+    run_seed = _resolve_run_seed(config, seed)
+    requested_device = (device or config.runtime.device or "auto").lower()
+    resolved_device = _resolve_device(config, device)
+    attempts = max(1, int(config.filter.max_attempts))
+    last_error = "unknown"
+
+    for attempt in range(attempts):
+        plan_seed = _attempt_seed(run_seed, attempt)
+        plan = _sample_fixed_layout_once(
+            config,
+            seed=plan_seed,
+            requested_device=requested_device,
+            resolved_device=resolved_device,
+        )
+        if str(config.dataset.task) != "classification":
+            return plan
+        valid = False
+        for validation_attempt in range(attempts):
+            validation_seed = _attempt_seed(plan_seed, validation_attempt)
+            if _fixed_layout_plan_supports_classification_replay(
+                config,
+                plan=plan,
+                requested_device=requested_device,
+                validation_seed=validation_seed,
+            ):
+                valid = True
+                break
+        if valid:
+            return plan
+        last_error = "invalid_class_split"
+
+    raise ValueError(
+        "Failed to sample a replayable fixed-layout classification plan after "
+        f"{attempts} attempts. Last reason: {last_error}."
     )
 
 

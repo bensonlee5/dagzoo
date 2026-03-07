@@ -93,7 +93,7 @@ def test_run_benchmark_suite_smoke_single_profile() -> None:
 
     result = summary["preset_results"][0]
     assert result["preset_key"] == "cpu_test"
-    assert result["generation_mode"] == "dynamic"
+    assert result["generation_mode"] == "fixed_batched"
     assert result["datasets_per_minute"] > 0
     assert result["generation_datasets_per_minute"] == pytest.approx(result["datasets_per_minute"])
     assert result["write_datasets_per_minute"] >= 0.0

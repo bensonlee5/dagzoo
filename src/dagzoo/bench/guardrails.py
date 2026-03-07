@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 import pickle
 import statistics
@@ -160,8 +161,13 @@ def _stage_lineage_trial_bundles(
             if effective_local_parallel_worker_count(int(config.runtime.worker_count), sample_n) > 1
             else generate_batch_iter
         )
+        generation_config = config
+        if generator is generate_batch_iter and int(config.runtime.worker_count) > 1:
+            generation_config = copy.deepcopy(config)
+            generation_config.runtime.worker_count = 1
+            generation_config.runtime.worker_index = 0
         bundle_iter = generator(
-            config,
+            generation_config,
             num_datasets=sample_n,
             seed=seed,
             device=device,

@@ -236,6 +236,17 @@ def _latency_sample_count(config: GeneratorConfig, suite: str, num_datasets: int
     return n
 
 
+def _serial_generation_config(config: GeneratorConfig) -> GeneratorConfig:
+    """Return a config copy normalized to one local worker for serial generation calls."""
+
+    if int(config.runtime.worker_count) <= 1 and int(config.runtime.worker_index) == 0:
+        return config
+    normalized = _copy_runtime_config(config)
+    normalized.runtime.worker_count = 1
+    normalized.runtime.worker_index = 0
+    return normalized
+
+
 def _collect_latency(
     config: GeneratorConfig,
     *,
@@ -246,6 +257,7 @@ def _collect_latency(
     """Collect per-dataset latency samples by repeatedly calling ``generate_one``."""
 
     manager = SeedManager(offset_seed32(config.seed, LATENCY_SEED_OFFSET))
+    serial_config = _serial_generation_config(config)
     samples: list[float] = []
     for i in range(max(1, num_samples)):
         seed = manager.child("latency", i)
@@ -260,7 +272,7 @@ def _collect_latency(
                 device=device,
             )[0]
         else:
-            _ = generate_one(config, seed=seed, device=device)
+            _ = generate_one(serial_config, seed=seed, device=device)
         samples.append(time.perf_counter() - start)
     return summarize_latencies(samples)
 
@@ -304,11 +316,16 @@ def _collect_reproducibility(
             if effective_local_parallel_worker_count(int(config.runtime.worker_count), n) > 1
             else generate_batch_iter
         )
+        generation_config = (
+            config
+            if generator is generate_parallel_batch_iter
+            else _serial_generation_config(config)
+        )
         sig_a = reproducibility_signature(
-            generator(config, num_datasets=n, seed=run_seed, device=device)
+            generator(generation_config, num_datasets=n, seed=run_seed, device=device)
         )
         sig_b = reproducibility_signature(
-            generator(config, num_datasets=n, seed=run_seed, device=device)
+            generator(generation_config, num_datasets=n, seed=run_seed, device=device)
         )
     return {
         "reproducibility_datasets": n,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import time
 from collections.abc import Callable
 from typing import Any
@@ -52,6 +53,11 @@ def _consume_generation(
     on_bundle: Callable[[DatasetBundle], object] | None = None,
 ) -> None:
     """Run generation for ``num_datasets`` items while discarding outputs."""
+
+    if generator is generate_batch_iter and int(config.runtime.worker_count) > 1:
+        config = copy.deepcopy(config)
+        config.runtime.worker_count = 1
+        config.runtime.worker_index = 0
 
     generator_kwargs: dict[str, Any] = {
         "num_datasets": num_datasets,
@@ -120,5 +126,9 @@ def run_throughput_benchmark(
         "datasets_per_second": dps,
         "datasets_per_minute": dpm,
         "slo_pass_100_datasets_per_min": dpm >= THROUGHPUT_SLO_DATASETS_PER_MINUTE,
-        "generation_mode": "fixed_batched" if fixed_layout_plan is not None else "dynamic",
+        "generation_mode": (
+            "fixed_batched"
+            if fixed_layout_plan is not None or generator is generate_batch_iter
+            else "dynamic"
+        ),
     }

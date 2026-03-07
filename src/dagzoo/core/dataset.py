@@ -11,10 +11,10 @@ from dagzoo.core.fixed_layout import (
     FixedLayoutPlan,
     generate_batch_fixed_layout,
     generate_batch_fixed_layout_iter,
+    prepare_canonical_fixed_layout_run,
     sample_fixed_layout,
 )
 from dagzoo.core.worker_partition import iter_worker_dataset_seeds
-from dagzoo.rng import SeedManager
 from dagzoo.types import DatasetBundle
 
 __all__ = [
@@ -28,23 +28,31 @@ __all__ = [
 ]
 
 
+def _validate_public_generation_config(config: GeneratorConfig) -> None:
+    """Reject public generation configs that are intentionally unsupported."""
+
+    if bool(config.filter.enabled):
+        raise ValueError(
+            "Inline filtering has been removed from generate. Set filter.enabled=false and run "
+            "`dagzoo filter --in <shard_dir> --out <out_dir>` after generation."
+        )
+    if int(config.runtime.worker_count) > 1:
+        raise ValueError(
+            "runtime.worker_count > 1 is not supported for dagzoo generate. "
+            "Multi-worker generation is temporarily disabled while canonical fixed-layout "
+            "batch optimization is in progress."
+        )
+
+
 def generate_one(
     config: GeneratorConfig,
     *,
     seed: int | None = None,
     device: str | None = None,
 ) -> DatasetBundle:
-    """Generate one dataset bundle with deterministic per-dataset randomness."""
+    """Generate one dataset bundle using the canonical fixed-layout run model."""
 
-    run_seed = _generation_context._resolve_run_seed(config, seed)
-    requested_device = (device or config.runtime.device or "auto").lower()
-    resolved_device = _generation_context._resolve_device(config, device)
-    return _generation_engine._generate_one_seeded(
-        config,
-        seed=run_seed,
-        requested_device=requested_device,
-        resolved_device=resolved_device,
-    )
+    return next(generate_batch_iter(config, num_datasets=1, seed=seed, device=device))
 
 
 def generate_batch(
@@ -73,26 +81,28 @@ def generate_batch_iter(
     seed: int | None = None,
     device: str | None = None,
 ) -> Iterator[DatasetBundle]:
-    """Yield datasets lazily using deterministic per-dataset child seeds."""
+    """Yield datasets lazily using one fixed-layout plan sampled for the full run."""
 
     if num_datasets < 0:
         raise ValueError(f"num_datasets must be >= 0, got {num_datasets}")
     if num_datasets == 0:
         return
+    _validate_public_generation_config(config)
 
-    requested_device = (device or config.runtime.device or "auto").lower()
-    resolved_device = _generation_context._resolve_device(config, device)
-    run_seed = _generation_context._resolve_run_seed(config, seed)
-
-    manager = SeedManager(run_seed)
-    for dataset_index in range(num_datasets):
-        dataset_seed = manager.child("dataset", dataset_index)
-        yield _generation_engine._generate_one_seeded(
-            config,
-            seed=dataset_seed,
-            requested_device=requested_device,
-            resolved_device=resolved_device,
-        )
+    prepared = prepare_canonical_fixed_layout_run(
+        config,
+        num_datasets=num_datasets,
+        seed=seed,
+        device=device,
+    )
+    yield from generate_batch_fixed_layout_iter(
+        prepared.config,
+        plan=prepared.plan,
+        num_datasets=num_datasets,
+        seed=prepared.run_seed,
+        batch_size=prepared.batch_size,
+        device=prepared.requested_device,
+    )
 
 
 def generate_worker_batch_iter(

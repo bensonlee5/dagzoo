@@ -114,7 +114,7 @@ def test_dataset_seed_helpers_match_offset_seed32_formulas() -> None:
 
 
 def test_generate_one_shapes() -> None:
-    cfg = _tiny_config()
+    cfg = _tiny_regression_config()
     bundle = generate_one(cfg, seed=7, device="cpu")
     assert isinstance(bundle.X_train, torch.Tensor)
     assert bundle.X_train.shape[0] == cfg.dataset.n_train
@@ -124,7 +124,7 @@ def test_generate_one_shapes() -> None:
 
 
 def test_generate_one_uses_fixed_dataset_rows_and_updates_metadata_config_split() -> None:
-    cfg = _tiny_config()
+    cfg = _tiny_regression_config()
     cfg.dataset.rows = 1024  # type: ignore[assignment]
     cfg.dataset.n_test = 256
     cfg.dataset.n_train = 32
@@ -145,12 +145,28 @@ def test_generate_batch_rows_choices_are_seed_reproducible() -> None:
     batch_b = generate_batch(cfg, num_datasets=5, seed=19, device="cpu")
 
     allowed_train_sizes = {768, 1792, 3840}
+    assert {int(bundle.X_train.shape[0]) for bundle in batch_a} <= allowed_train_sizes
+    assert {int(bundle.X_train.shape[0]) for bundle in batch_b} <= allowed_train_sizes
+    assert {int(bundle.X_train.shape[0]) for bundle in batch_a} == {
+        int(batch_a[0].X_train.shape[0])
+    }
+    assert {int(bundle.X_train.shape[0]) for bundle in batch_b} == {
+        int(batch_b[0].X_train.shape[0])
+    }
     for bundle_a, bundle_b in zip(batch_a, batch_b, strict=True):
         assert int(bundle_a.X_train.shape[0]) in allowed_train_sizes
         assert int(bundle_b.X_train.shape[0]) in allowed_train_sizes
         assert int(bundle_a.X_train.shape[0]) == int(bundle_b.X_train.shape[0])
         assert int(bundle_a.X_test.shape[0]) == 256
         assert int(bundle_b.X_test.shape[0]) == 256
+        assert (
+            bundle_a.metadata["layout_plan_signature"]
+            == batch_a[0].metadata["layout_plan_signature"]
+        )
+        assert (
+            bundle_b.metadata["layout_plan_signature"]
+            == batch_b[0].metadata["layout_plan_signature"]
+        )
 
 
 def test_generate_one_emits_lineage_metadata_schema_fields() -> None:
@@ -478,19 +494,31 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
         target_node_assignment=2,
     )
 
-    monkeypatch.setattr(
-        "dagzoo.core.generation_engine._sample_layout",
-        lambda *_args, **_kwargs: layout,
-    )
+    monkeypatch.setattr("dagzoo.core.fixed_layout._sample_layout", lambda *_args, **_kwargs: layout)
 
-    def _stub_generate_graph_dataset_torch(_config, _layout, _seed, _device, *, n_rows, **_kwargs):
-        x = torch.arange(n_rows * 4, dtype=torch.float32).reshape(n_rows, 4)
-        y = torch.linspace(0.0, 1.0, n_rows, dtype=torch.float32)
-        return x, y, {"filter": {"enabled": False}}
+    def _stub_generate_fixed_layout_graph_batch(
+        _config,
+        _layout,
+        *,
+        node_plans,
+        dataset_seeds,
+        device,
+        noise_sigma_multiplier,
+        noise_spec,
+    ):
+        _ = node_plans
+        _ = dataset_seeds
+        _ = device
+        _ = noise_sigma_multiplier
+        _ = noise_spec
+        n_rows = int(cfg.dataset.n_train + cfg.dataset.n_test)
+        x = torch.arange(n_rows * 4, dtype=torch.float32).reshape(1, n_rows, 4)
+        y = torch.linspace(0.0, 1.0, n_rows, dtype=torch.float32).reshape(1, n_rows)
+        return x, y, [{"filter": {"enabled": False}}]
 
     monkeypatch.setattr(
-        "dagzoo.core.generation_engine._generate_graph_dataset_torch",
-        _stub_generate_graph_dataset_torch,
+        "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
+        _stub_generate_fixed_layout_graph_batch,
     )
 
     def _stub_postprocess_dataset(
@@ -507,7 +535,7 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
         preserve_feature_schema=False,
     ):
         assert return_feature_index_map is True
-        assert preserve_feature_schema is False
+        assert preserve_feature_schema is True
         index_map = [2, 0, 3]
         reordered_types = [feature_types[i] for i in index_map]
         return (
@@ -777,6 +805,21 @@ def test_generate_batch_iter_matches_batch_ordering() -> None:
     for a, b in zip(batch, streamed, strict=True):
         np.testing.assert_allclose(np.asarray(a.X_train), np.asarray(b.X_train), atol=1e-6)
         assert a.metadata["seed"] == b.metadata["seed"]
+        assert a.metadata["layout_plan_signature"] == b.metadata["layout_plan_signature"]
+
+
+def test_generate_one_matches_first_dataset_of_generate_batch() -> None:
+    cfg = _tiny_regression_config()
+
+    single = generate_one(cfg, seed=4321, device="cpu")
+    batch = generate_batch(cfg, num_datasets=1, seed=4321, device="cpu")
+
+    assert len(batch) == 1
+    np.testing.assert_allclose(np.asarray(single.X_train), np.asarray(batch[0].X_train), atol=1e-6)
+    np.testing.assert_allclose(np.asarray(single.X_test), np.asarray(batch[0].X_test), atol=1e-6)
+    np.testing.assert_allclose(np.asarray(single.y_train), np.asarray(batch[0].y_train), atol=1e-6)
+    np.testing.assert_allclose(np.asarray(single.y_test), np.asarray(batch[0].y_test), atol=1e-6)
+    assert single.metadata["layout_plan_signature"] == batch[0].metadata["layout_plan_signature"]
 
 
 def test_sample_fixed_layout_rejects_variable_rows_spec() -> None:
@@ -1166,22 +1209,58 @@ def test_generate_rejects_inline_filter_enabled() -> None:
 def test_auto_retries_on_cpu_when_mps_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
-    def _stub_generate_torch(_config, _layout, _seed, device, **_kwargs):
-        calls.append(device)
+    def _stub_generate_fixed_layout_graph_batch(
+        _config,
+        _layout,
+        *,
+        node_plans,
+        dataset_seeds,
+        device,
+        noise_sigma_multiplier,
+        noise_spec,
+    ):
+        _ = node_plans
+        _ = dataset_seeds
+        _ = noise_sigma_multiplier
+        _ = noise_spec
+        calls.append(str(device))
         if device == "mps":
             raise RuntimeError("simulated mps failure")
-        return DatasetBundle(
-            X_train=torch.zeros((2, 2), dtype=torch.float32),
-            y_train=torch.zeros(2, dtype=torch.int64),
-            X_test=torch.zeros((1, 2), dtype=torch.float32),
-            y_test=torch.zeros(1, dtype=torch.int64),
-            feature_types=["num", "num"],
-            metadata={"backend": "torch", "device": "cpu"},
+        return (
+            torch.zeros((1, 3, 2), dtype=torch.float32),
+            torch.zeros((1, 3), dtype=torch.float32),
+            [{}],
         )
 
-    monkeypatch.setattr("dagzoo.core.generation_context._resolve_device", lambda *_args: "mps")
-    monkeypatch.setattr("dagzoo.core.generation_engine._generate_torch", _stub_generate_torch)
-    cfg = _tiny_config()
+    def _stub_finalize_generated_tensors(*_args, **kwargs) -> DatasetBundle:
+        return DatasetBundle(
+            X_train=torch.zeros((2, 2), dtype=torch.float32),
+            y_train=torch.zeros(2, dtype=torch.float32),
+            X_test=torch.zeros((1, 2), dtype=torch.float32),
+            y_test=torch.zeros(1, dtype=torch.float32),
+            feature_types=["num", "num"],
+            metadata={
+                "backend": "torch",
+                "resolved_device": kwargs["resolved_device"],
+                "lineage": {
+                    "assignments": {
+                        "feature_to_node": [0, 1],
+                        "target_to_node": 1,
+                    }
+                },
+            },
+        )
+
+    monkeypatch.setattr("dagzoo.core.fixed_layout._resolve_device", lambda *_args, **_kwargs: "mps")
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
+        _stub_generate_fixed_layout_graph_batch,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._finalize_generated_tensors",
+        _stub_finalize_generated_tensors,
+    )
+    cfg = _tiny_regression_config()
 
     bundle = generate_one(cfg, seed=123, device="auto")
     assert calls == ["mps", "cpu"]
@@ -1265,7 +1344,10 @@ def test_auto_does_not_fallback_to_numpy_if_torch_runtime_fails(
     def _raise_runtime(*_args, **_kwargs):
         raise RuntimeError("simulated torch runtime failure")
 
-    monkeypatch.setattr("dagzoo.core.generation_engine._generate_torch", _raise_runtime)
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
+        _raise_runtime,
+    )
     cfg = _tiny_config()
 
     with pytest.raises(RuntimeError, match="simulated torch runtime failure"):

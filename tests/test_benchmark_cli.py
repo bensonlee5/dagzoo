@@ -36,7 +36,7 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
     assert payload["suite"] == "smoke"
     assert len(payload["preset_results"]) == 1
     profile = payload["preset_results"][0]
-    assert profile["generation_mode"] == "dynamic"
+    assert profile["generation_mode"] == "fixed_batched"
     assert float(profile["generation_datasets_per_minute"]) >= 0.0
     assert float(profile["write_datasets_per_minute"]) >= 0.0
     assert profile["filter_datasets_per_minute"] is None
