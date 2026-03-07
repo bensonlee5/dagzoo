@@ -170,7 +170,9 @@ def _apply_discretization(
     centers = x[center_idx]
 
     p = _log_uniform(generator, 0.5, 4.0, str(x.device))
-    dist = torch.pow(torch.abs(x.unsqueeze(1) - centers.unsqueeze(0)), p).sum(dim=2)
+    # Argmin over Minkowski distance is identical to argmin over the powered
+    # distance sum while avoiding the large broadcast allocation.
+    dist = torch.cdist(x, centers, p=float(p))
     nearest = torch.argmin(dist, dim=1)
     y = centers[nearest]
     return _apply_linear(

@@ -88,7 +88,7 @@ def apply_node_pipeline(
     noise_spec: NoiseSamplingSpec | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Apply node transform in torch."""
-    _, _, total_dim = _resolve_latent_dimensions(
+    required_dim, _, total_dim = _resolve_latent_dimensions(
         converter_specs,
         generator,
         device,
@@ -136,13 +136,14 @@ def apply_node_pipeline(
     column_cursor = 0
     for spec in converter_specs:
         spec_dim = max(1, int(spec.dim))
-        latent = _pad_latent_columns(
-            latent,
-            min_required_dim=column_cursor + spec_dim,
-            generator=generator,
-            device=device,
-            noise_spec=noise_spec,
-        )
+        if column_cursor + spec_dim > required_dim or column_cursor + spec_dim > int(
+            latent.shape[1]
+        ):
+            raise RuntimeError(
+                "Latent width underflow in node pipeline: "
+                f"required={required_dim}, available={int(latent.shape[1])}, "
+                f"requested_end={column_cursor + spec_dim}."
+            )
         view = latent[:, column_cursor : column_cursor + spec_dim]
         if spec.kind == "cat":
             if spec.cardinality is None:

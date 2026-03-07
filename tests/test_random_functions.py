@@ -3,10 +3,12 @@ import torch
 
 from dagzoo.functions.random_functions import (
     MechanismFamily,
+    _apply_quadratic,
     _sample_function_family,
     _apply_tree,
     apply_random_function,
 )
+from dagzoo.linalg.random_matrices import sample_random_matrix
 from conftest import make_generator as _make_generator
 
 
@@ -73,6 +75,64 @@ def test_each_family(family: MechanismFamily) -> None:
     y = apply_random_function(x, _make_generator(10), out_dim=3, function_type=family)
     assert y.shape == (64, 3)
     assert torch.all(torch.isfinite(y))
+
+
+@pytest.mark.parametrize("family", ["discretization", "quadratic"])
+def test_explicit_family_is_deterministic(family: MechanismFamily) -> None:
+    x = torch.randn(64, 4, generator=_make_generator(14))
+    y1 = apply_random_function(
+        x.clone(),
+        _make_generator(15),
+        out_dim=3,
+        function_type=family,
+    )
+    y2 = apply_random_function(
+        x.clone(),
+        _make_generator(15),
+        out_dim=3,
+        function_type=family,
+    )
+    torch.testing.assert_close(y1, y2)
+
+
+def _reference_apply_quadratic(
+    x: torch.Tensor,
+    out_dim: int,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    d_cap = min(x.shape[1], 20)
+    if x.shape[1] > d_cap:
+        idx = torch.randperm(x.shape[1], generator=generator, device=x.device)[:d_cap]
+        x_sub = x[:, idx]
+    else:
+        x_sub = x
+    x_aug = torch.cat([x_sub, torch.ones(x_sub.shape[0], 1, device=x.device)], dim=1)
+
+    y = torch.empty(x_aug.shape[0], out_dim, device=x.device)
+    for i in range(out_dim):
+        m = sample_random_matrix(x_aug.shape[1], x_aug.shape[1], generator, str(x.device))
+        y[:, i] = torch.sum((x_aug @ m) * x_aug, dim=1)
+    return y
+
+
+def test_quadratic_preserves_reference_fixed_seed_outputs() -> None:
+    x = torch.randn(64, 24, generator=_make_generator(16))
+    actual_generator = _make_generator(17)
+    reference_generator = _make_generator(17)
+
+    actual = _apply_quadratic(
+        x.clone(),
+        out_dim=5,
+        generator=actual_generator,
+    )
+    expected = _reference_apply_quadratic(
+        x.clone(),
+        out_dim=5,
+        generator=reference_generator,
+    )
+
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(actual_generator.get_state(), reference_generator.get_state())
 
 
 def test_invalid_type_raises() -> None:

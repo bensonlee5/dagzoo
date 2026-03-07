@@ -30,6 +30,36 @@ def _aggregate_parent_outputs(
     raise ValueError(f"Unknown aggregation kind: {aggregation_kind!r}")
 
 
+def _resolved_aggregation_kind(
+    aggregation_kind: AggregationKind | None,
+    *,
+    generator: torch.Generator,
+) -> AggregationKind:
+    """Resolve the aggregation kind, sampling one when not explicitly provided."""
+
+    if aggregation_kind is not None:
+        return aggregation_kind
+    idx = randint_scalar(0, len(_AGGREGATION_KIND_ORDER), generator)
+    return _AGGREGATION_KIND_ORDER[int(idx)]
+
+
+def _aggregate_incrementally(
+    aggregate: torch.Tensor,
+    transformed_output: torch.Tensor,
+    *,
+    aggregation_kind: AggregationKind,
+) -> torch.Tensor:
+    """Update an aggregate tensor without materializing a full stack."""
+
+    if aggregation_kind == "sum":
+        return aggregate + transformed_output
+    if aggregation_kind == "product":
+        return aggregate * transformed_output
+    if aggregation_kind == "max":
+        return torch.maximum(aggregate, transformed_output)
+    raise ValueError(f"Unknown aggregation kind: {aggregation_kind!r}")
+
+
 def apply_multi_function(
     inputs: list[torch.Tensor],
     generator: torch.Generator,
@@ -73,8 +103,45 @@ def apply_multi_function(
             noise_spec=noise_spec,
         )
 
-    transformed = [
-        apply_random_function(
+    if aggregation_kind is None:
+        transformed_outputs = [
+            apply_random_function(
+                inp,
+                generator,
+                out_dim=out_dim,
+                mechanism_logit_tilt=mechanism_logit_tilt,
+                function_family_mix=function_family_mix,
+                noise_sigma_multiplier=noise_sigma_multiplier,
+                noise_spec=noise_spec,
+            )
+            for inp in inputs
+        ]
+        resolved_aggregation_kind = _resolved_aggregation_kind(
+            aggregation_kind,
+            generator=generator,
+        )
+        stacked = torch.stack(transformed_outputs, dim=1)  # (N, parents, out_dim)
+        return _aggregate_parent_outputs(stacked, aggregation_kind=resolved_aggregation_kind)
+
+    if aggregation_kind == "logsumexp":
+        transformed_outputs = [
+            apply_random_function(
+                inp,
+                generator,
+                out_dim=out_dim,
+                mechanism_logit_tilt=mechanism_logit_tilt,
+                function_family_mix=function_family_mix,
+                noise_sigma_multiplier=noise_sigma_multiplier,
+                noise_spec=noise_spec,
+            )
+            for inp in inputs
+        ]
+        stacked = torch.stack(transformed_outputs, dim=1)  # (N, parents, out_dim)
+        return _aggregate_parent_outputs(stacked, aggregation_kind=aggregation_kind)
+
+    aggregate: torch.Tensor | None = None
+    for inp in inputs:
+        transformed_output = apply_random_function(
             inp,
             generator,
             out_dim=out_dim,
@@ -83,12 +150,15 @@ def apply_multi_function(
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )
-        for inp in inputs
-    ]
-    stacked = torch.stack(transformed, dim=1)  # (N, parents, out_dim)
+        if aggregate is None:
+            aggregate = transformed_output
+            continue
+        aggregate = _aggregate_incrementally(
+            aggregate,
+            transformed_output,
+            aggregation_kind=aggregation_kind,
+        )
 
-    resolved_aggregation_kind = aggregation_kind
-    if resolved_aggregation_kind is None:
-        idx = randint_scalar(0, len(_AGGREGATION_KIND_ORDER), generator)
-        resolved_aggregation_kind = _AGGREGATION_KIND_ORDER[int(idx)]
-    return _aggregate_parent_outputs(stacked, aggregation_kind=resolved_aggregation_kind)
+    if aggregate is None:
+        raise RuntimeError("Expected at least one transformed parent output.")
+    return aggregate

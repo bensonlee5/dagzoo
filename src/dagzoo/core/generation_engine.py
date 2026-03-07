@@ -76,6 +76,12 @@ def _parent_node_indices(adjacency: torch.Tensor, node_index: int) -> list[int]:
     return sorted(int(parent_index) for parent_index in parent_indices)
 
 
+def _parent_node_index_lists(adjacency: torch.Tensor, *, num_nodes: int) -> list[list[int]]:
+    """Return sorted parent-index lists for every node in one sampled layout."""
+
+    return [_parent_node_indices(adjacency, node_index) for node_index in range(num_nodes)]
+
+
 def _generate_graph_dataset_torch(
     config: GeneratorConfig,
     layout: LayoutPlan,
@@ -99,19 +105,19 @@ def _generate_graph_dataset_torch(
     if not isinstance(adjacency, torch.Tensor):
         adjacency = torch.as_tensor(adjacency, dtype=torch.bool, device=device)
     num_nodes = int(layout.graph_nodes)
+    parent_index_lists = _parent_node_index_lists(adjacency, num_nodes=num_nodes)
 
-    node_outputs: dict[int, torch.Tensor] = {}
+    node_outputs: list[torch.Tensor | None] = [None] * num_nodes
     feature_values: list[torch.Tensor | None] = [None] * num_features
     target_values: torch.Tensor | None = None
 
     for node_index in range(num_nodes):
         # Adjacency convention is adjacency[src, dst] (row=source, column=sink).
-        parent_indices = _parent_node_indices(adjacency, node_index)
-        parent_data = [
-            node_outputs[parent_index]
-            for parent_index in parent_indices
-            if parent_index in node_outputs
-        ]
+        parent_data = []
+        for parent_index in parent_index_lists[node_index]:
+            parent_output = node_outputs[parent_index]
+            if parent_output is not None:
+                parent_data.append(parent_output)
 
         # Build specs using a deterministic per-node generator for layout consistency.
         spec_gen = torch.Generator(device="cpu")
