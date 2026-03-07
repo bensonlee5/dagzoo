@@ -35,6 +35,27 @@ def test_multiple_inputs_support_explicit_aggregation_kind(
     assert torch.all(torch.isfinite(y))
 
 
+@pytest.mark.parametrize("aggregation_kind", ["sum", "product", "max", "logsumexp"])
+def test_multiple_inputs_are_deterministic_for_explicit_aggregation_kind(
+    aggregation_kind: AggregationKind,
+) -> None:
+    a = torch.randn(64, 3, generator=_make_generator(11))
+    b = torch.randn(64, 2, generator=_make_generator(12))
+    y1 = apply_multi_function(
+        [a.clone(), b.clone()],
+        _make_generator(13),
+        out_dim=4,
+        aggregation_kind=aggregation_kind,
+    )
+    y2 = apply_multi_function(
+        [a.clone(), b.clone()],
+        _make_generator(13),
+        out_dim=4,
+        aggregation_kind=aggregation_kind,
+    )
+    torch.testing.assert_close(y1, y2)
+
+
 def test_empty_raises() -> None:
     g = _make_generator(0)
     with pytest.raises(ValueError, match="non-empty"):

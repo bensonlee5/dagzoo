@@ -75,6 +75,24 @@ def test_each_family(family: MechanismFamily) -> None:
     assert torch.all(torch.isfinite(y))
 
 
+@pytest.mark.parametrize("family", ["discretization", "quadratic"])
+def test_explicit_family_is_deterministic(family: MechanismFamily) -> None:
+    x = torch.randn(64, 4, generator=_make_generator(14))
+    y1 = apply_random_function(
+        x.clone(),
+        _make_generator(15),
+        out_dim=3,
+        function_type=family,
+    )
+    y2 = apply_random_function(
+        x.clone(),
+        _make_generator(15),
+        out_dim=3,
+        function_type=family,
+    )
+    torch.testing.assert_close(y1, y2)
+
+
 def test_invalid_type_raises() -> None:
     g = _make_generator()
     x = torch.randn(32, 4, generator=g)

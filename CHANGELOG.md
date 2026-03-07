@@ -10,6 +10,19 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.5.6] - 2026-03-07
+
+### Changed
+
+- Improved practical generation throughput in shared Torch generation paths by
+  caching per-layout parent index lists, removing redundant latent-width checks
+  in the node pipeline, vectorizing quadratic random-function evaluation, using
+  `torch.cdist()` for discretization nearest-center selection, and reducing
+  intermediate allocations in multi-input aggregation.
+- These changes affect both single-worker generation and the local CPU
+  multi-worker benchmark path because they optimize shared generation kernels
+  instead of benchmark-only accounting.
+
 ## [0.5.5] - 2026-03-06
 
 ### Added

@@ -63,19 +63,21 @@ def _apply_quadratic(
     else:
         x_sub = x
     x_aug = torch.cat([x_sub, torch.ones(x_sub.shape[0], 1, device=x.device)], dim=1)
-
-    y = torch.empty(x_aug.shape[0], out_dim, device=x.device)
-    for i in range(out_dim):
-        m = sample_random_matrix(
-            x_aug.shape[1],
-            x_aug.shape[1],
-            generator,
-            str(x.device),
-            noise_sigma_multiplier=noise_sigma_multiplier,
-            noise_spec=noise_spec,
-        )
-        y[:, i] = torch.sum((x_aug @ m) * x_aug, dim=1)
-    return y
+    matrices = torch.stack(
+        [
+            sample_random_matrix(
+                x_aug.shape[1],
+                x_aug.shape[1],
+                generator,
+                str(x.device),
+                noise_sigma_multiplier=noise_sigma_multiplier,
+                noise_spec=noise_spec,
+            )
+            for _ in range(out_dim)
+        ],
+        dim=0,
+    )
+    return torch.einsum("ni,oij,nj->no", x_aug, matrices, x_aug)
 
 
 def _apply_nn(
@@ -170,7 +172,9 @@ def _apply_discretization(
     centers = x[center_idx]
 
     p = _log_uniform(generator, 0.5, 4.0, str(x.device))
-    dist = torch.pow(torch.abs(x.unsqueeze(1) - centers.unsqueeze(0)), p).sum(dim=2)
+    # Argmin over Minkowski distance is identical to argmin over the powered
+    # distance sum while avoiding the large broadcast allocation.
+    dist = torch.cdist(x, centers, p=float(p))
     nearest = torch.argmin(dist, dim=1)
     y = centers[nearest]
     return _apply_linear(
