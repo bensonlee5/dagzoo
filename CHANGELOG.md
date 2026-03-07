@@ -27,8 +27,9 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
   benchmark coordinator spawns worker processes and bounded IPC queues.
 - The process-based local multi-worker coordinator now uses bounded per-worker
   result queues, preserving deterministic ordering without deadlocking on slow
-  low-index workers, tolerating final result/control message reordering, and
-  avoiding unbounded out-of-order result accumulation.
+  low-index workers, tolerating clean-exit result/control message reordering,
+  cleaning up IPC queues on worker-startup failures, and avoiding unbounded
+  out-of-order result accumulation.
 - True local multi-worker benchmark runs now coerce `runtime.device: auto` to
   CPU after effective fan-out resolution, while effectively single-worker runs
   keep their requested device behavior.

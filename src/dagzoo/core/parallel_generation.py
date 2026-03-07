@@ -11,6 +11,7 @@ from multiprocessing.process import BaseProcess
 import os
 import queue
 import sys
+import time
 import traceback
 from typing import Any
 
@@ -26,6 +27,7 @@ from dagzoo.types import DatasetBundle
 
 _QUEUE_POLL_TIMEOUT_S = 0.05
 _PROCESS_JOIN_TIMEOUT_S = 0.5
+_CLEAN_EXIT_QUEUE_DRAIN_TIMEOUT_S = 1.0
 
 
 class ParallelGenerationConfigError(ValueError):
@@ -369,14 +371,13 @@ def _drain_control_queue(
         )
 
 
-def _raise_if_target_worker_missing_output(
+def _target_worker_exited_cleanly_or_raise(
     *,
     processes: list[BaseProcess],
-    done_workers: set[int],
     target_worker_index: int,
     next_dataset_index: int,
 ) -> bool:
-    """Return whether the target worker can no longer produce the next dataset."""
+    """Return whether the target worker has exited cleanly."""
 
     target_process = processes[target_worker_index]
     exitcode = target_process.exitcode
@@ -390,13 +391,35 @@ def _raise_if_target_worker_missing_output(
             f"worker {target_worker_index} exitcode={int(exitcode)}."
         )
 
-    if target_worker_index not in done_workers:
-        raise RuntimeError(
-            "Parallel generation worker exited without a completion signal before producing "
-            f"dataset index {next_dataset_index}: worker {target_worker_index}."
-        )
-
     return True
+
+
+def _drain_target_queue_after_clean_exit(
+    *,
+    target_queue: Any,
+    control_queue: Any,
+    done_workers: set[int],
+    drain_timeout_s: float,
+) -> _WorkerResultMessage | None:
+    """Poll one target worker queue for in-flight messages after a clean child exit."""
+
+    deadline = time.monotonic() + max(0.0, float(drain_timeout_s))
+    while True:
+        worker_error = _drain_control_queue(
+            control_queue,
+            done_workers=done_workers,
+        )
+        if worker_error is not None:
+            raise worker_error
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            return None
+
+        try:
+            return target_queue.get(timeout=min(_QUEUE_POLL_TIMEOUT_S, remaining))
+        except queue.Empty:
+            continue
 
 
 def _terminate_processes(processes: list[BaseProcess]) -> None:
@@ -469,13 +492,19 @@ def generate_parallel_batch_iter(
         )
         for worker_index in range(local_worker_count)
     ]
-    processes = _spawn_parallel_workers(
-        ctx=ctx,
-        worker_specs=worker_specs,
-        result_queues=result_queues,
-        control_queue=control_queue,
-        stop_event=stop_event,
-    )
+    try:
+        processes = _spawn_parallel_workers(
+            ctx=ctx,
+            worker_specs=worker_specs,
+            result_queues=result_queues,
+            control_queue=control_queue,
+            stop_event=stop_event,
+        )
+    except BaseException:
+        for result_queue in result_queues:
+            _close_process_queue(result_queue)
+        _close_process_queue(control_queue)
+        raise
 
     done_workers: set[int] = set()
     try:
@@ -498,21 +527,29 @@ def generate_parallel_batch_iter(
                     )
                     if worker_error is not None:
                         raise worker_error
-                    if not _raise_if_target_worker_missing_output(
+                    if not _target_worker_exited_cleanly_or_raise(
                         processes=processes,
-                        done_workers=done_workers,
                         target_worker_index=target_worker_index,
                         next_dataset_index=next_dataset_index,
                     ):
                         continue
-                    try:
-                        message = target_queue.get(timeout=_QUEUE_POLL_TIMEOUT_S)
-                    except queue.Empty:
+                    message = _drain_target_queue_after_clean_exit(
+                        target_queue=target_queue,
+                        control_queue=control_queue,
+                        done_workers=done_workers,
+                        drain_timeout_s=_CLEAN_EXIT_QUEUE_DRAIN_TIMEOUT_S,
+                    )
+                    if message is None:
+                        if target_worker_index not in done_workers:
+                            raise RuntimeError(
+                                "Parallel generation worker exited without a completion signal "
+                                f"before producing dataset index {next_dataset_index}: worker "
+                                f"{target_worker_index}."
+                            )
                         raise RuntimeError(
-                            "Parallel generation worker completed before producing the "
-                            f"expected dataset index {next_dataset_index}: worker "
-                            f"{target_worker_index}."
-                        ) from None
+                            "Parallel generation worker completed before producing the expected "
+                            f"dataset index {next_dataset_index}: worker {target_worker_index}."
+                        )
 
                 if not isinstance(message, _WorkerResultMessage):
                     raise RuntimeError(
