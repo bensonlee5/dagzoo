@@ -29,6 +29,7 @@ from dagzoo.config import (
     normalize_missing_mechanism,
 )
 from dagzoo.core.dataset import generate_batch_iter, generate_worker_batch_iter
+from dagzoo.core.parallel_generation import ParallelGenerationConfigError
 from dagzoo.core.config_resolution import (
     resolve_generate_config,
     serialize_resolution_events,
@@ -667,6 +668,51 @@ def _raise_if_worker_partitioning_unsupported(
     )
 
 
+def _raise_if_benchmark_multi_worker_preflight_invalid(
+    config: GeneratorConfig,
+) -> None:
+    """Reject benchmark worker configs that cannot be orchestrated locally."""
+
+    if int(config.runtime.worker_count) <= 1:
+        return
+    if int(config.runtime.worker_index) != 0:
+        _raise_usage_error(
+            "dagzoo benchmark local multi-worker mode requires runtime.worker_index == 0. "
+            f"Got worker_index={int(config.runtime.worker_index)} with "
+            f"worker_count={int(config.runtime.worker_count)}."
+        )
+
+
+def _normalized_benchmark_requested_device(
+    config: GeneratorConfig,
+    *,
+    device_override: str | None = None,
+    preset_device: str | None = None,
+) -> str:
+    """Normalize benchmark device selection for local multi-worker mode."""
+
+    return (device_override or preset_device or config.runtime.device or "auto").lower()
+
+
+def _raise_if_benchmark_multi_worker_config_is_ignored(
+    config: GeneratorConfig,
+    *,
+    requested_preset_keys: list[str] | None,
+    config_path: str | None,
+) -> None:
+    """Reject benchmark flows where multi-worker config from --config would be ignored."""
+
+    if config_path is None or int(config.runtime.worker_count) <= 1:
+        return
+    selected_preset_keys = list(requested_preset_keys or ["custom"])
+    if all(key == "custom" for key in selected_preset_keys):
+        return
+    _raise_usage_error(
+        "dagzoo benchmark multi-worker settings from --config are only honored with "
+        "`--preset custom`. Use `--preset custom` for multi-worker benchmark configs."
+    )
+
+
 def _run_generate(args: argparse.Namespace) -> int:
     """Execute the ``generate`` command."""
 
@@ -967,12 +1013,18 @@ def _print_preset_result_line(result: dict[str, Any]) -> None:
         if isinstance(filter_retry_ratio, (int, float))
         else " filter_retry_dataset_pct=-"
     )
+    latency_p95 = result.get("latency_p95_ms")
+    latency_hint = (
+        f"latency_p95_ms={float(latency_p95):.2f}"
+        if isinstance(latency_p95, (int, float))
+        else "latency_p95_ms=-"
+    )
 
     print(
         f"[{result.get('preset_key')}] device={result.get('device')} "
         f"backend={result.get('hardware_backend')} "
         f"datasets/min={float(result.get('datasets_per_minute', 0.0)):.2f} "
-        f"latency_p95_ms={float(result.get('latency_p95_ms', 0.0)):.2f}"
+        f"{latency_hint}"
         f"{stage_hint}{filter_stage_hint}{filter_reject_hint}{filter_retry_hint}"
         f"{diagnostics_hint}{missingness_hint}{lineage_hint}{shift_hint}{noise_hint}"
     )
@@ -985,7 +1037,6 @@ def _run_benchmark(args: argparse.Namespace) -> int:
     diagnostics_root_dir = _benchmark_diagnostics_root_dir(args, artifact_dir=artifact_dir)
 
     default_cfg = _default_benchmark_config(args)
-    _raise_if_worker_partitioning_unsupported(default_cfg, command="benchmark")
     suite = (args.suite or default_cfg.benchmark.suite).strip().lower()
     warn_pct = (
         float(args.warn_threshold_pct)
@@ -1002,36 +1053,50 @@ def _run_benchmark(args: argparse.Namespace) -> int:
         preset_keys=args.preset,
         config_path=args.config,
     )
-    for spec in preset_specs:
-        _raise_if_worker_partitioning_unsupported(spec.config, command="benchmark")
     if args.device and len(preset_specs) > 1:
         _raise_usage_error(
             "benchmark --device cannot be combined with multiple --preset values; "
             "the override would be ambiguous."
         )
-    if args.device and len(preset_specs) == 1:
-        preset_specs[0].device = args.device
+    _raise_if_benchmark_multi_worker_config_is_ignored(
+        default_cfg,
+        requested_preset_keys=args.preset,
+        config_path=args.config,
+    )
+    effective_device_override = args.device if args.device and len(preset_specs) == 1 else None
+    for spec in preset_specs:
+        normalized_requested_device = _normalized_benchmark_requested_device(
+            spec.config,
+            device_override=effective_device_override,
+            preset_device=spec.device,
+        )
+        _raise_if_benchmark_multi_worker_preflight_invalid(spec.config)
+        if int(spec.config.runtime.worker_count) > 1 or effective_device_override is not None:
+            spec.device = normalized_requested_device
 
     baseline_payload = load_baseline(args.baseline) if args.baseline else None
 
-    summary = run_benchmark_suite(
-        preset_specs,
-        suite=suite,
-        warn_threshold_pct=warn_pct,
-        fail_threshold_pct=fail_pct,
-        baseline_payload=baseline_payload,
-        num_datasets_override=args.num_datasets,
-        warmup_override=args.warmup,
-        collect_memory=not bool(args.no_memory),
-        collect_reproducibility=(
-            bool(args.collect_reproducibility)
-            or bool(default_cfg.benchmark.collect_reproducibility)
-        ),
-        collect_diagnostics=bool(args.diagnostics),
-        diagnostics_root_dir=diagnostics_root_dir,
-        fail_on_regression=bool(args.fail_on_regression),
-        hardware_policy=str(args.hardware_policy),
-    )
+    try:
+        summary = run_benchmark_suite(
+            preset_specs,
+            suite=suite,
+            warn_threshold_pct=warn_pct,
+            fail_threshold_pct=fail_pct,
+            baseline_payload=baseline_payload,
+            num_datasets_override=args.num_datasets,
+            warmup_override=args.warmup,
+            collect_memory=not bool(args.no_memory),
+            collect_reproducibility=(
+                bool(args.collect_reproducibility)
+                or bool(default_cfg.benchmark.collect_reproducibility)
+            ),
+            collect_diagnostics=bool(args.diagnostics),
+            diagnostics_root_dir=diagnostics_root_dir,
+            fail_on_regression=bool(args.fail_on_regression),
+            hardware_policy=str(args.hardware_policy),
+        )
+    except ParallelGenerationConfigError as exc:
+        _raise_usage_error(str(exc))
 
     if args.print_effective_config:
         for result in summary.get("preset_results", []):

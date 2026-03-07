@@ -450,3 +450,19 @@ def test_print_preset_result_line_includes_stage_and_filter_rejection_metrics(ca
     assert "filter/min=60.00" in output
     assert "filter_reject_attempt_pct=12.50" in output
     assert "filter_retry_dataset_pct=25.00" in output
+
+
+def test_print_preset_result_line_handles_missing_latency(capsys) -> None:
+    _print_preset_result_line(
+        {
+            "preset_key": "parallel_cpu",
+            "device": "cpu",
+            "hardware_backend": "cpu",
+            "datasets_per_minute": 123.0,
+            "generation_datasets_per_minute": 124.0,
+            "write_datasets_per_minute": 80.0,
+            "latency_p95_ms": None,
+        }
+    )
+    output = capsys.readouterr().out
+    assert "latency_p95_ms=-" in output

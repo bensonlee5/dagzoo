@@ -10,6 +10,50 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.5.5] - 2026-03-06
+
+### Added
+
+- Added process-based local CPU multi-worker benchmark orchestration for
+  `dagzoo benchmark` when `runtime.worker_count > 1`,
+  `runtime.worker_index == 0`, and `--preset custom` is used.
+
+### Changed
+
+- Benchmark throughput, reproducibility, and lineage guardrail generation paths
+  now use the local multi-worker iterator when multi-worker benchmark mode is
+  active.
+- Local multi-worker benchmark fan-out now caps to host CPU capacity before the
+  benchmark coordinator spawns worker processes and bounded IPC queues.
+- The process-based local multi-worker coordinator now uses bounded per-worker
+  result queues, preserving deterministic ordering without deadlocking on slow
+  low-index workers, tolerating clean-exit result/control message reordering,
+  cleaning up IPC queues on worker-startup failures, and avoiding unbounded
+  out-of-order result accumulation.
+- True local multi-worker benchmark runs now coerce `runtime.device: auto` to
+  CPU after effective fan-out resolution, while effectively single-worker runs
+  keep their requested device behavior.
+- Multi-worker benchmark summaries now report latency fields and
+  `micro_generate_one_ms` as unavailable when the run actually uses multiple
+  active worker partitions, avoiding misleading single-worker timings.
+- True local multi-worker benchmark summaries now also report memory fields as
+  unavailable, because coordinator-only RSS and CUDA counters do not represent
+  child worker processes.
+- Effectively single-worker benchmark runs now stay on the sequential
+  generation path for both warmup and measured passes even when
+  `runtime.worker_count > 1`, avoiding unnecessary coordinator overhead for
+  tiny runs.
+
+### Breaking
+
+- **BREAKING:** True local multi-worker `dagzoo benchmark` runs remain CPU-only
+  in this release; effectively single-worker runs keep their requested device,
+  but explicit `cuda`/`mps` requests are still rejected once effective fan-out
+  exceeds one local worker.
+- **BREAKING:** `dagzoo generate` still does not orchestrate peer workers, and
+  write-enabled multi-worker generate runs remain blocked until shard-writing
+  coordination lands.
+
 ## [0.5.4] - 2026-03-06
 
 ### Changed

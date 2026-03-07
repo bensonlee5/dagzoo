@@ -57,7 +57,8 @@ def run_microbenchmarks(
     *,
     device: str | None = None,
     repeats: int = MICROBENCH_DEFAULT_REPEATS,
-) -> dict[str, float | int]:
+    include_generate_one: bool = True,
+) -> dict[str, float | int | None]:
     """Run targeted microbenchmarks for core generation components."""
 
     g_rng = torch.Generator(device="cpu")
@@ -90,17 +91,23 @@ def run_microbenchmarks(
         _ = apply_node_pipeline(parent_data, MICROBENCH_SYNTH_ROWS, specs, g, "cpu")
 
     micro_cfg = _micro_config(config)
+    generate_one_ms: float | None
+    if include_generate_one:
 
-    def run_generate_one() -> None:
-        _ = generate_one(
-            micro_cfg,
-            seed=offset_seed32(micro_cfg.seed, MICROBENCH_GENERATE_ONE_SEED_OFFSET),
-            device=device,
-        )
+        def run_generate_one() -> None:
+            _ = generate_one(
+                micro_cfg,
+                seed=offset_seed32(micro_cfg.seed, MICROBENCH_GENERATE_ONE_SEED_OFFSET),
+                device=device,
+            )
+
+        generate_one_ms = _time_ms(run_generate_one, repeats)
+    else:
+        generate_one_ms = None
 
     return {
         "micro_repeats": int(max(1, repeats)),
         "micro_random_function_linear_ms": _time_ms(run_linear, repeats),
         "micro_node_pipeline_ms": _time_ms(run_node_pipeline, repeats),
-        "micro_generate_one_ms": _time_ms(run_generate_one, repeats),
+        "micro_generate_one_ms": generate_one_ms,
     }

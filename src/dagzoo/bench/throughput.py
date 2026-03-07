@@ -14,11 +14,26 @@ from dagzoo.bench.constants import (
 )
 from dagzoo.config import GeneratorConfig
 from dagzoo.core.dataset import generate_batch_iter
+from dagzoo.core.parallel_generation import (
+    effective_local_parallel_worker_count,
+    generate_parallel_batch_iter,
+)
 from dagzoo.rng import offset_seed32
 from dagzoo.types import DatasetBundle
 
 
+def _select_generation_iterator(config: GeneratorConfig, *, num_datasets: int) -> Any:
+    """Choose one generator path for the full benchmark run."""
+
+    return (
+        generate_parallel_batch_iter
+        if effective_local_parallel_worker_count(int(config.runtime.worker_count), num_datasets) > 1
+        else generate_batch_iter
+    )
+
+
 def _consume_generation(
+    generator: Any,
     config: GeneratorConfig,
     *,
     num_datasets: int,
@@ -28,7 +43,7 @@ def _consume_generation(
 ) -> None:
     """Run generation for ``num_datasets`` items while discarding outputs."""
 
-    for bundle in generate_batch_iter(
+    for bundle in generator(
         config,
         num_datasets=num_datasets,
         seed=seed,
@@ -48,8 +63,10 @@ def run_throughput_benchmark(
 ) -> dict[str, Any]:
     """Measure end-to-end generation throughput for a benchmark preset."""
 
+    generator = _select_generation_iterator(config, num_datasets=num_datasets)
     if warmup_datasets > 0:
         _consume_generation(
+            generator,
             config,
             num_datasets=warmup_datasets,
             seed=offset_seed32(config.seed, THROUGHPUT_WARMUP_SEED_OFFSET),
@@ -58,6 +75,7 @@ def run_throughput_benchmark(
 
     start = time.perf_counter()
     _consume_generation(
+        generator,
         config,
         num_datasets=num_datasets,
         seed=offset_seed32(config.seed, THROUGHPUT_MEASURE_SEED_OFFSET),
