@@ -34,8 +34,12 @@ dagzoo generate --config configs/default.yaml --num-datasets 10 --out data/run1
 
 Each generate run writes `effective_config.yaml` and `effective_config_trace.yaml`
 under the resolved output directory.
+`dagzoo generate` now samples one internal fixed-layout plan per run, so all
+datasets emitted in the same run share one layout signature / plan signature.
 Generation does not run inline filtering; keep `filter.enabled: false` for
 generate flows.
+Parallel generation has been removed. Config files must not include
+`runtime.worker_count` or `runtime.worker_index`.
 
 ______________________________________________________________________
 
@@ -62,6 +66,8 @@ dagzoo generate --config configs/default.yaml --rows 1024,2048,4096 --num-datase
 
 When rows mode is active, `dataset.n_test` stays fixed and `n_train` is derived as:
 `n_train = total_rows - n_test`.
+For canonical `generate` runs, `range` and `choices` rows modes are realized
+once per run, not once per dataset.
 
 Historical curriculum shell workflows are retired. To migrate prior train-row stages:
 
@@ -90,8 +96,9 @@ ______________________________________________________________________
 
 ## 5. Fixed-layout batch generation
 
-Use a fixed layout plan when you want many datasets with consistent structure
-and aligned emitted columns across the batch.
+Use the explicit fixed-layout APIs when you want to persist or replay a sampled
+plan artifact. The standard `generate_*` APIs already use the same fixed-layout
+execution model internally, but they sample the plan implicitly at run start.
 
 Python API:
 
@@ -170,8 +177,8 @@ Note: the built-in CPU benchmark preset (`dagzoo benchmark --preset cpu`) now
 measures three explicit row profiles: `1024`, `4096`, and `8192` total rows per
 dataset. Those built-in CPU runs use the fixed-layout batched generator by
 default and report `generation_mode="fixed_batched"` plus explicit row counts in
-their summary artifacts. Custom presets stay on the normal dynamic-layout path
-unless you call the fixed-layout APIs or CLI explicitly.
+their summary artifacts. Single-worker benchmark generation now follows the same
+canonical fixed-layout model as `dagzoo generate`.
 
 Detailed guide: [Many-class](features/many-class.md)
 

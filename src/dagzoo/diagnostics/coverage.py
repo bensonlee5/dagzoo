@@ -360,9 +360,14 @@ def _build_histogram(
         hi = float(value_range[1])
         if lo > hi:
             lo, hi = hi, lo
-        if lo == hi:
-            lo -= 0.5
-            hi += 0.5
+    if not np.isfinite(lo) or not np.isfinite(hi):
+        lo = -0.5
+        hi = 0.5
+    elif not hi > lo or np.isclose(lo, hi, rtol=1e-12, atol=1e-12):
+        center = float((lo + hi) / 2.0)
+        span = max(0.5, abs(center) * 1e-6)
+        lo = center - span
+        hi = center + span
     counts, edges = np.histogram(values, bins=bins, range=(lo, hi))
     total = float(np.sum(counts))
     bins_payload: list[dict[str, Any]] = []

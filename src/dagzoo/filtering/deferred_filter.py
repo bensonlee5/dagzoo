@@ -185,6 +185,15 @@ def _coerce_seed(raw_seed: object, *, dataset_index: int) -> int:
     return int(dataset_index % (SEED32_MAX + 1))
 
 
+def _resolve_filter_seed(metadata_payload: Mapping[str, Any], *, dataset_index: int) -> int:
+    """Resolve filter replay seed from persisted metadata with child-seed preference."""
+
+    return _coerce_seed(
+        metadata_payload.get("dataset_seed", metadata_payload.get("seed")),
+        dataset_index=dataset_index,
+    )
+
+
 def _resolve_task_and_filter_config(
     *,
     metadata_payload: Mapping[str, Any],
@@ -435,7 +444,7 @@ def run_deferred_filter(
                 fallback_config=config,
                 n_jobs_override=n_jobs_override,
             )
-            seed = _coerce_seed(metadata_payload.get("seed"), dataset_index=dataset_index)
+            seed = _resolve_filter_seed(metadata_payload, dataset_index=dataset_index)
 
             accepted, filter_details, elapsed_seconds = _filter_dataset(
                 x_train=train_split[0],

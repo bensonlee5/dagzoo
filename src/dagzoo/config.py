@@ -815,22 +815,6 @@ def _normalize_runtime_fields(runtime: RuntimeConfig) -> None:
     if not runtime.torch_dtype:
         raise ValueError("runtime.torch_dtype must be a non-empty string.")
 
-    runtime.worker_count = _validate_int_field(
-        field_name="runtime.worker_count",
-        value=runtime.worker_count,
-        minimum=1,
-    )
-    runtime.worker_index = _validate_int_field(
-        field_name="runtime.worker_index",
-        value=runtime.worker_index,
-        minimum=0,
-    )
-    if runtime.worker_index >= runtime.worker_count:
-        raise ValueError(
-            "runtime.worker_index must be < runtime.worker_count, "
-            f"got {runtime.worker_index} >= {runtime.worker_count}."
-        )
-
 
 def _normalize_output_fields(_output: OutputConfig) -> None:
     """Stage 1: output section has no additional field normalization."""
@@ -1165,8 +1149,6 @@ class NoiseConfig:
 class RuntimeConfig:
     device: str = "auto"
     torch_dtype: str = "float32"
-    worker_count: int = 1
-    worker_index: int = 0
 
 
 @dataclass(slots=True)
@@ -1267,12 +1249,22 @@ class GeneratorConfig:
         """Construct `GeneratorConfig` from a nested dictionary payload."""
 
         data = data or {}
+        runtime_payload = dict(data.get("runtime") or {})
+        removed_runtime_keys = [
+            key for key in ("worker_count", "worker_index") if key in runtime_payload
+        ]
+        if removed_runtime_keys:
+            joined = ", ".join(f"runtime.{key}" for key in removed_runtime_keys)
+            raise ValueError(
+                f"{joined} is no longer supported. Parallel generation has been removed; "
+                "remove these runtime keys from the config."
+            )
         dataset = DatasetConfig(**(data.get("dataset") or {}))
         graph = GraphConfig(**(data.get("graph") or {}))
         mechanism = MechanismConfig(**(data.get("mechanism") or {}))
         shift = ShiftConfig(**(data.get("shift") or {}))
         noise = NoiseConfig(**(data.get("noise") or {}))
-        runtime = RuntimeConfig(**(data.get("runtime") or {}))
+        runtime = RuntimeConfig(**runtime_payload)
         output = OutputConfig(**(data.get("output") or {}))
         diagnostics = DiagnosticsConfig(**(data.get("diagnostics") or {}))
         benchmark = BenchmarkConfig(**(data.get("benchmark") or {}))

@@ -73,16 +73,17 @@ def _coerce_bundle_seed(bundle: DatasetBundle, *, fallback_seed: int) -> int:
     """Resolve per-bundle seed for deterministic deferred filter replay."""
 
     metadata = bundle.metadata
-    raw_seed: Any = metadata.get("seed")
-    if isinstance(raw_seed, bool):
-        raw_seed = None
-    if isinstance(raw_seed, float):
-        if raw_seed.is_integer():
-            raw_seed = int(raw_seed)
-        else:
+    for key in ("dataset_seed", "seed"):
+        raw_seed: Any = metadata.get(key)
+        if isinstance(raw_seed, bool):
             raw_seed = None
-    if isinstance(raw_seed, int):
-        return int(raw_seed % (SEED32_MAX + 1))
+        if isinstance(raw_seed, float):
+            if raw_seed.is_integer():
+                raw_seed = int(raw_seed)
+            else:
+                raw_seed = None
+        if isinstance(raw_seed, int):
+            return int(raw_seed % (SEED32_MAX + 1))
     return int(fallback_seed % (SEED32_MAX + 1))
 
 

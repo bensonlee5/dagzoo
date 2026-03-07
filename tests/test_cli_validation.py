@@ -97,12 +97,12 @@ def test_generate_cli_rejects_inline_filter_enabled(tmp_path) -> None:
     assert int(exc.value.code) == 2
 
 
-def test_generate_cli_rejects_worker_partition_when_dataset_write_enabled(tmp_path) -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.runtime.worker_count = 2
-    cfg.runtime.worker_index = 1
-    config_path = tmp_path / "multi_worker.yaml"
-    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+def test_generate_cli_rejects_removed_parallel_generation_runtime_keys(tmp_path) -> None:
+    config_path = tmp_path / "removed_parallel_runtime.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"runtime": {"worker_count": 2, "worker_index": 1}}),
+        encoding="utf-8",
+    )
 
     with pytest.raises(SystemExit) as exc:
         main(
@@ -123,108 +123,6 @@ def test_generate_cli_rejects_worker_partition_when_dataset_write_enabled(tmp_pa
     assert int(exc.value.code) == 2
     assert not (tmp_path / "out" / "effective_config.yaml").exists()
     assert not (tmp_path / "out" / "effective_config_trace.yaml").exists()
-
-
-def test_generate_cli_allows_worker_partition_with_no_dataset_write(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.runtime.worker_count = 2
-    cfg.runtime.worker_index = 1
-    config_path = tmp_path / "multi_worker_no_write.yaml"
-    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
-
-    captured: dict[str, int] = {}
-
-    def _stub_generate_batch_iter(
-        config,
-        *,
-        num_datasets: int,
-        seed: int | None = None,
-        device: str | None = None,
-    ):
-        _ = seed
-        _ = device
-        captured["worker_count"] = int(config.runtime.worker_count)
-        captured["worker_index"] = int(config.runtime.worker_index)
-        yield object()
-
-    monkeypatch.setattr("dagzoo.cli.generate_worker_batch_iter", _stub_generate_batch_iter)
-
-    code = main(
-        [
-            "generate",
-            "--config",
-            str(config_path),
-            "--num-datasets",
-            "3",
-            "--device",
-            "cpu",
-            "--hardware-policy",
-            "none",
-            "--no-dataset-write",
-            "--out",
-            str(tmp_path / "out_no_write"),
-        ]
-    )
-    assert code == 0
-    assert captured["worker_count"] == 2
-    assert captured["worker_index"] == 1
-    worker_dir = tmp_path / "out_no_write" / "worker_00001_of_00002"
-    assert (worker_dir / "effective_config.yaml").exists()
-    assert (worker_dir / "effective_config_trace.yaml").exists()
-
-
-def test_generate_cli_namespaces_worker_diagnostics_artifacts(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.runtime.device = "cpu"
-    cfg.runtime.worker_count = 2
-    cfg.runtime.worker_index = 1
-    cfg.output.out_dir = str(tmp_path / "run")
-    cfg.diagnostics.enabled = True
-    config_path = tmp_path / "worker_diag.yaml"
-    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
-
-    def _stub_generate_worker_batch_iter(
-        _config,
-        *,
-        num_datasets: int,
-        seed: int | None = None,
-        device: str | None = None,
-    ):
-        _ = seed
-        _ = device
-        for _ in range(num_datasets):
-            yield object()
-
-    monkeypatch.setattr("dagzoo.cli.generate_worker_batch_iter", _stub_generate_worker_batch_iter)
-    monkeypatch.setattr(
-        "dagzoo.cli.CoverageAggregator.update_bundle",
-        lambda _self, _bundle: None,
-    )
-
-    code = main(
-        [
-            "generate",
-            "--config",
-            str(config_path),
-            "--num-datasets",
-            "1",
-            "--device",
-            "cpu",
-            "--hardware-policy",
-            "none",
-            "--no-dataset-write",
-        ]
-    )
-    assert code == 0
-    worker_dir = tmp_path / "run" / "worker_00001_of_00002"
-    assert (worker_dir / "effective_config.yaml").exists()
-    assert (worker_dir / "effective_config_trace.yaml").exists()
-    assert (worker_dir / "coverage_summary.json").exists()
-    assert (worker_dir / "coverage_summary.md").exists()
 
 
 def test_fixed_layout_sample_cli_writes_plan_artifact(tmp_path: Path) -> None:
@@ -363,87 +261,14 @@ def test_fixed_layout_generate_cli_forwards_device_override(
     assert captured["device"] == "cpu"
 
 
-def test_benchmark_cli_accepts_cpu_multi_worker_root_config(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+def test_benchmark_cli_rejects_removed_parallel_generation_runtime_keys(
+    tmp_path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.runtime.worker_count = 2
-    cfg.runtime.worker_index = 0
-    cfg.runtime.device = "auto"
-    config_path = tmp_path / "benchmark_multi_worker.yaml"
-    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
-
-    captured: dict[str, object] = {}
-
-    def _stub_run_benchmark_suite(
-        preset_specs,
-        **kwargs,
-    ):
-        captured["preset_specs"] = preset_specs
-        captured.update(kwargs)
-        return {"preset_results": [], "regression": {"status": "pass", "issues": []}}
-
-    monkeypatch.setattr("dagzoo.cli.run_benchmark_suite", _stub_run_benchmark_suite)
-
-    code = main(
-        [
-            "benchmark",
-            "--config",
-            str(config_path),
-            "--preset",
-            "custom",
-            "--suite",
-            "smoke",
-            "--no-memory",
-        ]
+    config_path = tmp_path / "benchmark_removed_parallel_runtime.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"runtime": {"worker_count": 2, "worker_index": 0}}),
+        encoding="utf-8",
     )
-
-    assert code == 0
-    preset_specs = captured["preset_specs"]
-    assert isinstance(preset_specs, list)
-    assert len(preset_specs) == 1
-    assert getattr(preset_specs[0], "device", None) == "auto"
-
-
-def test_benchmark_cli_rejects_ignored_multi_worker_config_for_builtin_preset(
-    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.runtime.worker_count = 2
-    cfg.runtime.worker_index = 0
-    cfg.runtime.device = "cpu"
-    config_path = tmp_path / "benchmark_multi_worker_builtin_preset.yaml"
-    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
-
-    monkeypatch.setattr(
-        "dagzoo.cli.run_benchmark_suite",
-        lambda *_args, **_kwargs: pytest.fail("run_benchmark_suite should not be called"),
-    )
-
-    with pytest.raises(SystemExit) as exc:
-        main(
-            [
-                "benchmark",
-                "--config",
-                str(config_path),
-                "--preset",
-                "cpu",
-                "--suite",
-                "smoke",
-                "--no-memory",
-            ]
-        )
-
-    assert int(exc.value.code) == 2
-    assert "--preset custom" in capsys.readouterr().err
-
-
-def test_benchmark_cli_rejects_multi_worker_nonzero_worker_index(tmp_path) -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.runtime.worker_count = 2
-    cfg.runtime.worker_index = 1
-    config_path = tmp_path / "benchmark_multi_worker.yaml"
-    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
 
     with pytest.raises(SystemExit) as exc:
         main(
@@ -458,52 +283,12 @@ def test_benchmark_cli_rejects_multi_worker_nonzero_worker_index(tmp_path) -> No
                 "--no-memory",
             ]
         )
+
     assert int(exc.value.code) == 2
-
-
-def test_benchmark_cli_allows_multi_worker_explicit_cuda_preflight(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.runtime.worker_count = 2
-    cfg.runtime.worker_index = 0
-    cfg.runtime.device = "cpu"
-    config_path = tmp_path / "benchmark_multi_worker_cuda.yaml"
-    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
-    captured: dict[str, object] = {}
-
-    def _stub_run_benchmark_suite(
-        preset_specs,
-        **kwargs,
-    ):
-        captured["preset_specs"] = preset_specs
-        captured.update(kwargs)
-        return {"preset_results": [], "regression": {"status": "pass", "issues": []}}
-
-    monkeypatch.setattr("dagzoo.cli.run_benchmark_suite", _stub_run_benchmark_suite)
-
-    code = main(
-        [
-            "benchmark",
-            "--config",
-            str(config_path),
-            "--preset",
-            "custom",
-            "--suite",
-            "smoke",
-            "--no-memory",
-            "--num-datasets",
-            "1",
-            "--device",
-            "cuda",
-        ]
+    assert (
+        "runtime.worker_count, runtime.worker_index is no longer supported"
+        in capsys.readouterr().err
     )
-
-    assert code == 0
-    preset_specs = captured["preset_specs"]
-    assert isinstance(preset_specs, list)
-    assert len(preset_specs) == 1
-    assert getattr(preset_specs[0], "device", None) == "cuda"
 
 
 def test_benchmark_cli_rejects_device_override_with_multiple_presets(
@@ -538,12 +323,12 @@ def test_benchmark_cli_rejects_device_override_with_multiple_presets(
     assert "multiple --preset values" in captured.err
 
 
-def test_diversity_audit_cli_rejects_worker_partition_config(tmp_path) -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.runtime.worker_count = 2
-    cfg.runtime.worker_index = 1
-    config_path = tmp_path / "diversity_multi_worker.yaml"
-    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+def test_diversity_audit_cli_rejects_removed_parallel_generation_runtime_keys(tmp_path) -> None:
+    config_path = tmp_path / "diversity_removed_parallel_runtime.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"runtime": {"worker_count": 2, "worker_index": 1}}),
+        encoding="utf-8",
+    )
 
     with pytest.raises(SystemExit) as exc:
         main(
@@ -648,8 +433,11 @@ def test_generate_cli_uses_default_config_without_noise_overrides(
     assert captured["called"] is True
 
 
-def test_generate_cli_applies_rows_override_no_write(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_generate_cli_applies_rows_override_no_write(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     captured: dict[str, object] = {}
+    out_dir = tmp_path / "rows_override_run"
 
     def _stub_generate_batch_iter(
         config,
@@ -659,6 +447,8 @@ def test_generate_cli_applies_rows_override_no_write(monkeypatch: pytest.MonkeyP
         device: str | None = None,
     ):
         captured["rows_spec"] = config.dataset.rows
+        captured["n_train"] = int(config.dataset.n_train)
+        captured["n_test"] = int(config.dataset.n_test)
         _ = seed
         _ = device
         for _ in range(num_datasets):
@@ -679,15 +469,43 @@ def test_generate_cli_applies_rows_override_no_write(monkeypatch: pytest.MonkeyP
             "cpu",
             "--hardware-policy",
             "none",
+            "--out",
+            str(out_dir),
             "--no-dataset-write",
         ]
     )
     assert code == 0
     rows_spec = captured["rows_spec"]
     assert rows_spec is not None
-    assert rows_spec.mode == "range"
-    assert rows_spec.start == 400
-    assert rows_spec.stop == 60000
+    assert rows_spec.mode == "fixed"
+    assert int(rows_spec.value) == captured["n_train"] + captured["n_test"]
+    effective_config = yaml.safe_load(
+        (out_dir / "effective_config.yaml").read_text(encoding="utf-8")
+    )
+    assert effective_config["dataset"]["rows"]["mode"] == "fixed"
+    assert int(effective_config["dataset"]["rows"]["value"]) == int(rows_spec.value)
+    trace_payload = yaml.safe_load(
+        (out_dir / "effective_config_trace.yaml").read_text(encoding="utf-8")
+    )
+    assert isinstance(trace_payload, list)
+    realization_events = [
+        item
+        for item in trace_payload
+        if isinstance(item, dict) and item.get("source") == "generate.run_realization"
+    ]
+    assert realization_events
+    assert any(
+        isinstance(item, dict)
+        and item.get("path") == "dataset.n_train"
+        and int(item["new_value"]) == int(effective_config["dataset"]["n_train"])
+        for item in realization_events
+    )
+    assert any(
+        isinstance(item, dict)
+        and item.get("path") == "dataset.rows.value"
+        and int(item["new_value"]) == int(effective_config["dataset"]["rows"]["value"])
+        for item in realization_events
+    )
 
 
 def test_generate_cli_writes_resolution_trace_artifact_no_write(

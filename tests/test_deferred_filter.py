@@ -9,7 +9,25 @@ from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 from dagzoo.types import DatasetBundle
 
 
-def _bundle_with_embedded_config(seed: int) -> DatasetBundle:
+def _bundle_with_embedded_config(
+    seed: int,
+    *,
+    dataset_seed: int | None = None,
+    dataset_index: int | None = None,
+) -> DatasetBundle:
+    metadata = {
+        "seed": seed,
+        "filter": {"mode": "deferred", "status": "not_run"},
+        "config": {
+            "dataset": {"task": "classification"},
+            "filter": {"enabled": True},
+        },
+    }
+    if dataset_seed is not None:
+        metadata["dataset_seed"] = int(dataset_seed)
+    if dataset_index is not None:
+        metadata["dataset_index"] = int(dataset_index)
+
     return DatasetBundle(
         X_train=np.array(
             [
@@ -23,14 +41,7 @@ def _bundle_with_embedded_config(seed: int) -> DatasetBundle:
         X_test=np.array([[1.5, 0.5], [0.5, 1.5]], dtype=np.float32),
         y_test=np.array([1, 0], dtype=np.int64),
         feature_types=["num", "num"],
-        metadata={
-            "seed": seed,
-            "filter": {"mode": "deferred", "status": "not_run"},
-            "config": {
-                "dataset": {"task": "classification"},
-                "filter": {"enabled": True},
-            },
-        },
+        metadata=metadata,
     )
 
 
@@ -152,3 +163,32 @@ def test_run_deferred_filter_requires_fallback_config_when_metadata_lacks_filter
     result = run_deferred_filter(in_dir=in_dir, out_dir=out_dir, config=cfg)
     assert result.total_datasets == 1
     assert result.accepted_datasets == 1
+
+
+def test_run_deferred_filter_prefers_dataset_seed_when_present(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("pyarrow.parquet")
+
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "filter_out"
+    bundles = [
+        _bundle_with_embedded_config(101, dataset_seed=501, dataset_index=0),
+        _bundle_with_embedded_config(102, dataset_seed=502, dataset_index=1),
+    ]
+    _ = write_packed_parquet_shards_stream(bundles, in_dir, shard_size=2, compression="zstd")
+
+    replay_seeds: list[int] = []
+
+    def _stub_filter(*_args, **_kwargs):
+        replay_seeds.append(int(_kwargs["seed"]))
+        return True, {"wins_ratio": 1.0, "n_valid_oob": 128}
+
+    monkeypatch.setattr("dagzoo.filtering.deferred_filter.apply_extra_trees_filter", _stub_filter)
+
+    result = run_deferred_filter(in_dir=in_dir, out_dir=out_dir)
+
+    assert result.total_datasets == 2
+    assert result.accepted_datasets == 2
+    assert replay_seeds == [501, 502]

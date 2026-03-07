@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from dagzoo.config import GeneratorConfig
-from dagzoo.core.dataset import generate_one
+from dagzoo.core.dataset import generate_batch, generate_one
 from dagzoo.io import resolve_lineage_path
 from dagzoo.io.lineage_artifact import unpack_upper_triangle_adjacency
 from dagzoo.io.lineage_schema import (
@@ -150,6 +150,36 @@ def test_write_packed_parquet_shards_stream_writes_real_parquet_tables(tmp_path)
     train_x = train_table.column("x").to_pylist()
     assert len(train_x[0]) == 2
     assert train_x[0] == [1.0, 1.0]
+
+
+def test_write_packed_parquet_shards_stream_preserves_canonical_replay_metadata(tmp_path) -> None:
+    pytest.importorskip("pyarrow.parquet")
+
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.runtime.device = "cpu"
+    cfg.filter.enabled = False
+    cfg.dataset.task = "regression"
+    cfg.dataset.n_train = 32
+    cfg.dataset.n_test = 8
+    cfg.dataset.n_features_min = 8
+    cfg.dataset.n_features_max = 8
+    cfg.graph.n_nodes_min = 2
+    cfg.graph.n_nodes_max = 6
+
+    bundles = generate_batch(cfg, num_datasets=2, seed=4321, device="cpu")
+    written = write_packed_parquet_shards_stream(
+        bundles, tmp_path, shard_size=2, compression="zstd"
+    )
+
+    assert written == 2
+    records = _load_metadata_records(tmp_path / "shard_00000" / "metadata.ndjson")
+    assert [int(record["dataset_index"]) for record in records] == [0, 1]
+    metadata = [record["metadata"] for record in records]
+    assert [int(payload["seed"]) for payload in metadata] == [4321, 4321]
+    assert [int(payload["dataset_index"]) for payload in metadata] == [0, 1]
+    assert [int(payload["run_num_datasets"]) for payload in metadata] == [2, 2]
+    dataset_seeds = [int(payload["dataset_seed"]) for payload in metadata]
+    assert len(set(dataset_seeds)) == 2
 
 
 def test_write_packed_parquet_shards_stream_preserves_float_targets(tmp_path) -> None:

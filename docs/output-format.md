@@ -92,7 +92,7 @@ Each line contains:
 | `feature_types` | list[str] | Per-feature type annotations (`num`/`cat`)   |
 | `metadata`      | object    | The dataset metadata payload described below |
 
-`metadata` contains the same object fields as before.
+`metadata` contains the dataset-level generation metadata described below.
 
 ### Top-level keys
 
@@ -111,7 +111,10 @@ Each line contains:
 | `graph_edges`                | int         | Number of edges in the DAG                                                                         |
 | `graph_depth_nodes`          | int         | Longest path length in the DAG                                                                     |
 | `graph_edge_density`         | float       | Edge count / max possible edges                                                                    |
-| `seed`                       | int         | Base seed for this dataset                                                                         |
+| `seed`                       | int         | Replay seed recorded by the emitting API. Canonical generation stores the shared run seed here.    |
+| `dataset_seed`               | int         | Optional canonical per-dataset child seed derived from `seed`                                      |
+| `dataset_index`              | int         | Optional canonical dataset position within the run (0-based)                                       |
+| `run_num_datasets`           | int         | Optional canonical run length used to replay the saved bundle                                      |
 | `attempt_used`               | int         | Generation attempt index (0-based)                                                                 |
 | `lineage`                    | object      | DAG lineage record (see Lineage below)                                                             |
 | `shift`                      | object      | Resolved shift settings and realized observability signals                                         |
@@ -126,6 +129,13 @@ Each line contains:
 | `layout_plan_signature`      | str         | Optional deterministic fingerprint for the frozen fixed-layout execution plan                      |
 | `layout_plan_schema_version` | int         | Optional fixed-layout plan schema version used to sample the shared plan                           |
 | `layout_execution_contract`  | str         | Optional fixed-layout execution contract for deterministic replay                                  |
+
+For canonical generation (`generate_one`, `generate_batch`, `generate_batch_iter`,
+and `dagzoo generate`), replay later bundles with the shared `seed`,
+`run_num_datasets`, and `dataset_index` by regenerating the canonical batch and
+selecting that index. `dataset_seed` preserves the per-bundle child seed for
+internal replay and diagnostics. Explicit fixed-layout generation keeps using
+the saved plan plus its per-dataset `seed`.
 
 ### Shift sub-object
 
@@ -191,11 +201,12 @@ Present only for classification datasets.
 | `min_label`              | int or null | Minimum emitted class label                        |
 | `max_label`              | int or null | Maximum emitted class label                        |
 
-### Fixed-layout metadata (optional)
+### Fixed-layout metadata
 
-Present only for outputs emitted by fixed-layout batch APIs. These bundles
-share one sampled layout and preserve emitted column alignment (feature count,
-column order, and lineage feature-to-node mapping).
+Present for all canonical generation outputs. These bundles share one sampled
+layout per run and preserve emitted column alignment (feature count, column
+order, and lineage feature-to-node mapping) within that run. Explicit
+fixed-layout replay uses the same metadata contract.
 
 | Key                          | Type | Description                                                   |
 | ---------------------------- | ---- | ------------------------------------------------------------- |
@@ -206,9 +217,10 @@ column order, and lineage feature-to-node mapping).
 | `layout_plan_schema_version` | int  | Serialized fixed-layout plan schema version                   |
 | `layout_execution_contract`  | str  | Fixed-layout execution contract (`chunk_batched_v1`)          |
 
-Fixed-layout APIs validate that the provided `config` remains compatible with
-the sampled plan before generation. This prevents plan-driven emitted tensors
-from disagreeing with `metadata.config` on layout-driving fields.
+Explicit fixed-layout replay validates that the provided `config` remains
+compatible with the sampled plan before generation. This prevents plan-driven
+emitted tensors from disagreeing with `metadata.config` on layout-driving
+fields.
 Under `chunk_batched_v1`, fixed-layout outputs are deterministic for the same
 plan, run seed, and fixed-layout batch size; changing the batch size may change
 the emitted values. The plan's stored device fields are provenance; replay uses
@@ -329,12 +341,12 @@ protected by a SHA-256 checksum recorded in the metadata.
 
 **Postprocessing invariants**:
 
-- Standard generation (`generate_one`, `generate_batch`, `generate_batch_iter`)
-  removes constant columns and may permute feature columns during postprocess.
-- Fixed-layout generation (`generate_batch_fixed_layout`,
-  `generate_batch_fixed_layout_iter`) preserves emitted feature schema across
-  the batch: constant-column removal and feature-column permutation are
-  disabled.
+- Canonical generation (`generate_one`, `generate_batch`, `generate_batch_iter`)
+  is fixed-layout-backed and preserves emitted feature schema across the run:
+  constant-column removal and feature-column permutation are disabled.
+- Explicit fixed-layout generation (`generate_batch_fixed_layout`,
+  `generate_batch_fixed_layout_iter`) preserves the same emitted-schema contract
+  for saved-plan replay.
 - Numeric features are clipped and standardized (approximately zero mean,
   unit variance).
 - Classification target classes are randomly permuted (label indices carry

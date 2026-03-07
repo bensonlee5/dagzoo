@@ -30,8 +30,6 @@ def test_load_default_config() -> None:
     assert cfg.filter.max_depth >= 0
     assert cfg.filter.max_features == "auto"
     assert cfg.filter.n_jobs == -1
-    assert cfg.runtime.worker_count == 1
-    assert cfg.runtime.worker_index == 0
     assert cfg.dataset.missing_rate == 0.0
     assert cfg.dataset.missing_mechanism == MISSINGNESS_MECHANISM_NONE
     assert cfg.dataset.missing_mar_observed_fraction == 0.5
@@ -282,30 +280,9 @@ def test_runtime_config_from_dict() -> None:
     assert "linearity_proxy" in cfg.diagnostics.meta_feature_targets
 
 
-def test_runtime_config_accepts_worker_partition_fields() -> None:
-    cfg = GeneratorConfig.from_dict({"runtime": {"worker_count": 4, "worker_index": 2}})
-    assert cfg.runtime.worker_count == 4
-    assert cfg.runtime.worker_index == 2
-
-
-@pytest.mark.parametrize("value", [0, -1, True])
-def test_runtime_worker_count_rejects_invalid_values(value: int | bool) -> None:
-    with pytest.raises(ValueError, match=r"runtime\.worker_count must be an integer >= 1"):
-        GeneratorConfig.from_dict({"runtime": {"worker_count": value}})
-
-
-@pytest.mark.parametrize("value", [-1, True])
-def test_runtime_worker_index_rejects_invalid_values(value: int | bool) -> None:
-    with pytest.raises(ValueError, match=r"runtime\.worker_index must be an integer >= 0"):
-        GeneratorConfig.from_dict({"runtime": {"worker_index": value}})
-
-
-def test_runtime_worker_index_rejects_values_not_less_than_worker_count() -> None:
-    with pytest.raises(
-        ValueError,
-        match=r"runtime\.worker_index must be < runtime\.worker_count",
-    ):
-        GeneratorConfig.from_dict({"runtime": {"worker_count": 2, "worker_index": 2}})
+def test_runtime_config_rejects_removed_parallel_generation_keys() -> None:
+    with pytest.raises(ValueError, match=r"runtime\.worker_count, runtime\.worker_index"):
+        GeneratorConfig.from_dict({"runtime": {"worker_count": 4, "worker_index": 2}})
 
 
 def test_runtime_config_rejects_generation_engine_key() -> None:

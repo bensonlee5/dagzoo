@@ -9,7 +9,11 @@ from dagzoo.config import (
     NOISE_FAMILY_LAPLACE,
     NOISE_FAMILY_STUDENT_T,
 )
-from dagzoo.core.constants import NODE_SPEC_SEED_OFFSET, SPLIT_PERMUTATION_SEED_OFFSET
+from dagzoo.core.constants import (
+    FIXED_LAYOUT_PLAN_SEED_OFFSET,
+    NODE_SPEC_SEED_OFFSET,
+    SPLIT_PERMUTATION_SEED_OFFSET,
+)
 from dagzoo.core.dataset import (
     FixedLayoutPlan,
     generate_batch,
@@ -18,6 +22,10 @@ from dagzoo.core.dataset import (
     generate_batch_iter,
     generate_one,
     sample_fixed_layout,
+)
+from dagzoo.core.fixed_layout import (
+    _resolve_fixed_layout_batch_size,
+    prepare_canonical_fixed_layout_run,
 )
 from dagzoo.core.generation_context import _attempt_seed, _node_spec_seed, _split_permutation_seed
 from dagzoo.core.generation_engine import _generate_torch, _parent_node_indices
@@ -114,7 +122,7 @@ def test_dataset_seed_helpers_match_offset_seed32_formulas() -> None:
 
 
 def test_generate_one_shapes() -> None:
-    cfg = _tiny_config()
+    cfg = _tiny_regression_config()
     bundle = generate_one(cfg, seed=7, device="cpu")
     assert isinstance(bundle.X_train, torch.Tensor)
     assert bundle.X_train.shape[0] == cfg.dataset.n_train
@@ -124,7 +132,7 @@ def test_generate_one_shapes() -> None:
 
 
 def test_generate_one_uses_fixed_dataset_rows_and_updates_metadata_config_split() -> None:
-    cfg = _tiny_config()
+    cfg = _tiny_regression_config()
     cfg.dataset.rows = 1024  # type: ignore[assignment]
     cfg.dataset.n_test = 256
     cfg.dataset.n_train = 32
@@ -145,12 +153,28 @@ def test_generate_batch_rows_choices_are_seed_reproducible() -> None:
     batch_b = generate_batch(cfg, num_datasets=5, seed=19, device="cpu")
 
     allowed_train_sizes = {768, 1792, 3840}
+    assert {int(bundle.X_train.shape[0]) for bundle in batch_a} <= allowed_train_sizes
+    assert {int(bundle.X_train.shape[0]) for bundle in batch_b} <= allowed_train_sizes
+    assert {int(bundle.X_train.shape[0]) for bundle in batch_a} == {
+        int(batch_a[0].X_train.shape[0])
+    }
+    assert {int(bundle.X_train.shape[0]) for bundle in batch_b} == {
+        int(batch_b[0].X_train.shape[0])
+    }
     for bundle_a, bundle_b in zip(batch_a, batch_b, strict=True):
         assert int(bundle_a.X_train.shape[0]) in allowed_train_sizes
         assert int(bundle_b.X_train.shape[0]) in allowed_train_sizes
         assert int(bundle_a.X_train.shape[0]) == int(bundle_b.X_train.shape[0])
         assert int(bundle_a.X_test.shape[0]) == 256
         assert int(bundle_b.X_test.shape[0]) == 256
+        assert (
+            bundle_a.metadata["layout_plan_signature"]
+            == batch_a[0].metadata["layout_plan_signature"]
+        )
+        assert (
+            bundle_b.metadata["layout_plan_signature"]
+            == batch_b[0].metadata["layout_plan_signature"]
+        )
 
 
 def test_generate_one_emits_lineage_metadata_schema_fields() -> None:
@@ -478,19 +502,31 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
         target_node_assignment=2,
     )
 
-    monkeypatch.setattr(
-        "dagzoo.core.generation_engine._sample_layout",
-        lambda *_args, **_kwargs: layout,
-    )
+    monkeypatch.setattr("dagzoo.core.fixed_layout._sample_layout", lambda *_args, **_kwargs: layout)
 
-    def _stub_generate_graph_dataset_torch(_config, _layout, _seed, _device, *, n_rows, **_kwargs):
-        x = torch.arange(n_rows * 4, dtype=torch.float32).reshape(n_rows, 4)
-        y = torch.linspace(0.0, 1.0, n_rows, dtype=torch.float32)
-        return x, y, {"filter": {"enabled": False}}
+    def _stub_generate_fixed_layout_graph_batch(
+        _config,
+        _layout,
+        *,
+        node_plans,
+        dataset_seeds,
+        device,
+        noise_sigma_multiplier,
+        noise_spec,
+    ):
+        _ = node_plans
+        _ = dataset_seeds
+        _ = device
+        _ = noise_sigma_multiplier
+        _ = noise_spec
+        n_rows = int(cfg.dataset.n_train + cfg.dataset.n_test)
+        x = torch.arange(n_rows * 4, dtype=torch.float32).reshape(1, n_rows, 4)
+        y = torch.linspace(0.0, 1.0, n_rows, dtype=torch.float32).reshape(1, n_rows)
+        return x, y, [{"filter": {"enabled": False}}]
 
     monkeypatch.setattr(
-        "dagzoo.core.generation_engine._generate_graph_dataset_torch",
-        _stub_generate_graph_dataset_torch,
+        "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
+        _stub_generate_fixed_layout_graph_batch,
     )
 
     def _stub_postprocess_dataset(
@@ -507,7 +543,7 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
         preserve_feature_schema=False,
     ):
         assert return_feature_index_map is True
-        assert preserve_feature_schema is False
+        assert preserve_feature_schema is True
         index_map = [2, 0, 3]
         reordered_types = [feature_types[i] for i in index_map]
         return (
@@ -777,6 +813,80 @@ def test_generate_batch_iter_matches_batch_ordering() -> None:
     for a, b in zip(batch, streamed, strict=True):
         np.testing.assert_allclose(np.asarray(a.X_train), np.asarray(b.X_train), atol=1e-6)
         assert a.metadata["seed"] == b.metadata["seed"]
+        assert a.metadata["dataset_seed"] == b.metadata["dataset_seed"]
+        assert a.metadata["dataset_index"] == b.metadata["dataset_index"]
+        assert a.metadata["run_num_datasets"] == b.metadata["run_num_datasets"]
+        assert a.metadata["layout_plan_signature"] == b.metadata["layout_plan_signature"]
+
+
+def test_generate_one_matches_first_dataset_of_generate_batch() -> None:
+    cfg = _tiny_regression_config()
+
+    single = generate_one(cfg, seed=4321, device="cpu")
+    batch = generate_batch(cfg, num_datasets=1, seed=4321, device="cpu")
+
+    assert len(batch) == 1
+    np.testing.assert_allclose(np.asarray(single.X_train), np.asarray(batch[0].X_train), atol=1e-6)
+    np.testing.assert_allclose(np.asarray(single.X_test), np.asarray(batch[0].X_test), atol=1e-6)
+    np.testing.assert_allclose(np.asarray(single.y_train), np.asarray(batch[0].y_train), atol=1e-6)
+    np.testing.assert_allclose(np.asarray(single.y_test), np.asarray(batch[0].y_test), atol=1e-6)
+    assert int(single.metadata["seed"]) == 4321
+    assert int(batch[0].metadata["seed"]) == 4321
+    assert int(single.metadata["dataset_seed"]) == int(batch[0].metadata["dataset_seed"])
+    assert int(single.metadata["dataset_index"]) == 0
+    assert int(batch[0].metadata["dataset_index"]) == 0
+    assert int(single.metadata["run_num_datasets"]) == 1
+    assert int(batch[0].metadata["run_num_datasets"]) == 1
+    assert single.metadata["layout_plan_signature"] == batch[0].metadata["layout_plan_signature"]
+
+
+def test_generate_batch_metadata_preserves_run_seed_and_dataset_indices() -> None:
+    cfg = _tiny_regression_config()
+
+    batch = generate_batch(cfg, num_datasets=3, seed=4321, device="cpu")
+
+    assert [int(bundle.metadata["seed"]) for bundle in batch] == [4321, 4321, 4321]
+    assert [int(bundle.metadata["dataset_index"]) for bundle in batch] == [0, 1, 2]
+    assert [int(bundle.metadata["run_num_datasets"]) for bundle in batch] == [3, 3, 3]
+    dataset_seeds = [int(bundle.metadata["dataset_seed"]) for bundle in batch]
+    assert len(set(dataset_seeds)) == 3
+
+
+def test_generate_batch_bundle_replays_from_run_metadata() -> None:
+    cfg = _tiny_regression_config()
+
+    batch = generate_batch(cfg, num_datasets=3, seed=4321, device="cpu")
+
+    for bundle in (batch[0], batch[2]):
+        dataset_index = int(bundle.metadata["dataset_index"])
+        replayed = generate_batch(
+            cfg,
+            num_datasets=int(bundle.metadata["run_num_datasets"]),
+            seed=int(bundle.metadata["seed"]),
+            device="cpu",
+        )[dataset_index]
+
+        np.testing.assert_allclose(
+            np.asarray(bundle.X_train), np.asarray(replayed.X_train), atol=1e-6
+        )
+        np.testing.assert_allclose(
+            np.asarray(bundle.X_test), np.asarray(replayed.X_test), atol=1e-6
+        )
+        np.testing.assert_allclose(
+            np.asarray(bundle.y_train), np.asarray(replayed.y_train), atol=1e-6
+        )
+        np.testing.assert_allclose(
+            np.asarray(bundle.y_test), np.asarray(replayed.y_test), atol=1e-6
+        )
+        assert int(bundle.metadata["seed"]) == int(replayed.metadata["seed"])
+        assert int(bundle.metadata["dataset_seed"]) == int(replayed.metadata["dataset_seed"])
+        assert int(bundle.metadata["dataset_index"]) == int(replayed.metadata["dataset_index"])
+        assert int(bundle.metadata["run_num_datasets"]) == int(
+            replayed.metadata["run_num_datasets"]
+        )
+        assert (
+            bundle.metadata["layout_plan_signature"] == replayed.metadata["layout_plan_signature"]
+        )
 
 
 def test_sample_fixed_layout_rejects_variable_rows_spec() -> None:
@@ -1166,22 +1276,58 @@ def test_generate_rejects_inline_filter_enabled() -> None:
 def test_auto_retries_on_cpu_when_mps_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
-    def _stub_generate_torch(_config, _layout, _seed, device, **_kwargs):
-        calls.append(device)
+    def _stub_generate_fixed_layout_graph_batch(
+        _config,
+        _layout,
+        *,
+        node_plans,
+        dataset_seeds,
+        device,
+        noise_sigma_multiplier,
+        noise_spec,
+    ):
+        _ = node_plans
+        _ = dataset_seeds
+        _ = noise_sigma_multiplier
+        _ = noise_spec
+        calls.append(str(device))
         if device == "mps":
             raise RuntimeError("simulated mps failure")
-        return DatasetBundle(
-            X_train=torch.zeros((2, 2), dtype=torch.float32),
-            y_train=torch.zeros(2, dtype=torch.int64),
-            X_test=torch.zeros((1, 2), dtype=torch.float32),
-            y_test=torch.zeros(1, dtype=torch.int64),
-            feature_types=["num", "num"],
-            metadata={"backend": "torch", "device": "cpu"},
+        return (
+            torch.zeros((1, 3, 2), dtype=torch.float32),
+            torch.zeros((1, 3), dtype=torch.float32),
+            [{}],
         )
 
-    monkeypatch.setattr("dagzoo.core.generation_context._resolve_device", lambda *_args: "mps")
-    monkeypatch.setattr("dagzoo.core.generation_engine._generate_torch", _stub_generate_torch)
-    cfg = _tiny_config()
+    def _stub_finalize_generated_tensors(*_args, **kwargs) -> DatasetBundle:
+        return DatasetBundle(
+            X_train=torch.zeros((2, 2), dtype=torch.float32),
+            y_train=torch.zeros(2, dtype=torch.float32),
+            X_test=torch.zeros((1, 2), dtype=torch.float32),
+            y_test=torch.zeros(1, dtype=torch.float32),
+            feature_types=["num", "num"],
+            metadata={
+                "backend": "torch",
+                "resolved_device": kwargs["resolved_device"],
+                "lineage": {
+                    "assignments": {
+                        "feature_to_node": [0, 1],
+                        "target_to_node": 1,
+                    }
+                },
+            },
+        )
+
+    monkeypatch.setattr("dagzoo.core.fixed_layout._resolve_device", lambda *_args, **_kwargs: "mps")
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
+        _stub_generate_fixed_layout_graph_batch,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._finalize_generated_tensors",
+        _stub_finalize_generated_tensors,
+    )
+    cfg = _tiny_regression_config()
 
     bundle = generate_one(cfg, seed=123, device="auto")
     assert calls == ["mps", "cpu"]
@@ -1265,7 +1411,10 @@ def test_auto_does_not_fallback_to_numpy_if_torch_runtime_fails(
     def _raise_runtime(*_args, **_kwargs):
         raise RuntimeError("simulated torch runtime failure")
 
-    monkeypatch.setattr("dagzoo.core.generation_engine._generate_torch", _raise_runtime)
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
+        _raise_runtime,
+    )
     cfg = _tiny_config()
 
     with pytest.raises(RuntimeError, match="simulated torch runtime failure"):
@@ -1439,6 +1588,170 @@ def test_generate_retries_when_stratified_split_is_infeasible(
 
     with pytest.raises(ValueError, match=r"Last reason: invalid_class_split"):
         generate_one(cfg, seed=99, device="cpu")
+
+
+def test_prepare_canonical_fixed_layout_run_validates_full_classification_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "classification"
+    cfg.filter.max_attempts = 2
+
+    first_plan = sample_fixed_layout(_tiny_regression_config(), seed=701, device="cpu")
+    second_plan = sample_fixed_layout(_tiny_regression_config(), seed=702, device="cpu")
+    sample_calls: list[int] = []
+    validation_calls: list[tuple[int, int, int, int]] = []
+
+    def _stub_sample_fixed_layout(
+        _config: GeneratorConfig,
+        *,
+        seed: int | None = None,
+        device: str | None = None,
+    ) -> FixedLayoutPlan:
+        assert device == "cpu"
+        assert seed is not None
+        sample_calls.append(int(seed))
+        return first_plan if len(sample_calls) == 1 else second_plan
+
+    def _stub_supports_classification_run(
+        _config: GeneratorConfig,
+        *,
+        plan: FixedLayoutPlan,
+        requested_device: str,
+        resolved_device: str,
+        run_seed: int,
+        num_datasets: int = 1,
+        batch_size: int = 1,
+    ) -> bool:
+        assert requested_device == "cpu"
+        assert resolved_device == "cpu"
+        validation_calls.append(
+            (int(plan.plan_seed), int(run_seed), int(num_datasets), int(batch_size))
+        )
+        return int(plan.plan_seed) == int(second_plan.plan_seed)
+
+    monkeypatch.setattr("dagzoo.core.fixed_layout.sample_fixed_layout", _stub_sample_fixed_layout)
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._fixed_layout_plan_supports_classification_run",
+        _stub_supports_classification_run,
+    )
+
+    prepared = prepare_canonical_fixed_layout_run(cfg, num_datasets=10, seed=16, device="cpu")
+    base_plan_seed = offset_seed32(16, FIXED_LAYOUT_PLAN_SEED_OFFSET)
+
+    assert sample_calls == [base_plan_seed, _attempt_seed(base_plan_seed, 1)]
+    assert validation_calls == [
+        (
+            int(first_plan.plan_seed),
+            16,
+            10,
+            _resolve_fixed_layout_batch_size(first_plan, num_datasets=10, batch_size=None),
+        ),
+        (
+            int(second_plan.plan_seed),
+            16,
+            10,
+            _resolve_fixed_layout_batch_size(second_plan, num_datasets=10, batch_size=None),
+        ),
+    ]
+    assert int(prepared.plan.plan_seed) == int(second_plan.plan_seed)
+    assert int(prepared.batch_size) == _resolve_fixed_layout_batch_size(
+        second_plan,
+        num_datasets=10,
+        batch_size=None,
+    )
+
+
+def test_prepare_canonical_fixed_layout_run_uses_lightweight_classification_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "classification"
+    cfg.filter.max_attempts = 2
+    plan = sample_fixed_layout(_tiny_regression_config(), seed=801, device="cpu")
+
+    def _stub_sample_fixed_layout(
+        _config: GeneratorConfig,
+        *,
+        seed: int | None = None,
+        device: str | None = None,
+    ) -> FixedLayoutPlan:
+        assert seed is not None
+        assert device == "cpu"
+        return plan
+
+    def _stub_generate_fixed_layout_graph_batch_with_fallback(
+        _config: GeneratorConfig,
+        _layout,
+        *,
+        node_plans,
+        dataset_seeds: list[int],
+        requested_device: str,
+        resolved_device: str,
+        noise_sigma_multiplier: float,
+        noise_spec,
+    ) -> tuple[torch.Tensor, torch.Tensor, list[dict[str, object]], str, str | None]:
+        _ = node_plans
+        _ = requested_device
+        _ = resolved_device
+        _ = noise_sigma_multiplier
+        _ = noise_spec
+        x_batch = torch.zeros((len(dataset_seeds), cfg.dataset.n_train + cfg.dataset.n_test, 1))
+        y_batch = torch.tensor(
+            [[0, 1] * ((cfg.dataset.n_train + cfg.dataset.n_test) // 2)] * len(dataset_seeds),
+            dtype=torch.int64,
+        )
+        aux_meta_batch = [{} for _ in dataset_seeds]
+        return x_batch, y_batch, aux_meta_batch, "cpu", None
+
+    monkeypatch.setattr("dagzoo.core.fixed_layout.sample_fixed_layout", _stub_sample_fixed_layout)
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._generate_fixed_layout_graph_batch_with_fallback",
+        _stub_generate_fixed_layout_graph_batch_with_fallback,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._finalize_generated_tensors",
+        lambda *_args, **_kwargs: pytest.fail(
+            "classification preflight should validate raw labels without finalizing bundles"
+        ),
+    )
+
+    prepared = prepare_canonical_fixed_layout_run(cfg, num_datasets=4, seed=17, device="cpu")
+
+    assert int(prepared.plan.plan_seed) == int(plan.plan_seed)
+
+
+def test_generate_batch_iter_classification_avoids_midstream_invalid_class_split() -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "classification"
+    cfg.dataset.n_train = 200
+    cfg.dataset.n_test = 200
+    cfg.dataset.n_classes_min = 20
+    cfg.dataset.n_classes_max = 20
+    cfg.filter.max_attempts = 2
+
+    batch = list(generate_batch_iter(cfg, num_datasets=10, seed=16, device="cpu"))
+
+    assert len(batch) == 10
+    assert {str(bundle.metadata["layout_plan_signature"]) for bundle in batch} == {
+        str(batch[0].metadata["layout_plan_signature"])
+    }
+    assert all(str(bundle.metadata["layout_mode"]) == "fixed" for bundle in batch)
+
+
+def test_generate_one_replays_from_emitted_metadata_seed() -> None:
+    cfg = _tiny_regression_config()
+
+    bundle = generate_one(cfg, seed=4321, device="cpu")
+    replayed = generate_one(cfg, seed=int(bundle.metadata["seed"]), device="cpu")
+
+    assert int(bundle.metadata["seed"]) == 4321
+    assert int(replayed.metadata["seed"]) == 4321
+    np.testing.assert_allclose(np.asarray(bundle.X_train), np.asarray(replayed.X_train), atol=1e-6)
+    np.testing.assert_allclose(np.asarray(bundle.X_test), np.asarray(replayed.X_test), atol=1e-6)
+    np.testing.assert_allclose(np.asarray(bundle.y_train), np.asarray(replayed.y_train), atol=1e-6)
+    np.testing.assert_allclose(np.asarray(bundle.y_test), np.asarray(replayed.y_test), atol=1e-6)
+    assert bundle.metadata["layout_plan_signature"] == replayed.metadata["layout_plan_signature"]
 
 
 def _tiny_missingness_config(

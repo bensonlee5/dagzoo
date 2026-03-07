@@ -383,7 +383,25 @@ def serialize_resolution_events(events: list[ResolutionEvent]) -> list[dict[str,
     return [asdict(event) for event in events]
 
 
+def append_config_diff_events(
+    before: GeneratorConfig,
+    after: GeneratorConfig,
+    *,
+    source: str,
+    events: list[ResolutionEvent],
+) -> None:
+    """Append trace events describing config differences between two states."""
+
+    _append_diff_events(
+        before.to_dict(),
+        after.to_dict(),
+        source=source,
+        events=events,
+    )
+
+
 __all__ = [
+    "append_config_diff_events",
     "BenchmarkSmokeCaps",
     "ResolutionEvent",
     "ResolvedBenchmarkPresetConfig",
