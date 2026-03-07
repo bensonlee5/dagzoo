@@ -36,6 +36,7 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
     assert payload["suite"] == "smoke"
     assert len(payload["preset_results"]) == 1
     profile = payload["preset_results"][0]
+    assert profile["generation_mode"] == "dynamic"
     assert float(profile["generation_datasets_per_minute"]) >= 0.0
     assert float(profile["write_datasets_per_minute"]) >= 0.0
     assert profile["filter_datasets_per_minute"] is None
@@ -104,6 +105,38 @@ def test_benchmark_cli_writes_effective_config_trace_artifacts(tmp_path) -> None
         isinstance(item, dict) and item.get("source") == "benchmark.suite_smoke_caps"
         for item in trace_payload
     )
+
+
+def test_benchmark_cli_builtin_cpu_reports_fixed_batched_generation_mode(tmp_path) -> None:
+    out = tmp_path / "summary.json"
+    code = main(
+        [
+            "benchmark",
+            "--preset",
+            "cpu",
+            "--suite",
+            "smoke",
+            "--num-datasets",
+            "1",
+            "--warmup",
+            "0",
+            "--hardware-policy",
+            "none",
+            "--no-memory",
+            "--json-out",
+            str(out),
+        ]
+    )
+    assert code == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    preset_results = payload["preset_results"]
+    assert [result["preset_key"] for result in preset_results] == [
+        "cpu_rows1024",
+        "cpu_rows4096",
+        "cpu_rows8192",
+    ]
+    assert [result["dataset_rows_total"] for result in preset_results] == [1024, 4096, 8192]
+    assert all(result["generation_mode"] == "fixed_batched" for result in preset_results)
 
 
 def test_benchmark_cli_fail_on_regression(tmp_path) -> None:

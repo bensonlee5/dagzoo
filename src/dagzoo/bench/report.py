@@ -44,8 +44,8 @@ def _build_preset_table(preset_results: list[dict[str, Any]]) -> list[str]:
     """Create a markdown table summarizing per-preset performance metrics."""
 
     lines = [
-        "| Preset | Device | Backend | Datasets/min | Gen/min | Write/min | Filter/min | Filter Reject % (attempt) | Filter Retry % (dataset) | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) | Diagnostics | Missingness | Lineage | Shift | Noise |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
+        "| Preset | Rows | Mode | Device | Backend | Datasets/min | Gen/min | Write/min | Filter/min | Filter Reject % (attempt) | Filter Retry % (dataset) | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) | Diagnostics | Missingness | Lineage | Shift | Noise |",
+        "|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
     ]
     for result in preset_results:
         diagnostics_state = "on" if bool(result.get("diagnostics_enabled")) else "off"
@@ -68,6 +68,8 @@ def _build_preset_table(preset_results: list[dict[str, Any]]) -> list[str]:
         lines.append(
             "| "
             f"{result.get('preset_key', '-')} | "
+            f"{result.get('dataset_rows_total', '-')} | "
+            f"{result.get('generation_mode', 'dynamic')} | "
             f"{result.get('device', '-')} | "
             f"{result.get('hardware_backend', '-')} | "
             f"{_format_float(result.get('datasets_per_minute'), 2)} | "

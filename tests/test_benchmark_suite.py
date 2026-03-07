@@ -8,8 +8,9 @@ import dagzoo.bench.guardrails as guardrails_mod
 import dagzoo.bench.suite as suite_mod
 from dagzoo.bench.micro import run_microbenchmarks
 from dagzoo.bench.report import write_suite_markdown
-from dagzoo.bench.suite import PresetRunSpec, run_benchmark_suite
+from dagzoo.bench.suite import PresetRunSpec, resolve_preset_run_specs, run_benchmark_suite
 from dagzoo.config import GeneratorConfig
+from dagzoo.core.fixed_layout import sample_fixed_layout
 from dagzoo.types import DatasetBundle
 
 
@@ -92,6 +93,7 @@ def test_run_benchmark_suite_smoke_single_profile() -> None:
 
     result = summary["preset_results"][0]
     assert result["preset_key"] == "cpu_test"
+    assert result["generation_mode"] == "dynamic"
     assert result["datasets_per_minute"] > 0
     assert result["generation_datasets_per_minute"] == pytest.approx(result["datasets_per_minute"])
     assert result["write_datasets_per_minute"] >= 0.0
@@ -110,6 +112,93 @@ def test_run_benchmark_suite_smoke_single_profile() -> None:
     lineage_guardrails = result["lineage_guardrails"]
     assert lineage_guardrails["enabled"] is True
     assert lineage_guardrails["status"] in {"pass", "warn", "fail"}
+
+
+def test_run_benchmark_suite_builtin_cpu_uses_fixed_layout_batched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_cpu_config()
+    cfg.benchmark.preset_name = "cpu"
+    cfg.benchmark.presets["cpu"] = {
+        "device": "cpu",
+        "num_datasets": 2,
+        "warmup_datasets": 0,
+    }
+    spec = PresetRunSpec(key="cpu", config=cfg, device="cpu")
+
+    captured: dict[str, object] = {}
+    sampled_plan = sample_fixed_layout(cfg, seed=77, device="cpu")
+
+    monkeypatch.setattr(
+        "dagzoo.bench.suite.sample_fixed_layout", lambda *_args, **_kwargs: sampled_plan
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.suite.run_throughput_benchmark",
+        lambda config, *, num_datasets, warmup_datasets=10, device=None, fixed_layout_plan=None, on_bundle=None: (
+            captured.update(
+                {
+                    "fixed_layout_plan": fixed_layout_plan,
+                    "device": device,
+                    "num_datasets": num_datasets,
+                }
+            )
+            or {
+                "preset": config.benchmark.preset_name,
+                "num_datasets": num_datasets,
+                "warmup_datasets": warmup_datasets,
+                "elapsed_seconds": 1.0,
+                "datasets_per_second": float(num_datasets),
+                "datasets_per_minute": float(num_datasets) * 60.0,
+                "slo_pass_100_datasets_per_min": True,
+                "generation_mode": "fixed_batched",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.suite._collect_latency",
+        lambda *_args, **_kwargs: {
+            "latency_samples": 1.0,
+            "latency_mean_ms": 1.0,
+            "latency_p95_ms": 1.0,
+            "latency_min_ms": 1.0,
+            "latency_max_ms": 1.0,
+        },
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.suite._collect_lineage_guardrails",
+        lambda *_args, **_kwargs: {"enabled": False},
+    )
+
+    summary = run_benchmark_suite(
+        [spec],
+        suite="smoke",
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+        baseline_payload=None,
+        num_datasets_override=2,
+        warmup_override=0,
+        collect_memory=False,
+        collect_reproducibility=False,
+        collect_diagnostics=False,
+        diagnostics_root_dir=None,
+        fail_on_regression=False,
+        hardware_policy="none",
+    )
+
+    result = summary["preset_results"][0]
+    assert result["generation_mode"] == "fixed_batched"
+    assert captured["fixed_layout_plan"] is sampled_plan
+
+
+def test_resolve_preset_run_specs_expands_builtin_cpu_rows() -> None:
+    specs = resolve_preset_run_specs(preset_keys=["cpu"], config_path=None)
+
+    assert [spec.key for spec in specs] == ["cpu_rows1024", "cpu_rows4096", "cpu_rows8192"]
+    assert [int(spec.config.dataset.n_train + spec.config.dataset.n_test) for spec in specs] == [
+        1024,
+        4096,
+        8192,
+    ]
 
 
 def test_run_benchmark_suite_marks_latency_unavailable_for_multi_worker_cpu(

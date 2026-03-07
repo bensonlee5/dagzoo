@@ -805,8 +805,23 @@ def test_sample_fixed_layout_is_deterministic_for_seed() -> None:
 
     assert plan_a.layout_signature == plan_b.layout_signature
     assert plan_a.plan_seed == plan_b.plan_seed
+    assert plan_a.plan_signature == plan_b.plan_signature
+    assert plan_a.node_plans == plan_b.node_plans
     assert int(plan_a.layout.n_features) == int(plan_b.layout.n_features)
     assert list(plan_a.layout.feature_types) == list(plan_b.layout.feature_types)
+
+
+def test_fixed_layout_plan_round_trips_via_dict() -> None:
+    cfg = _tiny_regression_config()
+    sampled = sample_fixed_layout(cfg, seed=90211, device="cpu")
+
+    restored = FixedLayoutPlan.from_dict(sampled.to_dict())
+
+    assert restored.layout_signature == sampled.layout_signature
+    assert restored.plan_signature == sampled.plan_signature
+    assert restored.node_plans == sampled.node_plans
+    assert restored.compatibility_snapshot == sampled.compatibility_snapshot
+    assert restored.plan_schema_version == sampled.plan_schema_version
 
 
 def test_generate_batch_fixed_layout_iter_matches_materialized_ordering() -> None:
@@ -824,6 +839,23 @@ def test_generate_batch_fixed_layout_iter_matches_materialized_ordering() -> Non
         assert b.metadata["layout_mode"] == "fixed"
 
 
+def test_generate_batch_fixed_layout_is_batch_size_independent() -> None:
+    cfg = _tiny_regression_config()
+    plan = sample_fixed_layout(cfg, seed=78, device="cpu")
+
+    batch_a = generate_batch_fixed_layout(cfg, plan=plan, num_datasets=3, seed=801, batch_size=1)
+    batch_b = generate_batch_fixed_layout(cfg, plan=plan, num_datasets=3, seed=801, batch_size=2)
+
+    assert len(batch_a) == len(batch_b)
+    for left, right in zip(batch_a, batch_b, strict=True):
+        np.testing.assert_allclose(np.asarray(left.X_train), np.asarray(right.X_train), atol=1e-6)
+        np.testing.assert_allclose(np.asarray(left.X_test), np.asarray(right.X_test), atol=1e-6)
+        np.testing.assert_allclose(np.asarray(left.y_train), np.asarray(right.y_train), atol=1e-6)
+        np.testing.assert_allclose(np.asarray(left.y_test), np.asarray(right.y_test), atol=1e-6)
+        assert left.metadata["seed"] == right.metadata["seed"]
+        assert left.metadata["layout_plan_signature"] == right.metadata["layout_plan_signature"]
+
+
 def test_generate_batch_fixed_layout_enforces_layout_reuse() -> None:
     cfg = _tiny_regression_config()
     plan = sample_fixed_layout(cfg, seed=101, device="cpu")
@@ -838,6 +870,7 @@ def test_generate_batch_fixed_layout_enforces_layout_reuse() -> None:
         assert bundle.metadata["layout_mode"] == "fixed"
         assert int(bundle.metadata["layout_plan_seed"]) == plan.plan_seed
         assert str(bundle.metadata["layout_signature"]) == layout_signature
+        assert str(bundle.metadata["layout_plan_signature"]) == str(plan.plan_signature)
         assert int(bundle.metadata["n_features"]) == n_features
         assert list(bundle.feature_types) == feature_types
         assert (
@@ -919,7 +952,7 @@ def test_generate_batch_fixed_layout_raises_on_schema_mismatch(
     plan = sample_fixed_layout(cfg, seed=11, device="cpu")
     calls: dict[str, int] = {"count": 0}
 
-    def _stub_generate_one_with_resolved_layout(*_args, **_kwargs) -> DatasetBundle:
+    def _stub_finalize_generated_tensors(*_args, **_kwargs) -> DatasetBundle:
         calls["count"] += 1
         n_features = 3 if calls["count"] == 1 else 2
         return DatasetBundle(
@@ -940,8 +973,8 @@ def test_generate_batch_fixed_layout_raises_on_schema_mismatch(
         )
 
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._generate_one_with_resolved_layout",
-        _stub_generate_one_with_resolved_layout,
+        "dagzoo.core.fixed_layout._finalize_generated_tensors",
+        _stub_finalize_generated_tensors,
     )
 
     with pytest.raises(ValueError, match="Fixed-layout schema mismatch"):

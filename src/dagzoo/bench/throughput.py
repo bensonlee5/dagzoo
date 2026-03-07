@@ -14,6 +14,7 @@ from dagzoo.bench.constants import (
 )
 from dagzoo.config import GeneratorConfig
 from dagzoo.core.dataset import generate_batch_iter
+from dagzoo.core.fixed_layout import FixedLayoutPlan, generate_batch_fixed_layout_iter
 from dagzoo.core.parallel_generation import (
     effective_local_parallel_worker_count,
     generate_parallel_batch_iter,
@@ -22,9 +23,16 @@ from dagzoo.rng import offset_seed32
 from dagzoo.types import DatasetBundle
 
 
-def _select_generation_iterator(config: GeneratorConfig, *, num_datasets: int) -> Any:
+def _select_generation_iterator(
+    config: GeneratorConfig,
+    *,
+    num_datasets: int,
+    fixed_layout_plan: FixedLayoutPlan | None = None,
+) -> Any:
     """Choose one generator path for the full benchmark run."""
 
+    if fixed_layout_plan is not None:
+        return generate_batch_fixed_layout_iter
     return (
         generate_parallel_batch_iter
         if effective_local_parallel_worker_count(int(config.runtime.worker_count), num_datasets) > 1
@@ -39,16 +47,21 @@ def _consume_generation(
     num_datasets: int,
     seed: int,
     device: str | None,
+    fixed_layout_plan: FixedLayoutPlan | None = None,
     on_bundle: Callable[[DatasetBundle], object] | None = None,
 ) -> None:
     """Run generation for ``num_datasets`` items while discarding outputs."""
 
-    for bundle in generator(
-        config,
-        num_datasets=num_datasets,
-        seed=seed,
-        device=device,
-    ):
+    generator_kwargs: dict[str, Any] = {
+        "num_datasets": num_datasets,
+        "seed": seed,
+    }
+    if fixed_layout_plan is not None:
+        generator_kwargs["plan"] = fixed_layout_plan
+    else:
+        generator_kwargs["device"] = device
+
+    for bundle in generator(config, **generator_kwargs):
         if on_bundle is not None:
             on_bundle(bundle)
 
@@ -59,11 +72,16 @@ def run_throughput_benchmark(
     num_datasets: int,
     warmup_datasets: int = 10,
     device: str | None = None,
+    fixed_layout_plan: FixedLayoutPlan | None = None,
     on_bundle: Callable[[DatasetBundle], object] | None = None,
 ) -> dict[str, Any]:
     """Measure end-to-end generation throughput for a benchmark preset."""
 
-    generator = _select_generation_iterator(config, num_datasets=num_datasets)
+    generator = _select_generation_iterator(
+        config,
+        num_datasets=num_datasets,
+        fixed_layout_plan=fixed_layout_plan,
+    )
     if warmup_datasets > 0:
         _consume_generation(
             generator,
@@ -71,6 +89,7 @@ def run_throughput_benchmark(
             num_datasets=warmup_datasets,
             seed=offset_seed32(config.seed, THROUGHPUT_WARMUP_SEED_OFFSET),
             device=device,
+            fixed_layout_plan=fixed_layout_plan,
         )
 
     start = time.perf_counter()
@@ -80,6 +99,7 @@ def run_throughput_benchmark(
         num_datasets=num_datasets,
         seed=offset_seed32(config.seed, THROUGHPUT_MEASURE_SEED_OFFSET),
         device=device,
+        fixed_layout_plan=fixed_layout_plan,
         on_bundle=on_bundle,
     )
     elapsed = time.perf_counter() - start
@@ -93,4 +113,5 @@ def run_throughput_benchmark(
         "datasets_per_second": dps,
         "datasets_per_minute": dpm,
         "slo_pass_100_datasets_per_min": dpm >= THROUGHPUT_SLO_DATASETS_PER_MINUTE,
+        "generation_mode": "fixed_batched" if fixed_layout_plan is not None else "dynamic",
     }

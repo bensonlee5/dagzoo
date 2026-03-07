@@ -227,6 +227,73 @@ def test_generate_cli_namespaces_worker_diagnostics_artifacts(
     assert (worker_dir / "coverage_summary.md").exists()
 
 
+def test_fixed_layout_sample_cli_writes_plan_artifact(tmp_path: Path) -> None:
+    plan_path = tmp_path / "plan.yaml"
+
+    code = main(
+        [
+            "fixed-layout",
+            "sample",
+            "--config",
+            "configs/default.yaml",
+            "--out",
+            str(plan_path),
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
+        ]
+    )
+
+    assert code == 0
+    payload = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+    assert payload["schema_name"] == "dagzoo_fixed_layout_plan"
+    assert payload["schema_version"] == 2
+    assert isinstance(payload["node_plans"], list)
+    assert payload["plan_signature"]
+
+
+def test_fixed_layout_generate_cli_accepts_saved_plan_no_write(tmp_path: Path) -> None:
+    plan_path = tmp_path / "plan.yaml"
+    sample_code = main(
+        [
+            "fixed-layout",
+            "sample",
+            "--config",
+            "configs/default.yaml",
+            "--out",
+            str(plan_path),
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
+        ]
+    )
+    assert sample_code == 0
+
+    code = main(
+        [
+            "fixed-layout",
+            "generate",
+            "--config",
+            "configs/default.yaml",
+            "--plan",
+            str(plan_path),
+            "--num-datasets",
+            "2",
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
+            "--batch-size",
+            "1",
+            "--no-dataset-write",
+        ]
+    )
+
+    assert code == 0
+
+
 def test_benchmark_cli_accepts_cpu_multi_worker_root_config(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

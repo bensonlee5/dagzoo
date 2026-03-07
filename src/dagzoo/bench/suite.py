@@ -20,6 +20,7 @@ import torch
 from dagzoo.bench.baseline import compare_summary_to_baseline
 from dagzoo.bench.constants import (
     DIAGNOSTICS_DUPLICATE_PRESET_SUFFIX_BASE,
+    FIXED_LAYOUT_PLAN_SEED_OFFSET,
     KIB,
     LATENCY_SEED_OFFSET,
     MIB,
@@ -79,6 +80,12 @@ from dagzoo.core.config_resolution import (
     serialize_resolution_events,
 )
 from dagzoo.core.dataset import generate_batch_iter, generate_one
+from dagzoo.core.fixed_layout import (
+    FixedLayoutPlan,
+    generate_batch_fixed_layout,
+    generate_batch_fixed_layout_iter,
+    sample_fixed_layout,
+)
 from dagzoo.core.parallel_generation import (
     ParallelGenerationConfigError,
     effective_local_parallel_worker_count,
@@ -102,6 +109,7 @@ DEFAULT_PRESET_CONFIGS: dict[str, str] = {
     "cuda_desktop": "configs/benchmark_cuda_desktop.yaml",
     "cuda_h100": "configs/benchmark_cuda_h100.yaml",
 }
+CPU_BENCHMARK_ROW_TOTALS: tuple[int, ...] = (1024, 4096, 8192)
 
 
 @dataclass(slots=True)
@@ -117,6 +125,70 @@ def _copy_runtime_config(config: GeneratorConfig) -> GeneratorConfig:
     """Copy an already validated runtime config without re-running schema validation."""
 
     return copy.deepcopy(config)
+
+
+def _cpu_row_profile_key(total_rows: int) -> str:
+    """Return the derived preset key for one built-in CPU row profile."""
+
+    return f"cpu_rows{int(total_rows)}"
+
+
+def _is_builtin_cpu_row_profile_key(preset_key: str) -> bool:
+    """Return whether `preset_key` is one derived built-in CPU row-profile key."""
+
+    return str(preset_key).startswith("cpu_rows")
+
+
+def _is_builtin_cpu_fixed_layout_key(preset_key: str) -> bool:
+    """Return whether `preset_key` should use the built-in CPU fixed-layout path."""
+
+    normalized = str(preset_key)
+    return normalized == "cpu" or _is_builtin_cpu_row_profile_key(normalized)
+
+
+def _split_total_rows(total_rows: int) -> tuple[int, int]:
+    """Split total rows into the repo-standard 3:1 train/test ratio."""
+
+    n_test = max(1, int(total_rows) // 4)
+    n_train = max(1, int(total_rows) - n_test)
+    return n_train, n_test
+
+
+def _expand_builtin_cpu_run_specs(
+    config: GeneratorConfig, *, device: str | None
+) -> list[PresetRunSpec]:
+    """Expand the built-in CPU preset into explicit row-profile run specs."""
+
+    base_preset = dict(config.benchmark.presets.get("cpu", {}))
+    expanded: list[PresetRunSpec] = []
+    for total_rows in CPU_BENCHMARK_ROW_TOTALS:
+        derived = _copy_runtime_config(config)
+        n_train, n_test = _split_total_rows(total_rows)
+        derived.dataset.n_train = int(n_train)
+        derived.dataset.n_test = int(n_test)
+        derived_key = _cpu_row_profile_key(total_rows)
+        derived.benchmark.preset_name = derived_key
+        derived.benchmark.presets[derived_key] = dict(base_preset)
+        expanded.append(PresetRunSpec(key=derived_key, config=derived, device=device))
+    return expanded
+
+
+def _smoke_caps_for_spec(spec: PresetRunSpec) -> BenchmarkSmokeCaps:
+    """Resolve smoke-suite caps for one preset spec."""
+
+    if _is_builtin_cpu_row_profile_key(spec.key):
+        return BenchmarkSmokeCaps(
+            n_train=int(spec.config.dataset.n_train),
+            n_test=int(spec.config.dataset.n_test),
+            n_features=SMOKE_N_FEATURES_CAP,
+            n_nodes=SMOKE_N_NODES_CAP,
+        )
+    return BenchmarkSmokeCaps(
+        n_train=SMOKE_N_TRAIN_CAP,
+        n_test=SMOKE_N_TEST_CAP,
+        n_features=SMOKE_N_FEATURES_CAP,
+        n_nodes=SMOKE_N_NODES_CAP,
+    )
 
 
 def _peak_rss_mb() -> float:
@@ -168,6 +240,7 @@ def _collect_latency(
     *,
     device: str | None,
     num_samples: int,
+    fixed_layout_plan: FixedLayoutPlan | None = None,
 ) -> dict[str, float]:
     """Collect per-dataset latency samples by repeatedly calling ``generate_one``."""
 
@@ -176,7 +249,16 @@ def _collect_latency(
     for i in range(max(1, num_samples)):
         seed = manager.child("latency", i)
         start = time.perf_counter()
-        _ = generate_one(config, seed=seed, device=device)
+        if fixed_layout_plan is not None:
+            _ = generate_batch_fixed_layout(
+                config,
+                plan=fixed_layout_plan,
+                num_datasets=1,
+                seed=seed,
+                batch_size=1,
+            )[0]
+        else:
+            _ = generate_one(config, seed=seed, device=device)
         samples.append(time.perf_counter() - start)
     return summarize_latencies(samples)
 
@@ -186,22 +268,41 @@ def _collect_reproducibility(
     *,
     device: str | None,
     num_datasets: int,
+    fixed_layout_plan: FixedLayoutPlan | None = None,
 ) -> dict[str, Any]:
     """Generate two deterministic runs and compare content digests."""
 
     n = max(1, num_datasets)
     run_seed = offset_seed32(config.seed, REPRODUCIBILITY_SEED_OFFSET)
-    generator = (
-        generate_parallel_batch_iter
-        if effective_local_parallel_worker_count(int(config.runtime.worker_count), n) > 1
-        else generate_batch_iter
-    )
-    sig_a = reproducibility_signature(
-        generator(config, num_datasets=n, seed=run_seed, device=device)
-    )
-    sig_b = reproducibility_signature(
-        generator(config, num_datasets=n, seed=run_seed, device=device)
-    )
+    if fixed_layout_plan is not None:
+        sig_a = reproducibility_signature(
+            generate_batch_fixed_layout_iter(
+                config,
+                plan=fixed_layout_plan,
+                num_datasets=n,
+                seed=run_seed,
+            )
+        )
+        sig_b = reproducibility_signature(
+            generate_batch_fixed_layout_iter(
+                config,
+                plan=fixed_layout_plan,
+                num_datasets=n,
+                seed=run_seed,
+            )
+        )
+    else:
+        generator = (
+            generate_parallel_batch_iter
+            if effective_local_parallel_worker_count(int(config.runtime.worker_count), n) > 1
+            else generate_batch_iter
+        )
+        sig_a = reproducibility_signature(
+            generator(config, num_datasets=n, seed=run_seed, device=device)
+        )
+        sig_b = reproducibility_signature(
+            generator(config, num_datasets=n, seed=run_seed, device=device)
+        )
     return {
         "reproducibility_datasets": n,
         "reproducibility_signature": sig_a,
@@ -233,6 +334,47 @@ def _normalize_multi_worker_benchmark_requested_device(
     """Normalize benchmark device requests before preset resolution."""
 
     return (requested_device or config.runtime.device or "auto").lower()
+
+
+def _should_use_fixed_layout_benchmark_mode(
+    *,
+    preset_key: str,
+    config: GeneratorConfig,
+    hardware_backend: str,
+    num_datasets: int,
+) -> bool:
+    """Return whether this benchmark run should use fixed-layout batched generation."""
+
+    return bool(
+        _is_builtin_cpu_fixed_layout_key(preset_key)
+        and str(hardware_backend) == "cpu"
+        and effective_local_parallel_worker_count(int(config.runtime.worker_count), num_datasets)
+        <= 1
+    )
+
+
+def _sample_benchmark_fixed_layout_plan(
+    *,
+    preset_key: str,
+    config: GeneratorConfig,
+    requested_device: str | None,
+    hardware_backend: str,
+    num_datasets: int,
+) -> FixedLayoutPlan | None:
+    """Sample the reusable fixed-layout plan for benchmark runs when enabled."""
+
+    if not _should_use_fixed_layout_benchmark_mode(
+        preset_key=preset_key,
+        config=config,
+        hardware_backend=hardware_backend,
+        num_datasets=num_datasets,
+    ):
+        return None
+    return sample_fixed_layout(
+        config,
+        seed=offset_seed32(config.seed, FIXED_LAYOUT_PLAN_SEED_OFFSET),
+        device=requested_device,
+    )
 
 
 def _build_diagnostics_aggregator(config: GeneratorConfig) -> CoverageAggregator:
@@ -345,12 +487,7 @@ def run_preset_benchmark(
             preset_device=requested_device,
             suite=suite,
             hardware_policy=hardware_policy,
-            smoke_caps=BenchmarkSmokeCaps(
-                n_train=SMOKE_N_TRAIN_CAP,
-                n_test=SMOKE_N_TEST_CAP,
-                n_features=SMOKE_N_FEATURES_CAP,
-                n_nodes=SMOKE_N_NODES_CAP,
-            ),
+            smoke_caps=_smoke_caps_for_spec(spec),
         )
 
     normalized_preset_device = _normalize_multi_worker_benchmark_requested_device(
@@ -430,6 +567,13 @@ def run_preset_benchmark(
 
     generation_config = _copy_runtime_config(config)
     generation_config.filter.enabled = False
+    fixed_layout_plan = _sample_benchmark_fixed_layout_plan(
+        preset_key=spec.key,
+        config=generation_config,
+        requested_device=requested_device,
+        hardware_backend=hw.backend,
+        num_datasets=num_datasets,
+    )
 
     def _build_throughput_on_bundle_callback(
         *,
@@ -470,13 +614,15 @@ def run_preset_benchmark(
         noise_guardrails=noise_guardrails,
     )
 
-    result = run_throughput_benchmark(
-        generation_config,
-        num_datasets=num_datasets,
-        warmup_datasets=warmup,
-        device=requested_device,
-        on_bundle=on_bundle_callback,
-    )
+    throughput_kwargs: dict[str, Any] = {
+        "num_datasets": num_datasets,
+        "warmup_datasets": warmup,
+        "device": requested_device,
+        "on_bundle": on_bundle_callback,
+    }
+    if fixed_layout_plan is not None:
+        throughput_kwargs["fixed_layout_plan"] = fixed_layout_plan
+    result = run_throughput_benchmark(generation_config, **throughput_kwargs)
     sampled_bundles = stage_sample_collector.bundles
     stage_sample_datasets = len(sampled_bundles)
     write_dpm = (
@@ -529,6 +675,10 @@ def run_preset_benchmark(
     result["preset_key"] = spec.key
     result["suite"] = suite
     result["device"] = requested_device
+    result["generation_mode"] = str(result.get("generation_mode", "dynamic"))
+    result["dataset_rows_total"] = int(config.dataset.n_train + config.dataset.n_test)
+    result["dataset_n_train"] = int(config.dataset.n_train)
+    result["dataset_n_test"] = int(config.dataset.n_test)
     result["hardware_backend"] = hw.backend
     result["hardware_device_name"] = hw.device_name
     result["hardware_memory_gb"] = hw.total_memory_gb
@@ -574,11 +724,13 @@ def run_preset_benchmark(
             "latency_max_ms": None,
         }
     else:
-        latency_stats = _collect_latency(
-            generation_config,
-            device=requested_device,
-            num_samples=_latency_sample_count(config, suite, num_datasets),
-        )
+        latency_kwargs: dict[str, Any] = {
+            "device": requested_device,
+            "num_samples": _latency_sample_count(config, suite, num_datasets),
+        }
+        if fixed_layout_plan is not None:
+            latency_kwargs["fixed_layout_plan"] = fixed_layout_plan
+        latency_stats = _collect_latency(generation_config, **latency_kwargs)
     result.update(latency_stats)
 
     if collect_memory:
@@ -598,13 +750,13 @@ def run_preset_benchmark(
 
     if collect_reproducibility:
         repro_n = min(num_datasets, max(1, int(config.benchmark.reproducibility_num_datasets)))
-        result.update(
-            _collect_reproducibility(
-                generation_config,
-                device=requested_device,
-                num_datasets=repro_n,
-            )
-        )
+        reproducibility_kwargs: dict[str, Any] = {
+            "device": requested_device,
+            "num_datasets": repro_n,
+        }
+        if fixed_layout_plan is not None:
+            reproducibility_kwargs["fixed_layout_plan"] = fixed_layout_plan
+        result.update(_collect_reproducibility(generation_config, **reproducibility_kwargs))
 
     if include_micro:
         result.update(
@@ -620,6 +772,13 @@ def run_preset_benchmark(
         baseline_config = _copy_runtime_config(generation_config)
         baseline_config.dataset.missing_rate = 0.0
         baseline_config.dataset.missing_mechanism = MISSINGNESS_MECHANISM_NONE
+        baseline_fixed_layout_plan = _sample_benchmark_fixed_layout_plan(
+            preset_key=spec.key,
+            config=baseline_config,
+            requested_device=requested_device,
+            hardware_backend=hw.backend,
+            num_datasets=num_datasets,
+        )
         missingness_baseline_diagnostics_aggregator: CoverageAggregator | None = None
         if diagnostics_aggregator is not None:
             missingness_baseline_diagnostics_aggregator = _build_diagnostics_aggregator(
@@ -645,12 +804,16 @@ def run_preset_benchmark(
             ),
         )
 
+        baseline_throughput_kwargs: dict[str, Any] = {
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup,
+            "device": requested_device,
+            "on_bundle": baseline_on_bundle_callback,
+        }
+        if baseline_fixed_layout_plan is not None:
+            baseline_throughput_kwargs["fixed_layout_plan"] = baseline_fixed_layout_plan
         baseline_throughput = run_throughput_benchmark(
-            baseline_config,
-            num_datasets=num_datasets,
-            warmup_datasets=warmup,
-            device=requested_device,
-            on_bundle=baseline_on_bundle_callback,
+            baseline_config, **baseline_throughput_kwargs
         )
         baseline_stage_sample_collector.bundles.clear()
         baseline_dpm = float(baseline_throughput.get("datasets_per_minute", 0.0))
@@ -709,6 +872,13 @@ def run_preset_benchmark(
         baseline_config.shift.graph_scale = None
         baseline_config.shift.mechanism_scale = None
         baseline_config.shift.variance_scale = None
+        baseline_fixed_layout_plan = _sample_benchmark_fixed_layout_plan(
+            preset_key=spec.key,
+            config=baseline_config,
+            requested_device=requested_device,
+            hardware_backend=hw.backend,
+            num_datasets=num_datasets,
+        )
         shift_baseline_diagnostics_aggregator: CoverageAggregator | None = None
         if diagnostics_aggregator is not None:
             shift_baseline_diagnostics_aggregator = _build_diagnostics_aggregator(baseline_config)
@@ -733,12 +903,16 @@ def run_preset_benchmark(
             ),
         )
 
+        baseline_throughput_kwargs = {
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup,
+            "device": requested_device,
+            "on_bundle": baseline_on_bundle_callback,
+        }
+        if baseline_fixed_layout_plan is not None:
+            baseline_throughput_kwargs["fixed_layout_plan"] = baseline_fixed_layout_plan
         baseline_throughput = run_throughput_benchmark(
-            baseline_config,
-            num_datasets=num_datasets,
-            warmup_datasets=warmup,
-            device=requested_device,
-            on_bundle=baseline_on_bundle_callback,
+            baseline_config, **baseline_throughput_kwargs
         )
         baseline_stage_sample_collector.bundles.clear()
         baseline_dpm = float(baseline_throughput.get("datasets_per_minute", 0.0))
@@ -890,6 +1064,13 @@ def run_preset_benchmark(
         baseline_config.noise.base_scale = 1.0
         baseline_config.noise.student_t_df = 5.0
         baseline_config.noise.mixture_weights = None
+        baseline_fixed_layout_plan = _sample_benchmark_fixed_layout_plan(
+            preset_key=spec.key,
+            config=baseline_config,
+            requested_device=requested_device,
+            hardware_backend=hw.backend,
+            num_datasets=num_datasets,
+        )
         noise_baseline_diagnostics_aggregator: CoverageAggregator | None = None
         if diagnostics_aggregator is not None:
             noise_baseline_diagnostics_aggregator = _build_diagnostics_aggregator(baseline_config)
@@ -912,12 +1093,16 @@ def run_preset_benchmark(
             shift_guardrails=noise_baseline_shift_guardrails,
             noise_guardrails=baseline_noise_guardrails,
         )
+        baseline_throughput_kwargs = {
+            "num_datasets": num_datasets,
+            "warmup_datasets": warmup,
+            "device": requested_device,
+            "on_bundle": baseline_on_bundle_callback,
+        }
+        if baseline_fixed_layout_plan is not None:
+            baseline_throughput_kwargs["fixed_layout_plan"] = baseline_fixed_layout_plan
         baseline_throughput = run_throughput_benchmark(
-            baseline_config,
-            num_datasets=num_datasets,
-            warmup_datasets=warmup,
-            device=requested_device,
-            on_bundle=baseline_on_bundle_callback,
+            baseline_config, **baseline_throughput_kwargs
         )
         baseline_stage_sample_collector.bundles.clear()
 
@@ -981,14 +1166,16 @@ def run_preset_benchmark(
             "status": _status_from_issues(noise_issues),
         }
 
-    result["lineage_guardrails"] = _collect_lineage_guardrails(
-        generation_config,
-        suite=suite,
-        num_datasets=num_datasets,
-        device=requested_device,
-        warn_threshold_pct=float(warn_threshold_pct),
-        fail_threshold_pct=float(fail_threshold_pct),
-    )
+    lineage_kwargs: dict[str, Any] = {
+        "suite": suite,
+        "num_datasets": num_datasets,
+        "device": requested_device,
+        "warn_threshold_pct": float(warn_threshold_pct),
+        "fail_threshold_pct": float(fail_threshold_pct),
+    }
+    if fixed_layout_plan is not None:
+        lineage_kwargs["fixed_layout_plan"] = fixed_layout_plan
+    result["lineage_guardrails"] = _collect_lineage_guardrails(generation_config, **lineage_kwargs)
 
     if (
         diagnostics_enabled
@@ -1054,7 +1241,10 @@ def resolve_preset_run_specs(
         preset_device = str(
             config.benchmark.presets.get(key, {}).get("device", config.runtime.device)
         )
-        resolved.append(PresetRunSpec(key=key, config=config, device=preset_device))
+        if key == "cpu":
+            resolved.extend(_expand_builtin_cpu_run_specs(config, device=preset_device))
+        else:
+            resolved.append(PresetRunSpec(key=key, config=config, device=preset_device))
 
     return resolved
 

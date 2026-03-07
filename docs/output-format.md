@@ -123,6 +123,7 @@ Each line contains:
 | `layout_mode`            | str         | Optional layout mode metadata (`"fixed"` for fixed-layout API)                                     |
 | `layout_plan_seed`       | int         | Optional fixed-layout plan seed                                                                    |
 | `layout_signature`       | str         | Optional deterministic fixed-layout fingerprint                                                    |
+| `layout_plan_signature`  | str         | Optional deterministic fingerprint for the frozen fixed-layout execution plan                      |
 
 ### Shift sub-object
 
@@ -194,11 +195,12 @@ Present only for outputs emitted by fixed-layout batch APIs. These bundles
 share one sampled layout and preserve emitted column alignment (feature count,
 column order, and lineage feature-to-node mapping).
 
-| Key                | Type | Description                                      |
-| ------------------ | ---- | ------------------------------------------------ |
-| `layout_mode`      | str  | `"fixed"`                                        |
-| `layout_plan_seed` | int  | Seed used to sample the shared fixed-layout plan |
-| `layout_signature` | str  | Stable fingerprint for the shared sampled layout |
+| Key                     | Type | Description                                                   |
+| ----------------------- | ---- | ------------------------------------------------------------- |
+| `layout_mode`           | str  | `"fixed"`                                                     |
+| `layout_plan_seed`      | int  | Seed used to sample the shared fixed-layout plan              |
+| `layout_signature`      | str  | Stable fingerprint for the shared sampled layout              |
+| `layout_plan_signature` | str  | Stable fingerprint for the frozen node execution plan payload |
 
 Fixed-layout APIs validate that the provided `config` remains compatible with
 the sampled plan before generation. This prevents plan-driven emitted tensors

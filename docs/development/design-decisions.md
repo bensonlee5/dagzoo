@@ -145,10 +145,12 @@ analysis can isolate value-level variation from layout-level variation.
 
 ### Decision
 
-Expose a dedicated fixed-layout API:
+Expose a dedicated fixed-layout API and CLI:
 
 - `sample_fixed_layout(...)` to sample one reusable plan.
 - `generate_batch_fixed_layout(_iter)(...)` to emit many datasets from that plan.
+- `dagzoo fixed-layout sample` / `dagzoo fixed-layout generate` for plan-file
+  workflows outside Python.
 
 Default `generate_batch(_iter)` behavior remains layout-dynamic.
 

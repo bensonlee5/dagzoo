@@ -22,6 +22,7 @@ from dagzoo.bench.constants import (
 from dagzoo.bench.metrics import degradation_percent
 from dagzoo.config import GeneratorConfig
 from dagzoo.core.dataset import generate_batch_iter
+from dagzoo.core.fixed_layout import FixedLayoutPlan, generate_batch_fixed_layout_iter
 from dagzoo.core.parallel_generation import (
     effective_local_parallel_worker_count,
     generate_parallel_batch_iter,
@@ -133,6 +134,7 @@ def _stage_lineage_trial_bundles(
     sample_n: int,
     seed: int,
     device: str | None,
+    fixed_layout_plan: FixedLayoutPlan | None,
     baseline_stage_dir: Path,
     current_stage_dir: Path,
 ) -> tuple[int, int]:
@@ -140,22 +142,28 @@ def _stage_lineage_trial_bundles(
 
     baseline_stage_dir.mkdir(parents=True, exist_ok=True)
     current_stage_dir.mkdir(parents=True, exist_ok=True)
-    generator = (
-        generate_parallel_batch_iter
-        if effective_local_parallel_worker_count(int(config.runtime.worker_count), sample_n) > 1
-        else generate_batch_iter
-    )
-
     seen = 0
     with_lineage = 0
-    for idx, bundle in enumerate(
-        generator(
+    if fixed_layout_plan is not None:
+        bundle_iter = generate_batch_fixed_layout_iter(
+            config,
+            plan=fixed_layout_plan,
+            num_datasets=sample_n,
+            seed=seed,
+        )
+    else:
+        generator = (
+            generate_parallel_batch_iter
+            if effective_local_parallel_worker_count(int(config.runtime.worker_count), sample_n) > 1
+            else generate_batch_iter
+        )
+        bundle_iter = generator(
             config,
             num_datasets=sample_n,
             seed=seed,
             device=device,
         )
-    ):
+    for idx, bundle in enumerate(bundle_iter):
         has_lineage = isinstance(bundle.metadata.get("lineage"), dict)
         if has_lineage:
             with_lineage += 1
@@ -294,6 +302,7 @@ def _collect_lineage_guardrails(
     suite: str,
     num_datasets: int,
     device: str | None,
+    fixed_layout_plan: FixedLayoutPlan | None = None,
     warn_threshold_pct: float,
     fail_threshold_pct: float,
 ) -> dict[str, Any]:
@@ -313,6 +322,7 @@ def _collect_lineage_guardrails(
                 sample_n=sample_n,
                 seed=sample_seed,
                 device=device,
+                fixed_layout_plan=fixed_layout_plan,
                 baseline_stage_dir=baseline_stage_dir,
                 current_stage_dir=current_stage_dir,
             )
