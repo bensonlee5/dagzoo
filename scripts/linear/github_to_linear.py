@@ -799,6 +799,13 @@ def apply_cutover(
     mapping_path: Path | None = None,
     persist_mapping: bool = False,
 ) -> None:
+    def checkpoint_mapping() -> None:
+        if not persist_mapping:
+            return
+        if mapping_path is None:
+            raise MigrationError("Cutover checkpointing requires a mapping path.")
+        mapping_path.write_text(mapping.to_json())
+
     numbers = sorted(mapping.entries)
     for number in numbers:
         if issue_numbers and number not in issue_numbers:
@@ -811,15 +818,16 @@ def apply_cutover(
             identifier=entry.linear_identifier,
             url=entry.linear_url,
         )
-        gh.create_migration_comment(number, linear_ref)
+        if entry.cutover_applied_at is None:
+            gh.create_migration_comment(number, linear_ref)
+            entry.cutover_applied_at = iso_now()
+            checkpoint_mapping()
         if entry.github_state == "OPEN":
             gh.close_issue(number)
+            entry.github_state = "CLOSED"
         entry.cutover_applied = True
         entry.cutover_applied_at = iso_now()
-        if persist_mapping:
-            if mapping_path is None:
-                raise MigrationError("Cutover checkpointing requires a mapping path.")
-            mapping_path.write_text(mapping.to_json())
+        checkpoint_mapping()
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

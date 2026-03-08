@@ -593,3 +593,71 @@ def test_apply_cutover_dry_run_does_not_checkpoint_mapping(tmp_path: Path) -> No
     )
 
     assert json.loads(mapping_path.read_text()) == original_payload
+
+
+def test_apply_cutover_retry_skips_duplicate_comment_after_close_failure(
+    tmp_path: Path,
+) -> None:
+    mapping_path = tmp_path / "mapping.json"
+    mapping = MODULE.MappingFile(
+        repo="bensonlee5/dagzoo",
+        project_slug="proj",
+        migrated_at="2026-03-08T00:00:00Z",
+        entries={
+            10: MODULE.MappingEntry(
+                github_number=10,
+                github_url="https://github.com/bensonlee5/dagzoo/issues/10",
+                github_state="OPEN",
+                linear_id="linear-10",
+                linear_identifier="DAG-10",
+                linear_url="https://linear.app/dagzoo/issue/DAG-10",
+                linear_state="Backlog",
+            )
+        },
+    )
+    mapping_path.write_text(mapping.to_json())
+
+    first_gh = _CheckpointingGH([_issue(10)], fail_on_close_issue=10)
+    try:
+        MODULE.apply_cutover(
+            gh=first_gh,
+            mapping=mapping,
+            issue_numbers=None,
+            mapping_path=mapping_path,
+            persist_mapping=True,
+        )
+    except MODULE.MigrationError as exc:
+        assert "close failed for #10" in str(exc)
+    else:
+        raise AssertionError("Expected apply_cutover() to stop on close failure.")
+
+    checkpointed = MODULE.MappingFile.load(
+        mapping_path,
+        repo="bensonlee5/dagzoo",
+        project_slug="proj",
+    )
+    assert first_gh.comments == [10]
+    assert first_gh.closed == [10]
+    assert checkpointed.entry_for(10).cutover_applied is False
+    assert checkpointed.entry_for(10).cutover_applied_at is not None
+    assert checkpointed.entry_for(10).github_state == "OPEN"
+
+    second_gh = _CheckpointingGH([_issue(10)])
+    MODULE.apply_cutover(
+        gh=second_gh,
+        mapping=checkpointed,
+        issue_numbers=None,
+        mapping_path=mapping_path,
+        persist_mapping=True,
+    )
+
+    persisted = MODULE.MappingFile.load(
+        mapping_path,
+        repo="bensonlee5/dagzoo",
+        project_slug="proj",
+    )
+    assert second_gh.comments == []
+    assert second_gh.closed == [10]
+    assert persisted.entry_for(10).cutover_applied is True
+    assert persisted.entry_for(10).cutover_applied_at is not None
+    assert persisted.entry_for(10).github_state == "CLOSED"
