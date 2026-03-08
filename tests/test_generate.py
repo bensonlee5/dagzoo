@@ -25,6 +25,8 @@ from dagzoo.core.dataset import (
 )
 from dagzoo.core.fixed_layout import (
     _FixedLayoutPlan,
+    _fixed_layout_plan_supports_classification_run,
+    _generate_batch_with_plan_iter,
     _resolve_fixed_layout_batch_size,
     _sample_fixed_layout,
     prepare_canonical_fixed_layout_run,
@@ -32,6 +34,7 @@ from dagzoo.core.fixed_layout import (
 from dagzoo.core.generation_context import _attempt_seed, _node_spec_seed, _split_permutation_seed
 from dagzoo.core.generation_runtime import _finalize_generated_tensors, _parent_node_indices
 from dagzoo.core.layout_types import LayoutPlan
+from dagzoo.core.noise_runtime import NoiseRuntimeSelection
 from dagzoo.core.shift import mechanism_nonlinear_mass, resolve_shift_runtime_params
 from dagzoo.core.validation import _stratified_split_indices
 from dagzoo.io.lineage_schema import (
@@ -40,7 +43,7 @@ from dagzoo.io.lineage_schema import (
     validate_metadata_lineage,
     validate_lineage_payload,
 )
-from dagzoo.rng import offset_seed32
+from dagzoo.rng import SeedManager, offset_seed32
 from dagzoo.types import DatasetBundle
 
 
@@ -938,6 +941,234 @@ def test_sample_fixed_layout_propagates_mechanism_drift_tilt(
 
     assert observed_tilts
     assert all(tilt == pytest.approx(runtime.mechanism_logit_tilt) for tilt in observed_tilts)
+
+
+def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_regression_config()
+    cfg.dataset.n_train = 4
+    cfg.dataset.n_test = 2
+    run_seed = 321
+    plan = _FixedLayoutPlan(
+        layout=_layout_stub(
+            feature_types=["num", "num"],
+            graph_nodes=2,
+            adjacency=torch.zeros((2, 2), dtype=torch.bool),
+            feature_node_assignment=[0, 1],
+            target_node_assignment=1,
+        ),
+        requested_device="cpu",
+        resolved_device="cpu",
+        plan_seed=11,
+        n_train=cfg.dataset.n_train,
+        n_test=cfg.dataset.n_test,
+        layout_signature="layout_sig",
+        node_plans=[],
+        plan_signature="plan_sig",
+    )
+    manager = SeedManager(run_seed)
+    dataset_seeds = [manager.child("dataset", idx) for idx in range(4)]
+    family_pattern = ["gaussian", "gaussian", "laplace", "gaussian"]
+    family_by_data_seed = {
+        SeedManager(dataset_seed).child("data"): family
+        for dataset_seed, family in zip(dataset_seeds, family_pattern, strict=True)
+    }
+    grouped_call_sizes: list[int] = []
+
+    def _stub_resolve_noise_runtime_selection(_config, *, run_seed: int) -> NoiseRuntimeSelection:
+        family = family_by_data_seed[int(run_seed)]
+        return NoiseRuntimeSelection(
+            family_requested="mixture",
+            family_sampled=family,
+            sampling_strategy="dataset_level",
+            base_scale=1.0,
+            student_t_df=5.0,
+            mixture_weights={"gaussian": 0.5, "laplace": 0.5},
+        )
+
+    def _stub_generate_fixed_layout_graph_batch_with_fallback(
+        _config,
+        _layout,
+        *,
+        node_plans,
+        dataset_seeds,
+        requested_device,
+        resolved_device,
+        noise_sigma_multiplier,
+        noise_spec,
+    ):
+        _ = node_plans
+        _ = requested_device
+        _ = resolved_device
+        _ = noise_sigma_multiplier
+        _ = noise_spec
+        grouped_call_sizes.append(len(dataset_seeds))
+        batch_size = len(dataset_seeds)
+        n_rows = cfg.dataset.n_train + cfg.dataset.n_test
+        return (
+            torch.zeros((batch_size, n_rows, 2), dtype=torch.float32),
+            torch.zeros((batch_size, n_rows), dtype=torch.float32),
+            [{} for _ in dataset_seeds],
+            "cpu",
+            None,
+        )
+
+    def _stub_finalize_generated_tensors(*_args, **kwargs) -> DatasetBundle:
+        dataset_seed = int(kwargs["seed"])
+        selection = kwargs["noise_runtime_selection"]
+        return DatasetBundle(
+            X_train=torch.zeros((cfg.dataset.n_train, 2), dtype=torch.float32),
+            y_train=torch.zeros(cfg.dataset.n_train, dtype=torch.float32),
+            X_test=torch.zeros((cfg.dataset.n_test, 2), dtype=torch.float32),
+            y_test=torch.zeros(cfg.dataset.n_test, dtype=torch.float32),
+            feature_types=["num", "num"],
+            metadata={
+                "backend": "torch",
+                "n_features": 2,
+                "dataset_seed_seen": dataset_seed,
+                "family_sampled": str(selection.family_sampled),
+                "lineage": {
+                    "assignments": {
+                        "feature_to_node": [0, 1],
+                        "target_to_node": 1,
+                    }
+                },
+            },
+        )
+
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._resolve_noise_runtime_selection",
+        _stub_resolve_noise_runtime_selection,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._generate_fixed_layout_graph_batch_with_fallback",
+        _stub_generate_fixed_layout_graph_batch_with_fallback,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._finalize_generated_tensors",
+        _stub_finalize_generated_tensors,
+    )
+
+    bundles = list(
+        _generate_batch_with_plan_iter(
+            cfg,
+            plan=plan,
+            num_datasets=4,
+            seed=run_seed,
+            batch_size=4,
+        )
+    )
+
+    assert grouped_call_sizes == [3, 1]
+    assert [int(bundle.metadata["dataset_seed_seen"]) for bundle in bundles] == dataset_seeds
+    assert [str(bundle.metadata["family_sampled"]) for bundle in bundles] == family_pattern
+
+
+def test_fixed_layout_plan_supports_classification_run_groups_mixed_noise_runtime_subbatches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "classification"
+    cfg.filter.enabled = False
+    cfg.dataset.n_train = 4
+    cfg.dataset.n_test = 2
+    run_seed = 654
+    plan = _FixedLayoutPlan(
+        layout=_layout_stub(
+            feature_types=["num", "num"],
+            graph_nodes=2,
+            adjacency=torch.zeros((2, 2), dtype=torch.bool),
+            feature_node_assignment=[0, 1],
+            target_node_assignment=1,
+        ),
+        requested_device="cpu",
+        resolved_device="cpu",
+        plan_seed=17,
+        n_train=cfg.dataset.n_train,
+        n_test=cfg.dataset.n_test,
+        layout_signature="layout_sig",
+        node_plans=[],
+        plan_signature="plan_sig",
+    )
+    manager = SeedManager(run_seed)
+    dataset_seeds = [manager.child("dataset", idx) for idx in range(3)]
+    family_pattern = ["gaussian", "laplace", "gaussian"]
+    family_by_data_seed = {
+        SeedManager(dataset_seed).child("data"): family
+        for dataset_seed, family in zip(dataset_seeds, family_pattern, strict=True)
+    }
+    grouped_call_sizes: list[int] = []
+
+    def _stub_resolve_noise_runtime_selection(_config, *, run_seed: int) -> NoiseRuntimeSelection:
+        family = family_by_data_seed[int(run_seed)]
+        return NoiseRuntimeSelection(
+            family_requested="mixture",
+            family_sampled=family,
+            sampling_strategy="dataset_level",
+            base_scale=1.0,
+            student_t_df=5.0,
+            mixture_weights={"gaussian": 0.5, "laplace": 0.5},
+        )
+
+    def _stub_generate_fixed_layout_graph_batch_with_fallback(
+        _config,
+        _layout,
+        *,
+        node_plans,
+        dataset_seeds,
+        requested_device,
+        resolved_device,
+        noise_sigma_multiplier,
+        noise_spec,
+    ):
+        _ = node_plans
+        _ = requested_device
+        _ = resolved_device
+        _ = noise_sigma_multiplier
+        _ = noise_spec
+        grouped_call_sizes.append(len(dataset_seeds))
+        batch_size = len(dataset_seeds)
+        n_rows = cfg.dataset.n_train + cfg.dataset.n_test
+        return (
+            torch.zeros((batch_size, n_rows, 2), dtype=torch.float32),
+            torch.zeros((batch_size, n_rows), dtype=torch.int64),
+            [{} for _ in dataset_seeds],
+            "cpu",
+            None,
+        )
+
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._resolve_noise_runtime_selection",
+        _stub_resolve_noise_runtime_selection,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._generate_fixed_layout_graph_batch_with_fallback",
+        _stub_generate_fixed_layout_graph_batch_with_fallback,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._raw_classification_labels_support_split",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout._fixed_layout_dataset_supports_classification_replay",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("per-dataset replay fallback should not run when raw splits validate")
+        ),
+    )
+
+    supported = _fixed_layout_plan_supports_classification_run(
+        cfg,
+        plan=plan,
+        requested_device="cpu",
+        resolved_device="cpu",
+        run_seed=run_seed,
+        num_datasets=3,
+        batch_size=3,
+    )
+
+    assert supported is True
+    assert grouped_call_sizes == [2, 1]
 
 
 def test_generate_one_returns_torch_tensors_on_cpu() -> None:
