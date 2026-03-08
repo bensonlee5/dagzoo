@@ -304,8 +304,8 @@ status, shift, noise distribution, and resolved config snapshot.
 - `lineage` aligns emitted columns with DAG node assignments.
 - `requested_device`, `resolved_device`, and optional fallback reason
   are emitted for runtime observability.
-- Fixed-layout batches add `layout_mode`, `layout_plan_seed`, and
-  `layout_signature`.
+- Canonical generation outputs add `layout_mode`, `layout_plan_seed`,
+  and `layout_signature`.
 
 ## DAG/node data flow
 
@@ -354,8 +354,8 @@ flowchart TB
 
 These are related but distinct runtime surfaces.
 
-- Fixed-layout generation controls structural consistency across emitted
-  datasets.
+- Canonical fixed-layout generation controls structural consistency
+  across emitted datasets.
 - Diagnostics aggregates observability metrics across emitted bundles.
 - Benchmark guardrails evaluate runtime/metadata regressions in suite
   runs.
