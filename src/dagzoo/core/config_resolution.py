@@ -344,12 +344,6 @@ def resolve_benchmark_preset_config(
         events=trace_events,
     )
 
-    if resolved.dataset.rows is not None:
-        raise ValueError(
-            "Benchmark config resolution does not support dataset.rows yet. "
-            "Unset dataset.rows (or avoid --rows) for benchmark runs."
-        )
-
     hw = detect_hardware(requested_device)
     before_policy = resolved.to_dict()
     resolved = apply_hardware_policy(resolved, hw, policy_name=hardware_policy)

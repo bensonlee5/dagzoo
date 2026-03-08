@@ -94,55 +94,15 @@ Detailed guides:
 
 ______________________________________________________________________
 
-## 5. Fixed-layout batch generation
+## 5. Canonical fixed-layout generation
 
-Use the explicit fixed-layout APIs when you want to persist or replay a sampled
-plan artifact. The standard `generate_*` APIs already use the same fixed-layout
-execution model internally, but they sample the plan implicitly at run start.
+Explicit fixed-layout plan workflows have been removed from the public CLI and
+top-level Python API. Use `dagzoo generate`, `generate_one`, `generate_batch`,
+or `generate_batch_iter`; those entrypoints all run on the canonical
+fixed-layout engine internally.
 
-Python API:
-
-```python
-from dagzoo import (
-    GeneratorConfig,
-    generate_batch_fixed_layout,
-    sample_fixed_layout,
-)
-
-cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-plan = sample_fixed_layout(cfg, seed=7, device="cpu")
-batch = generate_batch_fixed_layout(cfg, plan=plan, num_datasets=32, seed=101)
-```
-
-`generate_batch_fixed_layout(_iter)` validates plan/config compatibility before
-generation. If layout-driving config fields drift from the plan snapshot, it
-raises and asks you to resample the plan.
-
-CLI:
-
-```bash
-dagzoo fixed-layout sample \
-  --config configs/default.yaml \
-  --device cpu \
-  --out plans/fixed_layout_cpu.yaml
-
-dagzoo fixed-layout generate \
-  --config configs/default.yaml \
-  --plan plans/fixed_layout_cpu.yaml \
-  --num-datasets 32 \
-  --batch-size 8 \
-  --out data/fixed_layout_run
-```
-
-Saved plan artifacts now include frozen node execution plans, an
-`execution_contract`, and a `plan_signature`. Under the current
-`chunk_batched_v1` contract, fixed-layout generation is deterministic for the
-same `plan + run seed + batch_size`, but outputs may change if you change the
-fixed-layout batch size. Built-in CPU benchmarks pin one internal fixed-layout
-batch size per preset run so those benchmark artifacts stay stable. Plan
-device fields are provenance only: replay uses the current request/config
-device, and `dagzoo fixed-layout generate --device auto` still falls back to
-CPU when a partially supported MPS runtime fails during batched execution.
+For persisted outputs, replay canonical batch bundles with the shared run seed
+plus `dataset_index` / `run_num_datasets` from the recorded metadata.
 
 ______________________________________________________________________
 
@@ -175,10 +135,9 @@ dagzoo benchmark \
 
 Note: the built-in CPU benchmark preset (`dagzoo benchmark --preset cpu`) now
 measures three explicit row profiles: `1024`, `4096`, and `8192` total rows per
-dataset. Those built-in CPU runs use the fixed-layout batched generator by
-default and report `generation_mode="fixed_batched"` plus explicit row counts in
-their summary artifacts. Single-worker benchmark generation now follows the same
-canonical fixed-layout model as `dagzoo generate`.
+dataset. Those runs report `generation_mode="fixed_batched"` plus explicit row
+counts in their summary artifacts and use the same canonical generation path as
+`dagzoo generate`.
 
 Detailed guide: [Many-class](features/many-class.md)
 

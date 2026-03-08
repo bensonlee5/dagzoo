@@ -10,7 +10,6 @@ from dagzoo.bench.micro import run_microbenchmarks
 from dagzoo.bench.report import write_suite_markdown
 from dagzoo.bench.suite import PresetRunSpec, resolve_preset_run_specs, run_benchmark_suite
 from dagzoo.config import GeneratorConfig
-from dagzoo.core.fixed_layout import sample_fixed_layout
 from dagzoo.types import DatasetBundle
 
 
@@ -114,7 +113,7 @@ def test_run_benchmark_suite_smoke_single_profile() -> None:
     assert lineage_guardrails["status"] in {"pass", "warn", "fail"}
 
 
-def test_run_benchmark_suite_builtin_cpu_uses_fixed_layout_batched(
+def test_run_benchmark_suite_builtin_cpu_uses_canonical_generation_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_cpu_config()
@@ -127,18 +126,12 @@ def test_run_benchmark_suite_builtin_cpu_uses_fixed_layout_batched(
     spec = PresetRunSpec(key="cpu", config=cfg, device="cpu")
 
     captured: dict[str, object] = {}
-    sampled_plan = sample_fixed_layout(cfg, seed=77, device="cpu")
-
-    monkeypatch.setattr(
-        "dagzoo.bench.suite.sample_fixed_layout", lambda *_args, **_kwargs: sampled_plan
-    )
     monkeypatch.setattr(
         "dagzoo.bench.suite.run_throughput_benchmark",
-        lambda config, *, num_datasets, warmup_datasets=10, device=None, fixed_layout_plan=None, fixed_layout_batch_size=None, on_bundle=None: (
+        lambda config, *, num_datasets, warmup_datasets=10, device=None, on_bundle=None: (
             captured.update(
                 {
-                    "fixed_layout_plan": fixed_layout_plan,
-                    "fixed_layout_batch_size": fixed_layout_batch_size,
+                    "rows_total": int(config.dataset.n_train + config.dataset.n_test),
                     "device": device,
                     "num_datasets": num_datasets,
                 }
@@ -188,8 +181,8 @@ def test_run_benchmark_suite_builtin_cpu_uses_fixed_layout_batched(
 
     result = summary["preset_results"][0]
     assert result["generation_mode"] == "fixed_batched"
-    assert captured["fixed_layout_plan"] is sampled_plan
-    assert captured["fixed_layout_batch_size"] is not None
+    assert captured["rows_total"] == int(result["dataset_rows_total"])
+    assert captured["device"] == "cpu"
 
 
 def test_resolve_preset_run_specs_expands_builtin_cpu_rows() -> None:

@@ -257,9 +257,9 @@ This section maps the runtime to module boundaries and data flow.
 - Public generation APIs live in `src/dagzoo/core/dataset.py`.
 - `dataset.py` is a façade over focused internals:
   - `generation_context.py`: seed/split/device/dtype helpers
-  - `generation_engine.py`: torch generation loop and retries
+  - `generation_runtime.py`: shared finalization, stratified split, and postprocess helpers
   - `noise_runtime.py`: per-dataset noise runtime selection
-  - `fixed_layout.py`: fixed-layout plan/compatibility execution
+  - `fixed_layout.py`: internal canonical run preparation, classification replay validation, and batched execution
 
 ### 2) Layout and structure sampling {#2-layout-and-structure-sampling}
 
@@ -289,11 +289,12 @@ This section maps the runtime to module boundaries and data flow.
 - Split, postprocess, and missingness run in-generation.
 - Classification split validity is enforced before bundle emission.
 
-Mode-specific postprocess behavior:
+Canonical postprocess behavior:
 
-- Standard generation can remove constant columns and permute feature
-  columns.
-- Fixed-layout generation preserves emitted schema across the batch.
+- Public generation preserves emitted schema across a canonical run.
+- Classification runs may validate the requested run up front before the
+  first bundle is emitted so later dataset seeds cannot fail after
+  partial output.
 
 ### 5) Metadata and output emission {#5-metadata-and-output-emission}
 
@@ -309,7 +310,7 @@ status, shift, noise distribution, and resolved config snapshot.
 ## DAG/node data flow
 
 This diagram focuses on node-level execution mechanics inside the
-generation engine.
+canonical generation runtime.
 
 ```mermaid
 flowchart TB
@@ -372,8 +373,8 @@ These are related but distinct runtime surfaces.
 - **shift runtime params**: resolved graph/mechanism/noise drift
   controls.
 - **noise runtime selection**: per-dataset resolved noise family/params.
-- **fixed-layout plan**: reusable sampled layout with compatibility
-  snapshot.
+- **fixed-layout plan**: internal sampled layout/execution payload reused
+  within one canonical run.
 - **layout signature**: deterministic hash fingerprint of a sampled
   layout.
 - **DatasetBundle**: in-memory output container with tensors + metadata.

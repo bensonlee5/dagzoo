@@ -34,12 +34,7 @@ from dagzoo.core.config_resolution import (
     resolve_generate_config,
     serialize_resolution_events,
 )
-from dagzoo.core.fixed_layout import (
-    FixedLayoutPlan,
-    generate_batch_fixed_layout_iter,
-    realize_generation_config_for_run,
-    sample_fixed_layout,
-)
+from dagzoo.core.fixed_layout import realize_generation_config_for_run
 from dagzoo.diagnostics import (
     CoverageAggregator,
     write_coverage_summary_json,
@@ -218,26 +213,6 @@ def _raise_usage_error(message: str) -> None:
     raise SystemExit(2)
 
 
-def _write_fixed_layout_plan(plan: FixedLayoutPlan, path: Path) -> Path:
-    """Persist a fixed-layout plan artifact to YAML."""
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        yaml.safe_dump(plan.to_dict(), sort_keys=False, default_flow_style=False),
-        encoding="utf-8",
-    )
-    return path
-
-
-def _load_fixed_layout_plan(path: str | Path) -> FixedLayoutPlan:
-    """Load one fixed-layout plan artifact from YAML."""
-
-    payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("Fixed-layout plan file must contain a mapping payload.")
-    return FixedLayoutPlan.from_dict(payload)
-
-
 def _build_parser() -> argparse.ArgumentParser:
     """Create the CLI parser and register all subcommands/options."""
 
@@ -335,101 +310,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--print-resolution-trace",
         action="store_true",
         help="Print field-level override trace for resolved config before generation.",
-    )
-    fl = sub.add_parser("fixed-layout", help="Sample or generate from reusable fixed-layout plans.")
-    fl_sub = fl.add_subparsers(dest="fixed_layout_command", required=True)
-
-    fl_sample = fl_sub.add_parser("sample", help="Sample and write one fixed-layout plan artifact.")
-    fl_sample.add_argument("--config", required=True, help="Path to YAML config.")
-    fl_sample.add_argument("--out", required=True, help="Output YAML path for the plan artifact.")
-    fl_sample.add_argument(
-        "--seed",
-        type=_seed_32bit_int,
-        default=None,
-        help=f"Optional override for plan seed in [{SEED32_MIN}, {SEED32_MAX}].",
-    )
-    fl_sample.add_argument(
-        "--rows",
-        default=None,
-        help=(
-            "Optional total-row spec override before plan sampling. "
-            "Only fixed row specs are compatible with fixed-layout plans."
-        ),
-    )
-    fl_sample.add_argument(
-        "--device",
-        default=None,
-        choices=DEVICE_CHOICES,
-        help="Device override (auto/cpu/cuda/mps).",
-    )
-    fl_sample.add_argument(
-        "--hardware-policy",
-        default="none",
-        choices=HARDWARE_POLICY_CHOICES,
-        help="Explicit hardware policy to apply to config (default: none).",
-    )
-    fl_sample.add_argument(
-        "--print-effective-config",
-        action="store_true",
-        help="Print resolved effective config YAML before plan sampling.",
-    )
-    fl_sample.add_argument(
-        "--print-resolution-trace",
-        action="store_true",
-        help="Print field-level override trace before plan sampling.",
-    )
-
-    fl_generate = fl_sub.add_parser(
-        "generate",
-        help="Generate datasets from a saved fixed-layout plan artifact.",
-    )
-    fl_generate.add_argument("--config", required=True, help="Path to YAML config.")
-    fl_generate.add_argument("--plan", required=True, help="Path to YAML fixed-layout plan.")
-    fl_generate.add_argument("--out", default=None, help="Output directory for parquet shards.")
-    fl_generate.add_argument(
-        "--num-datasets",
-        type=_positive_int,
-        default=10,
-        help="Number of datasets to generate.",
-    )
-    fl_generate.add_argument(
-        "--seed",
-        type=_seed_32bit_int,
-        default=None,
-        help=f"Optional override for run seed in [{SEED32_MIN}, {SEED32_MAX}].",
-    )
-    fl_generate.add_argument(
-        "--batch-size",
-        type=_positive_int,
-        default=None,
-        help="Optional internal fixed-layout microbatch size.",
-    )
-    fl_generate.add_argument(
-        "--device",
-        default=None,
-        choices=DEVICE_CHOICES,
-        help="Device override (auto/cpu/cuda/mps).",
-    )
-    fl_generate.add_argument(
-        "--hardware-policy",
-        default="none",
-        choices=HARDWARE_POLICY_CHOICES,
-        help="Explicit hardware policy to apply to config (default: none).",
-    )
-    fl_generate.add_argument(
-        "--no-dataset-write",
-        action="store_true",
-        help="Generate in memory only and do not write parquet files.",
-    )
-    fl_generate.add_argument(
-        "--print-effective-config",
-        action="store_true",
-        help="Print resolved effective config YAML before generation.",
-    )
-    fl_generate.add_argument(
-        "--print-resolution-trace",
-        action="store_true",
-        help="Print field-level override trace before generation.",
     )
     f = sub.add_parser(
         "filter",
@@ -896,121 +776,6 @@ def _run_generate(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_fixed_layout_sample(args: argparse.Namespace) -> int:
-    """Execute the ``fixed-layout sample`` command."""
-
-    config = _load_config_or_usage_error(args.config)
-    try:
-        resolved = resolve_generate_config(
-            config,
-            device_override=args.device,
-            rows=args.rows,
-            hardware_policy=str(args.hardware_policy),
-            missing_rate=None,
-            missing_mechanism=None,
-            missing_mar_observed_fraction=None,
-            missing_mar_logit_scale=None,
-            missing_mnar_logit_scale=None,
-            diagnostics_enabled=False,
-        )
-        plan = sample_fixed_layout(
-            resolved.config,
-            seed=args.seed if args.seed is not None else resolved.config.seed,
-            device=resolved.requested_device,
-        )
-    except ValueError as exc:
-        _raise_usage_error(str(exc))
-
-    trace_payload = serialize_resolution_events(resolved.trace_events)
-    if args.print_effective_config:
-        _print_effective_config(resolved.config, header="Effective config:")
-    if args.print_resolution_trace:
-        _print_resolution_trace(trace_payload, header="Resolution trace:")
-
-    out_path = _write_fixed_layout_plan(plan, Path(args.out))
-    print(f"Wrote fixed-layout plan: {out_path}")
-    print(
-        f"Fixed-layout plan signature={plan.plan_signature} "
-        f"layout_signature={plan.layout_signature} seed={plan.plan_seed}"
-    )
-    return 0
-
-
-def _run_fixed_layout_generate(args: argparse.Namespace) -> int:
-    """Execute the ``fixed-layout generate`` command."""
-
-    config = _load_config_or_usage_error(args.config)
-    try:
-        resolved = resolve_generate_config(
-            config,
-            device_override=args.device,
-            rows=None,
-            hardware_policy=str(args.hardware_policy),
-            missing_rate=None,
-            missing_mechanism=None,
-            missing_mar_observed_fraction=None,
-            missing_mar_logit_scale=None,
-            missing_mnar_logit_scale=None,
-            diagnostics_enabled=False,
-        )
-    except ValueError as exc:
-        _raise_usage_error(str(exc))
-
-    config = resolved.config
-    if bool(config.filter.enabled):
-        _raise_usage_error(
-            "Inline filtering has been removed from generate. Set filter.enabled=false and run "
-            "`dagzoo filter --in <shard_dir> --out <out_dir>` after generation."
-        )
-
-    try:
-        plan = _load_fixed_layout_plan(args.plan)
-        stream = generate_batch_fixed_layout_iter(
-            config,
-            plan=plan,
-            num_datasets=args.num_datasets,
-            seed=args.seed if args.seed is not None else config.seed,
-            batch_size=args.batch_size,
-            device=resolved.requested_device,
-        )
-    except (FileNotFoundError, ValueError) as exc:
-        _raise_usage_error(str(exc))
-
-    trace_payload = serialize_resolution_events(resolved.trace_events)
-    if args.print_effective_config:
-        _print_effective_config(config, header="Effective config:")
-    if args.print_resolution_trace:
-        _print_resolution_trace(trace_payload, header="Resolution trace:")
-
-    if args.no_dataset_write:
-        generated = sum(1 for _ in stream)
-        print(f"Generated {generated} fixed-layout datasets (no-dataset-write mode).")
-        return 0
-
-    out_dir = args.out or config.output.out_dir
-    if out_dir is None:
-        _raise_usage_error("fixed-layout generate requires --out or config.output.out_dir.")
-    written = write_packed_parquet_shards_stream(
-        stream,
-        out_dir=out_dir,
-        shard_size=config.output.shard_size,
-        compression=config.output.compression,
-    )
-    print(f"Wrote {written} fixed-layout datasets to: {Path(out_dir)}")
-    return 0
-
-
-def _run_fixed_layout(args: argparse.Namespace) -> int:
-    """Dispatch ``fixed-layout`` subcommands."""
-
-    if args.fixed_layout_command == "sample":
-        return _run_fixed_layout_sample(args)
-    if args.fixed_layout_command == "generate":
-        return _run_fixed_layout_generate(args)
-    _raise_usage_error(f"Unknown fixed-layout subcommand: {args.fixed_layout_command}")
-    return 2
-
-
 def _run_filter(args: argparse.Namespace) -> int:
     """Execute the ``filter`` command."""
 
@@ -1397,8 +1162,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "generate":
         return _run_generate(args)
-    if args.command == "fixed-layout":
-        return _run_fixed_layout(args)
     if args.command == "filter":
         return _run_filter(args)
     if args.command == "benchmark":

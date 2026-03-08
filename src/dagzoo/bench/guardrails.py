@@ -22,7 +22,6 @@ from dagzoo.bench.constants import (
 from dagzoo.bench.metrics import degradation_percent
 from dagzoo.config import GeneratorConfig
 from dagzoo.core.dataset import generate_batch_iter
-from dagzoo.core.fixed_layout import FixedLayoutPlan, generate_batch_fixed_layout_iter
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 from dagzoo.math_utils import to_numpy as _to_numpy
 from dagzoo.rng import offset_seed32
@@ -130,8 +129,6 @@ def _stage_lineage_trial_bundles(
     sample_n: int,
     seed: int,
     device: str | None,
-    fixed_layout_plan: FixedLayoutPlan | None,
-    fixed_layout_batch_size: int | None,
     baseline_stage_dir: Path,
     current_stage_dir: Path,
 ) -> tuple[int, int]:
@@ -141,22 +138,12 @@ def _stage_lineage_trial_bundles(
     current_stage_dir.mkdir(parents=True, exist_ok=True)
     seen = 0
     with_lineage = 0
-    if fixed_layout_plan is not None:
-        bundle_iter = generate_batch_fixed_layout_iter(
-            config,
-            plan=fixed_layout_plan,
-            num_datasets=sample_n,
-            seed=seed,
-            batch_size=fixed_layout_batch_size,
-            device=device,
-        )
-    else:
-        bundle_iter = generate_batch_iter(
-            config,
-            num_datasets=sample_n,
-            seed=seed,
-            device=device,
-        )
+    bundle_iter = generate_batch_iter(
+        config,
+        num_datasets=sample_n,
+        seed=seed,
+        device=device,
+    )
     for idx, bundle in enumerate(bundle_iter):
         has_lineage = isinstance(bundle.metadata.get("lineage"), dict)
         if has_lineage:
@@ -296,8 +283,6 @@ def _collect_lineage_guardrails(
     suite: str,
     num_datasets: int,
     device: str | None,
-    fixed_layout_plan: FixedLayoutPlan | None = None,
-    fixed_layout_batch_size: int | None = None,
     warn_threshold_pct: float,
     fail_threshold_pct: float,
 ) -> dict[str, Any]:
@@ -317,8 +302,6 @@ def _collect_lineage_guardrails(
                 sample_n=sample_n,
                 seed=sample_seed,
                 device=device,
-                fixed_layout_plan=fixed_layout_plan,
-                fixed_layout_batch_size=fixed_layout_batch_size,
                 baseline_stage_dir=baseline_stage_dir,
                 current_stage_dir=current_stage_dir,
             )

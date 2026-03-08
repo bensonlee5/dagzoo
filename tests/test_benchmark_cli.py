@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
-import pytest
 import yaml
 
+from dagzoo.bench.constants import SMOKE_N_TEST_CAP, SMOKE_N_TRAIN_CAP
 from dagzoo.cli import _print_preset_result_line, main
 from dagzoo.config import GeneratorConfig
 
@@ -49,31 +49,47 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
         assert lineage_guardrails["status"] in {"pass", "warn", "fail"}
 
 
-def test_benchmark_cli_rejects_dataset_rows_config(tmp_path) -> None:
+def test_benchmark_cli_realizes_dataset_rows_once_per_preset(tmp_path) -> None:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
     cfg.dataset.rows = "400..60000"  # type: ignore[assignment]
     config_path = tmp_path / "rows_config.yaml"
     config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+    out_dir = tmp_path / "rows_benchmark"
 
-    with pytest.raises(ValueError, match=r"does not support dataset\.rows"):
-        main(
-            [
-                "benchmark",
-                "--config",
-                str(config_path),
-                "--preset",
-                "custom",
-                "--suite",
-                "smoke",
-                "--num-datasets",
-                "1",
-                "--warmup",
-                "0",
-                "--hardware-policy",
-                "none",
-                "--no-memory",
-            ]
-        )
+    code = main(
+        [
+            "benchmark",
+            "--config",
+            str(config_path),
+            "--preset",
+            "custom",
+            "--suite",
+            "smoke",
+            "--num-datasets",
+            "1",
+            "--warmup",
+            "0",
+            "--hardware-policy",
+            "none",
+            "--no-memory",
+            "--out-dir",
+            str(out_dir),
+        ]
+    )
+
+    assert code == 0
+    payload = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+    result = payload["preset_results"][0]
+    effective_config = result["effective_config"]
+    assert int(result["dataset_rows_total"]) <= int(SMOKE_N_TRAIN_CAP + SMOKE_N_TEST_CAP)
+    assert effective_config["dataset"]["rows"] is None
+    trace_files = sorted((out_dir / "effective_configs").glob("*_trace.yaml"))
+    assert trace_files
+    trace_payload = yaml.safe_load(trace_files[0].read_text(encoding="utf-8"))
+    assert any(
+        isinstance(item, dict) and item.get("source") == "benchmark.smoke_rows_cap"
+        for item in trace_payload
+    )
 
 
 def test_benchmark_cli_writes_effective_config_trace_artifacts(tmp_path) -> None:

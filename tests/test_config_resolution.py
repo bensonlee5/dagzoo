@@ -254,22 +254,26 @@ def test_resolve_benchmark_preset_config_requires_smoke_caps_for_smoke_suite() -
         )
 
 
-def test_resolve_benchmark_preset_config_rejects_dataset_rows() -> None:
+def test_resolve_benchmark_preset_config_preserves_dataset_rows_for_standard_suite() -> None:
     cfg = GeneratorConfig.from_yaml("configs/benchmark_cpu.yaml")
-    cfg.dataset.rows = "400..60000"  # type: ignore[assignment]
+    cfg.dataset.rows = "2000..60000"  # type: ignore[assignment]
 
-    with pytest.raises(ValueError, match=r"does not support dataset\.rows"):
-        resolve_benchmark_preset_config(
-            preset_key="cpu",
-            config=cfg,
-            preset_device="cpu",
-            suite="standard",
-            hardware_policy="none",
-            smoke_caps=None,
-        )
+    resolved = resolve_benchmark_preset_config(
+        preset_key="cpu",
+        config=cfg,
+        preset_device="cpu",
+        suite="standard",
+        hardware_policy="none",
+        smoke_caps=None,
+    )
+
+    assert resolved.config.dataset.rows is not None
+    assert resolved.config.dataset.rows.mode == "range"
+    assert resolved.config.dataset.rows.start == 2000
+    assert resolved.config.dataset.rows.stop == 60000
 
 
-def test_resolve_benchmark_preset_config_rejects_dataset_rows_before_policy_transform(
+def test_resolve_benchmark_preset_config_preserves_dataset_rows_after_policy_transform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -284,14 +288,22 @@ def test_resolve_benchmark_preset_config_rejects_dataset_rows_before_policy_tran
         ),
     )
     cfg = GeneratorConfig.from_yaml("configs/benchmark_cpu.yaml")
-    cfg.dataset.rows = "400..60000"  # type: ignore[assignment]
+    cfg.dataset.rows = "2000..60000"  # type: ignore[assignment]
 
-    with pytest.raises(ValueError, match=r"does not support dataset\.rows"):
-        resolve_benchmark_preset_config(
-            preset_key="cpu",
-            config=cfg,
-            preset_device="cuda",
-            suite="standard",
-            hardware_policy="cuda_tiered_v1",
-            smoke_caps=None,
-        )
+    resolved = resolve_benchmark_preset_config(
+        preset_key="cpu",
+        config=cfg,
+        preset_device="cuda",
+        suite="standard",
+        hardware_policy="cuda_tiered_v1",
+        smoke_caps=None,
+    )
+
+    # Benchmark preset resolution now permits variable rows; smoke-suite row
+    # capping and one-time run realization happen later in benchmark orchestration.
+    assert resolved.config.dataset.rows is not None
+    assert resolved.config.dataset.rows.mode == "range"
+    assert resolved.config.dataset.rows.start == 2000
+    assert resolved.config.dataset.rows.stop == 60000
+    assert resolved.requested_device == "cuda"
+    assert resolved.config.dataset.n_test == 1024

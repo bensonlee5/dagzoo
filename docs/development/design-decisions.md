@@ -135,45 +135,40 @@ with an explicit migration plan for compatibility.
 
 ______________________________________________________________________
 
-## 4. Fixed-layout batch API as explicit opt-in
+## 4. Canonical fixed-layout execution model
 
 ### Context
 
-Some workflows need many datasets with the same sampled structure (feature
-types, DAG shape, node assignments, and split sizes) so downstream
-analysis can isolate value-level variation from layout-level variation.
+The project needs one deterministic execution model that preserves emitted
+schema alignment across a run, keeps replay behavior stable, and avoids
+maintaining separate dynamic and fixed-layout runtimes.
 
 ### Decision
 
-Expose a dedicated fixed-layout API and CLI:
-
-- `sample_fixed_layout(...)` to sample one reusable plan.
-- `generate_batch_fixed_layout(_iter)(...)` to emit many datasets from that plan.
-- `dagzoo fixed-layout sample` / `dagzoo fixed-layout generate` for plan-file
-  workflows outside Python.
-
-Default `generate_batch(_iter)` behavior remains layout-dynamic.
+Canonical `generate_one`, `generate_batch`, and `generate_batch_iter` use the
+fixed-layout engine internally. The old dynamic executor and explicit
+fixed-layout public workflow have been removed.
 
 ### Rationale
 
-- **Clear semantics** — callers choose fixed-layout behavior explicitly instead
-  of relying on hidden coupling in default generation.
-- **Lower branching complexity** — generation core stays simple; layout reuse is
-  isolated in a dedicated path.
+- **Lower branching complexity** — one execution model replaces dual dynamic
+  and fixed-layout runtimes.
 - **Emitted-schema contract** — fixed-layout batches guarantee aligned emitted
   columns (feature count/order and lineage mapping), so index-based downstream
   consumers can safely stack bundles.
-- **Deterministic reproducibility** — one plan seed yields one stable layout
-  signature, while dataset seeds still vary value realizations. The current
-  fixed-layout execution contract is `chunk_batched_v1`, so emitted values are
-  deterministic for the same `plan + seed + batch_size`.
+- **Deterministic reproducibility** — one run seed yields one stable shared
+  layout signature, while dataset child seeds still vary value realizations.
+  Under `chunk_batched_v1`, canonical outputs are deterministic for the same
+  run seed and realized run shape.
+- **Batch completion guarantee** — classification runs validate the requested
+  canonical run before emission so public batches do not fail after partial
+  output.
 
 ### Alternatives considered
 
-- **Replace default generation behavior** — simpler surface area, but would
-  change longstanding semantics for users expecting dynamic layout sampling.
-- **Config-only fixed-layout mode** — convenient for CLI parity, but less clear
-  than an explicit Python API and adds global mode branching.
+- **Keep separate dynamic and fixed-layout runtimes** — rejected because it
+  preserves duplicate orchestration, testing, and documentation burden.
+- **Config-only fixed-layout mode** — not pursued.
 
 ______________________________________________________________________
 

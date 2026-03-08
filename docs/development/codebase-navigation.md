@@ -6,11 +6,13 @@ node execution and quality filtering.
 
 ## 1. Entry Points & Orchestration
 
-The high-level logic that bridges CLI/API requests to the generation engine.
+The high-level logic that bridges CLI/API requests to the canonical generation
+runtime.
 
 - [`src/dagzoo/cli.py`](../../src/dagzoo/cli.py): Maps CLI flags to `GeneratorConfig` and handles command dispatch.
-- [`src/dagzoo/core/dataset.py`](../../src/dagzoo/core/dataset.py): The main orchestration engine. Manages batch generation, fixed-layout planning, and end-to-end synchronization.
-- [`src/dagzoo/core/generation_engine.py`](../../src/dagzoo/core/generation_engine.py): Per-dataset Torch generation loop: node execution, retry, stratified split, X/y assembly.
+- [`src/dagzoo/core/dataset.py`](../../src/dagzoo/core/dataset.py): Public generation facade. Resolves canonical runs, annotates replay metadata, and streams emitted bundles.
+- [`src/dagzoo/core/generation_runtime.py`](../../src/dagzoo/core/generation_runtime.py): Shared split/finalization helpers used by canonical fixed-layout generation.
+- [`src/dagzoo/core/fixed_layout.py`](../../src/dagzoo/core/fixed_layout.py): Internal canonical run preparation, per-run layout sampling, classification replay validation, and batched execution.
 - [`src/dagzoo/core/config_resolution.py`](../../src/dagzoo/core/config_resolution.py): Layered config resolution, produces `effective_config_trace.yaml`.
 
 ## 2. The Generation Pipeline (The "Assembly Line")
