@@ -25,6 +25,8 @@ from dagzoo.core.dataset import (
 )
 from dagzoo.core.fixed_layout import (
     _FixedLayoutPlan,
+)
+from dagzoo.core.fixed_layout_runtime import (
     _fixed_layout_plan_supports_classification_run,
     _generate_batch_with_plan_iter,
     _resolve_fixed_layout_batch_size,
@@ -1292,15 +1294,15 @@ def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
         ]
 
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._resolve_noise_runtime_selection",
+        "dagzoo.core.fixed_layout_runtime._resolve_noise_runtime_selection",
         _stub_resolve_noise_runtime_selection,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._generate_fixed_layout_graph_batch_with_fallback",
+        "dagzoo.core.fixed_layout_runtime._generate_fixed_layout_graph_batch_with_fallback",
         _stub_generate_fixed_layout_label_batch_with_fallback,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._finalize_generated_chunk_preserve_schema",
+        "dagzoo.core.fixed_layout_runtime._finalize_generated_chunk_preserve_schema",
         _stub_finalize_generated_chunk_preserve_schema,
     )
 
@@ -1392,19 +1394,19 @@ def test_fixed_layout_plan_supports_classification_run_groups_mixed_noise_runtim
         )
 
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._resolve_noise_runtime_selection",
+        "dagzoo.core.fixed_layout_runtime._resolve_noise_runtime_selection",
         _stub_resolve_noise_runtime_selection,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._generate_fixed_layout_label_batch_with_fallback",
+        "dagzoo.core.fixed_layout_runtime._generate_fixed_layout_label_batch_with_fallback",
         _stub_generate_fixed_layout_graph_batch_with_fallback,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._raw_classification_labels_support_split",
+        "dagzoo.core.fixed_layout_runtime._raw_classification_labels_support_split",
         lambda *args, **kwargs: True,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._fixed_layout_dataset_supports_classification_replay",
+        "dagzoo.core.fixed_layout_runtime._fixed_layout_dataset_supports_classification_replay",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("per-dataset replay fallback should not run when raw splits validate")
         ),
@@ -1484,7 +1486,10 @@ def test_auto_retries_on_cpu_when_mps_fails(monkeypatch: pytest.MonkeyPatch) -> 
             [{}],
         )
 
-    monkeypatch.setattr("dagzoo.core.fixed_layout._resolve_device", lambda *_args, **_kwargs: "mps")
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._resolve_device",
+        lambda *_args, **_kwargs: "mps",
+    )
     monkeypatch.setattr(
         "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
         _stub_generate_fixed_layout_graph_batch,
@@ -1525,7 +1530,10 @@ def test_generate_batch_iter_auto_retries_on_cpu_when_mps_batch_generation_fails
         y = torch.zeros((1, n_rows), dtype=torch.float32)
         return x, y, [{}]
 
-    monkeypatch.setattr("dagzoo.core.fixed_layout._resolve_device", lambda *_args, **_kwargs: "mps")
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._resolve_device",
+        lambda *_args, **_kwargs: "mps",
+    )
     monkeypatch.setattr(
         "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
         _stub_generate_fixed_layout_graph_batch,
@@ -1765,11 +1773,11 @@ def test_prepare_canonical_fixed_layout_run_validates_full_classification_run(
         return int(plan.plan_seed) == int(second_plan.plan_seed)
 
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._sample_fixed_layout_candidate",
+        "dagzoo.core.fixed_layout_runtime._sample_fixed_layout_candidate",
         _stub_sample_fixed_layout_candidate,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._fixed_layout_plan_supports_classification_run",
+        "dagzoo.core.fixed_layout_runtime._fixed_layout_plan_supports_classification_run",
         _stub_supports_classification_run,
     )
 
@@ -1842,17 +1850,17 @@ def test_prepare_canonical_fixed_layout_run_uses_lightweight_classification_vali
         return y_batch, aux_meta_batch, "cpu", None
 
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._sample_fixed_layout_candidate",
+        "dagzoo.core.fixed_layout_runtime._sample_fixed_layout_candidate",
         _stub_sample_fixed_layout_candidate,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._sample_fixed_layout",
+        "dagzoo.core.fixed_layout_runtime._sample_fixed_layout",
         lambda *_args, **_kwargs: pytest.fail(
             "classification prep should skip single-dataset replay validation sampling"
         ),
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout._generate_fixed_layout_label_batch_with_fallback",
+        "dagzoo.core.fixed_layout_runtime._generate_fixed_layout_label_batch_with_fallback",
         _stub_generate_fixed_layout_label_batch_with_fallback,
     )
 

@@ -34,7 +34,7 @@ from dagzoo.core.config_resolution import (
     resolve_generate_config,
     serialize_resolution_events,
 )
-from dagzoo.core.fixed_layout import realize_generation_config_for_run
+from dagzoo.core.fixed_layout_runtime import realize_generation_config_for_run
 from dagzoo.diagnostics import (
     CoverageAggregator,
     write_coverage_summary_json,
