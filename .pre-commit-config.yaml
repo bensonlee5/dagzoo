@@ -14,6 +14,12 @@ repos:
     language: system
     types_or: [python, pyi]
     pass_filenames: true
+  - id: mypy
+    name: mypy
+    entry: ./.venv/bin/python -m mypy src
+    language: system
+    types_or: [python, pyi]
+    pass_filenames: false
   - id: mdformat
     name: mdformat
     entry: uv run mdformat

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 from typing import Any
@@ -19,13 +19,12 @@ from dagzoo.config import (
 )
 from dagzoo.core.constants import FIXED_LAYOUT_PLAN_SEED_OFFSET, ROWS_REALIZATION_SEED_OFFSET
 from dagzoo.core.fixed_layout_batched import (
-    _FIXED_LAYOUT_EXECUTION_CONTRACT,
-    build_fixed_layout_execution_plans,
+    build_fixed_layout_execution_plan,
     fixed_layout_plan_signature,
     generate_fixed_layout_graph_batch,
     generate_fixed_layout_label_batch,
-    normalize_fixed_layout_node_plans,
 )
+from dagzoo.core.fixed_layout_plan_types import FixedLayoutExecutionPlan
 from dagzoo.core.generation_context import (
     _attempt_seed,
     _resolve_device,
@@ -67,7 +66,7 @@ class _FixedLayoutPlan:
     n_train: int
     n_test: int
     layout_signature: str
-    node_plans: list[dict[str, Any]] | None = None
+    execution_plan: FixedLayoutExecutionPlan = field(default_factory=FixedLayoutExecutionPlan)
     plan_signature: str | None = None
 
 
@@ -195,7 +194,7 @@ def _generate_grouped_raw_batches(
     config: GeneratorConfig,
     layout: LayoutPlan,
     *,
-    node_plans: list[dict[str, Any]],
+    execution_plan: FixedLayoutExecutionPlan,
     grouped_noise_runtime: list[_NoiseRuntimeGroup],
     requested_device: str,
     resolved_device: str,
@@ -213,7 +212,7 @@ def _generate_grouped_raw_batches(
         ) = _generate_fixed_layout_graph_batch_with_fallback(
             config,
             layout,
-            node_plans=node_plans,
+            execution_plan=execution_plan,
             dataset_seeds=group.data_seeds,
             requested_device=requested_device,
             resolved_device=resolved_device,
@@ -395,13 +394,11 @@ def _sample_fixed_layout_once(
     n_train, n_test = _resolve_split_sizes(config, dataset_seed=seed)
     _validate_class_split_for_layout(config, layout=layout, n_train=n_train, n_test=n_test)
     shift_params = resolve_shift_runtime_params(config)
-    node_plans = normalize_fixed_layout_node_plans(
-        build_fixed_layout_execution_plans(
-            config,
-            layout,
-            plan_seed=seed,
-            mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
-        )
+    execution_plan = build_fixed_layout_execution_plan(
+        config,
+        layout,
+        plan_seed=seed,
+        mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
     )
     return _FixedLayoutPlan(
         layout=layout,
@@ -411,8 +408,8 @@ def _sample_fixed_layout_once(
         n_train=int(n_train),
         n_test=int(n_test),
         layout_signature=_layout_signature(layout),
-        node_plans=node_plans,
-        plan_signature=fixed_layout_plan_signature(node_plans),
+        execution_plan=execution_plan,
+        plan_signature=fixed_layout_plan_signature(execution_plan),
     )
 
 
@@ -452,9 +449,6 @@ def _fixed_layout_dataset_supports_classification_replay(
 ) -> bool:
     """Return whether one dataset seed can replay under one fixed-layout plan."""
 
-    if plan.node_plans is None:
-        raise ValueError("Fixed-layout plan must include node_plans.")
-
     data_seed = SeedManager(dataset_seed).child("data")
     shift_params = resolve_shift_runtime_params(config)
     noise_runtime_selection = _resolve_noise_runtime_selection(config, run_seed=data_seed)
@@ -466,7 +460,7 @@ def _fixed_layout_dataset_supports_classification_replay(
             _generate_fixed_layout_label_batch_with_fallback(
                 config,
                 plan.layout,
-                node_plans=plan.node_plans,
+                execution_plan=plan.execution_plan,
                 dataset_seeds=[_attempt_seed(data_seed, attempt)],
                 requested_device=requested_device,
                 resolved_device=resolved_device,
@@ -496,9 +490,6 @@ def _fixed_layout_plan_supports_classification_run(
 ) -> bool:
     """Return whether a classification plan can replay for the full requested run."""
 
-    if plan.node_plans is None:
-        raise ValueError("Fixed-layout plan must include node_plans.")
-
     manager = SeedManager(run_seed)
     shift_params = resolve_shift_runtime_params(config)
     effective_batch_size = max(1, int(batch_size))
@@ -519,7 +510,7 @@ def _fixed_layout_plan_supports_classification_run(
                 _generate_fixed_layout_label_batch_with_fallback(
                     config,
                     plan.layout,
-                    node_plans=plan.node_plans,
+                    execution_plan=plan.execution_plan,
                     dataset_seeds=group.data_seeds,
                     requested_device=requested_device,
                     resolved_device=resolved_device,
@@ -625,7 +616,7 @@ def _annotate_fixed_layout_metadata(bundle: DatasetBundle, *, plan: _FixedLayout
     bundle.metadata["layout_plan_seed"] = int(plan.plan_seed)
     bundle.metadata["layout_signature"] = str(plan.layout_signature)
     bundle.metadata["layout_plan_schema_version"] = int(_FIXED_LAYOUT_METADATA_SCHEMA_VERSION)
-    bundle.metadata["layout_execution_contract"] = str(_FIXED_LAYOUT_EXECUTION_CONTRACT)
+    bundle.metadata["layout_execution_contract"] = str(plan.execution_plan.execution_contract)
     if plan.plan_signature is not None:
         bundle.metadata["layout_plan_signature"] = str(plan.plan_signature)
 
@@ -664,7 +655,7 @@ def _generate_fixed_layout_graph_batch_with_fallback(
     config: GeneratorConfig,
     layout: LayoutPlan,
     *,
-    node_plans: list[dict[str, Any]],
+    execution_plan: FixedLayoutExecutionPlan,
     dataset_seeds: list[int],
     requested_device: str,
     resolved_device: str,
@@ -676,7 +667,7 @@ def _generate_fixed_layout_graph_batch_with_fallback(
             x_batch, y_batch, aux_meta_batch = generate_fixed_layout_graph_batch(
                 config,
                 layout,
-                node_plans=node_plans,
+                execution_plan=execution_plan,
                 dataset_seeds=dataset_seeds,
                 device=resolved_device,
                 noise_sigma_multiplier=noise_sigma_multiplier,
@@ -687,7 +678,7 @@ def _generate_fixed_layout_graph_batch_with_fallback(
             x_batch, y_batch, aux_meta_batch = generate_fixed_layout_graph_batch(
                 config,
                 layout,
-                node_plans=node_plans,
+                execution_plan=execution_plan,
                 dataset_seeds=dataset_seeds,
                 device="cpu",
                 noise_sigma_multiplier=noise_sigma_multiplier,
@@ -704,7 +695,7 @@ def _generate_fixed_layout_graph_batch_with_fallback(
     x_batch, y_batch, aux_meta_batch = generate_fixed_layout_graph_batch(
         config,
         layout,
-        node_plans=node_plans,
+        execution_plan=execution_plan,
         dataset_seeds=dataset_seeds,
         device=resolved_device,
         noise_sigma_multiplier=noise_sigma_multiplier,
@@ -717,7 +708,7 @@ def _generate_fixed_layout_label_batch_with_fallback(
     config: GeneratorConfig,
     layout: LayoutPlan,
     *,
-    node_plans: list[dict[str, Any]],
+    execution_plan: FixedLayoutExecutionPlan,
     dataset_seeds: list[int],
     requested_device: str,
     resolved_device: str,
@@ -729,7 +720,7 @@ def _generate_fixed_layout_label_batch_with_fallback(
             y_batch, aux_meta_batch = generate_fixed_layout_label_batch(
                 config,
                 layout,
-                node_plans=node_plans,
+                execution_plan=execution_plan,
                 dataset_seeds=dataset_seeds,
                 device=resolved_device,
                 noise_sigma_multiplier=noise_sigma_multiplier,
@@ -740,7 +731,7 @@ def _generate_fixed_layout_label_batch_with_fallback(
             y_batch, aux_meta_batch = generate_fixed_layout_label_batch(
                 config,
                 layout,
-                node_plans=node_plans,
+                execution_plan=execution_plan,
                 dataset_seeds=dataset_seeds,
                 device="cpu",
                 noise_sigma_multiplier=noise_sigma_multiplier,
@@ -756,7 +747,7 @@ def _generate_fixed_layout_label_batch_with_fallback(
     y_batch, aux_meta_batch = generate_fixed_layout_label_batch(
         config,
         layout,
-        node_plans=node_plans,
+        execution_plan=execution_plan,
         dataset_seeds=dataset_seeds,
         device=resolved_device,
         noise_sigma_multiplier=noise_sigma_multiplier,
@@ -774,9 +765,6 @@ def _generate_fixed_layout_bundle_with_retries(
     resolved_device: str,
     preserve_feature_schema: bool,
 ) -> DatasetBundle:
-    if plan.node_plans is None:
-        raise ValueError("Fixed-layout plan must include node_plans.")
-
     data_seed = SeedManager(dataset_seed).child("data")
     shift_params = resolve_shift_runtime_params(config)
     noise_runtime_selection = _resolve_noise_runtime_selection(config, run_seed=data_seed)
@@ -795,7 +783,7 @@ def _generate_fixed_layout_bundle_with_retries(
         ) = _generate_fixed_layout_graph_batch_with_fallback(
             config,
             plan.layout,
-            node_plans=plan.node_plans,
+            execution_plan=plan.execution_plan,
             dataset_seeds=[_attempt_seed(data_seed, attempt)],
             requested_device=requested_device,
             resolved_device=resolved_device,
@@ -884,7 +872,7 @@ def _generate_batch_with_plan_iter(
         grouped_raw_batches = _generate_grouped_raw_batches(
             config,
             plan.layout,
-            node_plans=plan.node_plans or [],
+            execution_plan=plan.execution_plan,
             grouped_noise_runtime=grouped_noise_runtime,
             requested_device=requested_device,
             resolved_device=validated_resolved_device,

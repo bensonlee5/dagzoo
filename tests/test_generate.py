@@ -38,6 +38,7 @@ from dagzoo.core.generation_runtime import (
     _finalize_generated_tensors,
     _parent_node_indices,
 )
+from dagzoo.core.fixed_layout_plan_types import FixedLayoutExecutionPlan
 from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.core.noise_runtime import NoiseRuntimeSelection
 from dagzoo.core.shift import mechanism_nonlinear_mass, resolve_shift_runtime_params
@@ -1128,7 +1129,7 @@ def test_sample_fixed_layout_is_deterministic_for_seed() -> None:
     assert plan_a.layout_signature == plan_b.layout_signature
     assert plan_a.plan_seed == plan_b.plan_seed
     assert plan_a.plan_signature == plan_b.plan_signature
-    assert plan_a.node_plans == plan_b.node_plans
+    assert plan_a.execution_plan == plan_b.execution_plan
     assert int(plan_a.layout.n_features) == int(plan_b.layout.n_features)
     assert list(plan_a.layout.feature_types) == list(plan_b.layout.feature_types)
 
@@ -1184,7 +1185,7 @@ def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
         n_train=cfg.dataset.n_train,
         n_test=cfg.dataset.n_test,
         layout_signature="layout_sig",
-        node_plans=[],
+        execution_plan=FixedLayoutExecutionPlan(),
         plan_signature="plan_sig",
     )
     manager = SeedManager(run_seed)
@@ -1211,14 +1212,14 @@ def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
         _config,
         _layout,
         *,
-        node_plans,
+        execution_plan,
         dataset_seeds,
         requested_device,
         resolved_device,
         noise_sigma_multiplier,
         noise_spec,
     ):
-        _ = node_plans
+        _ = execution_plan
         _ = requested_device
         _ = resolved_device
         _ = noise_sigma_multiplier
@@ -1341,7 +1342,7 @@ def test_fixed_layout_plan_supports_classification_run_groups_mixed_noise_runtim
         n_train=cfg.dataset.n_train,
         n_test=cfg.dataset.n_test,
         layout_signature="layout_sig",
-        node_plans=[],
+        execution_plan=FixedLayoutExecutionPlan(),
         plan_signature="plan_sig",
     )
     manager = SeedManager(run_seed)
@@ -1368,14 +1369,14 @@ def test_fixed_layout_plan_supports_classification_run_groups_mixed_noise_runtim
         _config,
         _layout,
         *,
-        node_plans,
+        execution_plan,
         dataset_seeds,
         requested_device,
         resolved_device,
         noise_sigma_multiplier,
         noise_spec,
     ):
-        _ = node_plans
+        _ = execution_plan
         _ = requested_device
         _ = resolved_device
         _ = noise_sigma_multiplier
@@ -1462,13 +1463,13 @@ def test_auto_retries_on_cpu_when_mps_fails(monkeypatch: pytest.MonkeyPatch) -> 
         _config,
         _layout,
         *,
-        node_plans,
+        execution_plan,
         dataset_seeds,
         device,
         noise_sigma_multiplier,
         noise_spec,
     ):
-        _ = node_plans
+        _ = execution_plan
         _ = dataset_seeds
         _ = noise_sigma_multiplier
         _ = noise_spec
@@ -1505,13 +1506,13 @@ def test_generate_batch_iter_auto_retries_on_cpu_when_mps_batch_generation_fails
         _config,
         _layout,
         *,
-        node_plans,
+        execution_plan,
         dataset_seeds,
         device,
         noise_sigma_multiplier,
         noise_spec,
     ):
-        _ = node_plans
+        _ = execution_plan
         _ = dataset_seeds
         _ = noise_sigma_multiplier
         _ = noise_spec
@@ -1821,14 +1822,14 @@ def test_prepare_canonical_fixed_layout_run_uses_lightweight_classification_vali
         _config: GeneratorConfig,
         _layout,
         *,
-        node_plans,
+        execution_plan,
         dataset_seeds: list[int],
         requested_device: str,
         resolved_device: str,
         noise_sigma_multiplier: float,
         noise_spec,
     ) -> tuple[torch.Tensor, torch.Tensor, list[dict[str, object]], str, str | None]:
-        _ = node_plans
+        _ = execution_plan
         _ = requested_device
         _ = resolved_device
         _ = noise_sigma_multiplier
