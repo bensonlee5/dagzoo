@@ -36,7 +36,11 @@ from dagzoo.core.generation_context import (
 from dagzoo.core.generation_runtime import _finalize_generated_tensors
 from dagzoo.core.layout import _sample_layout
 from dagzoo.core.layout_types import LayoutPlan
-from dagzoo.core.noise_runtime import _noise_sampling_spec, _resolve_noise_runtime_selection
+from dagzoo.core.noise_runtime import (
+    NoiseRuntimeSelection,
+    _noise_sampling_spec,
+    _resolve_noise_runtime_selection,
+)
 from dagzoo.core.shift import resolve_shift_runtime_params
 from dagzoo.core.validation import _classification_split_valid, _stratified_split_indices
 from dagzoo.rng import SeedManager, offset_seed32
@@ -73,6 +77,28 @@ class CanonicalFixedLayoutRun:
     batch_size: int
 
 
+@dataclass(slots=True)
+class _NoiseRuntimeGroup:
+    """One chunk subgroup that shares the same raw noise sampling contract."""
+
+    chunk_offsets: list[int]
+    data_seeds: list[int]
+    selection: NoiseRuntimeSelection
+
+
+@dataclass(slots=True)
+class _GroupedRawBatch:
+    """One raw fixed-layout subgroup generation result."""
+
+    chunk_offsets: list[int]
+    selection: NoiseRuntimeSelection
+    x_batch: torch.Tensor
+    y_batch: torch.Tensor
+    aux_meta_batch: list[dict[str, Any]]
+    effective_resolved_device: str
+    device_fallback_reason: str | None
+
+
 def _layout_to_dict(layout: LayoutPlan) -> dict[str, Any]:
     adjacency = layout.adjacency
     if isinstance(adjacency, torch.Tensor):
@@ -106,6 +132,83 @@ def _layout_signature(layout: LayoutPlan) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.blake2s(encoded, digest_size=16).hexdigest()
+
+
+def _noise_runtime_selection_key(
+    selection: NoiseRuntimeSelection,
+) -> tuple[str, float, float]:
+    return (
+        str(selection.family_sampled),
+        float(selection.base_scale),
+        float(selection.student_t_df),
+    )
+
+
+def _group_noise_runtime_chunk(
+    config: GeneratorConfig,
+    *,
+    dataset_seeds: list[int],
+) -> list[_NoiseRuntimeGroup]:
+    grouped: dict[tuple[str, float, float], _NoiseRuntimeGroup] = {}
+    ordered_keys: list[tuple[str, float, float]] = []
+    for chunk_offset, dataset_seed in enumerate(dataset_seeds):
+        data_seed = SeedManager(dataset_seed).child("data")
+        selection = _resolve_noise_runtime_selection(config, run_seed=data_seed)
+        key = _noise_runtime_selection_key(selection)
+        if key not in grouped:
+            grouped[key] = _NoiseRuntimeGroup(
+                chunk_offsets=[],
+                data_seeds=[],
+                selection=selection,
+            )
+            ordered_keys.append(key)
+        group = grouped[key]
+        group.chunk_offsets.append(int(chunk_offset))
+        group.data_seeds.append(int(data_seed))
+    return [grouped[key] for key in ordered_keys]
+
+
+def _generate_grouped_raw_batches(
+    config: GeneratorConfig,
+    layout: LayoutPlan,
+    *,
+    node_plans: list[dict[str, Any]],
+    grouped_noise_runtime: list[_NoiseRuntimeGroup],
+    requested_device: str,
+    resolved_device: str,
+    noise_sigma_multiplier: float,
+) -> list[_GroupedRawBatch]:
+    grouped_batches: list[_GroupedRawBatch] = []
+    for group in grouped_noise_runtime:
+        noise_spec = _noise_sampling_spec(group.selection)
+        (
+            x_batch,
+            y_batch,
+            aux_meta_batch,
+            effective_resolved_device,
+            device_fallback_reason,
+        ) = _generate_fixed_layout_graph_batch_with_fallback(
+            config,
+            layout,
+            node_plans=node_plans,
+            dataset_seeds=group.data_seeds,
+            requested_device=requested_device,
+            resolved_device=resolved_device,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+        )
+        grouped_batches.append(
+            _GroupedRawBatch(
+                chunk_offsets=list(group.chunk_offsets),
+                selection=group.selection,
+                x_batch=x_batch,
+                y_batch=y_batch,
+                aux_meta_batch=aux_meta_batch,
+                effective_resolved_device=str(effective_resolved_device),
+                device_fallback_reason=device_fallback_reason,
+            )
+        )
+    return grouped_batches
 
 
 def _validate_fixed_layout_rows_mode(config: GeneratorConfig) -> None:
@@ -364,42 +467,30 @@ def _fixed_layout_plan_supports_classification_run(
         dataset_seeds = [
             manager.child("dataset", dataset_index + offset) for offset in range(chunk_size)
         ]
-        data_seeds = [SeedManager(dataset_seed).child("data") for dataset_seed in dataset_seeds]
-        noise_runtime_selections = [
-            _resolve_noise_runtime_selection(config, run_seed=data_seed) for data_seed in data_seeds
-        ]
-        if any(
-            selection != noise_runtime_selections[0] for selection in noise_runtime_selections[1:]
-        ):
-            for dataset_seed in dataset_seeds:
-                if not _fixed_layout_dataset_supports_classification_replay(
-                    config,
-                    plan=plan,
-                    dataset_seed=dataset_seed,
-                    requested_device=requested_device,
-                    resolved_device=resolved_device,
-                ):
-                    return False
-            dataset_index += chunk_size
-            continue
-
-        noise_runtime_selection = noise_runtime_selections[0]
-        noise_spec = _noise_sampling_spec(noise_runtime_selection)
-        _, y_batch, _aux_meta_batch, _effective_resolved_device, _device_fallback_reason = (
-            _generate_fixed_layout_graph_batch_with_fallback(
-                config,
-                plan.layout,
-                node_plans=plan.node_plans,
-                dataset_seeds=data_seeds,
-                requested_device=requested_device,
-                resolved_device=resolved_device,
-                noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
-                noise_spec=noise_spec,
-            )
+        grouped_noise_runtime = _group_noise_runtime_chunk(
+            config,
+            dataset_seeds=dataset_seeds,
         )
+        grouped_raw_batches = _generate_grouped_raw_batches(
+            config,
+            plan.layout,
+            node_plans=plan.node_plans,
+            grouped_noise_runtime=grouped_noise_runtime,
+            requested_device=requested_device,
+            resolved_device=resolved_device,
+            noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
+        )
+        raw_batch_by_offset: list[tuple[_GroupedRawBatch, int] | None] = [None] * chunk_size
+        for grouped_batch in grouped_raw_batches:
+            for local_index, chunk_offset in enumerate(grouped_batch.chunk_offsets):
+                raw_batch_by_offset[chunk_offset] = (grouped_batch, int(local_index))
         for offset, dataset_seed in enumerate(dataset_seeds):
+            raw_batch_entry = raw_batch_by_offset[offset]
+            if raw_batch_entry is None:
+                raise RuntimeError("Missing grouped raw batch entry for fixed-layout chunk offset.")
+            grouped_batch, local_index = raw_batch_entry
             if _raw_classification_labels_support_split(
-                y_batch[offset],
+                grouped_batch.y_batch[local_index],
                 dataset_seed=dataset_seed,
                 attempt=0,
                 n_train=int(plan.n_train),
@@ -681,56 +772,28 @@ def _generate_batch_with_plan_iter(
         dataset_seeds = [
             manager.child("dataset", dataset_index + offset) for offset in range(chunk_size)
         ]
-        data_seeds = [SeedManager(dataset_seed).child("data") for dataset_seed in dataset_seeds]
-        noise_runtime_selections = [
-            _resolve_noise_runtime_selection(config, run_seed=data_seed) for data_seed in data_seeds
-        ]
-        if any(
-            selection != noise_runtime_selections[0] for selection in noise_runtime_selections[1:]
-        ):
-            # Noise-family runtime selection currently stays scalar when datasets in the same
-            # chunk sample different runtime families.
-            for dataset_seed in dataset_seeds:
-                bundle = _generate_fixed_layout_bundle_with_retries(
-                    config,
-                    plan=plan,
-                    dataset_seed=dataset_seed,
-                    requested_device=requested_device,
-                    resolved_device=validated_resolved_device,
-                    preserve_feature_schema=True,
-                )
-                _annotate_fixed_layout_metadata(bundle, plan=plan)
-                schema = _extract_emitted_schema_signature(bundle)
-                if expected_schema is None:
-                    expected_schema = schema
-                elif schema != expected_schema:
-                    raise ValueError(
-                        "Fixed-layout schema mismatch: emitted dataset does not match "
-                        "the first fixed-layout bundle schema."
-                    )
-                yield bundle
-            dataset_index += chunk_size
-            continue
-
-        noise_runtime_selection = noise_runtime_selections[0]
-        noise_spec = _noise_sampling_spec(noise_runtime_selection)
-        (
-            x_batch,
-            y_batch,
-            aux_meta_batch,
-            effective_resolved_device,
-            device_fallback_reason,
-        ) = _generate_fixed_layout_graph_batch_with_fallback(
+        grouped_noise_runtime = _group_noise_runtime_chunk(
+            config,
+            dataset_seeds=dataset_seeds,
+        )
+        grouped_raw_batches = _generate_grouped_raw_batches(
             config,
             plan.layout,
             node_plans=plan.node_plans or [],
-            dataset_seeds=data_seeds,
+            grouped_noise_runtime=grouped_noise_runtime,
             requested_device=requested_device,
             resolved_device=validated_resolved_device,
             noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
-            noise_spec=noise_spec,
         )
+        raw_batch_by_offset: list[tuple[_GroupedRawBatch, int] | None] = [None] * chunk_size
+        for grouped_batch in grouped_raw_batches:
+            for local_index, chunk_offset in enumerate(grouped_batch.chunk_offsets):
+                raw_batch_by_offset[chunk_offset] = (grouped_batch, int(local_index))
         for offset, dataset_seed in enumerate(dataset_seeds):
+            raw_batch_entry = raw_batch_by_offset[offset]
+            if raw_batch_entry is None:
+                raise RuntimeError("Missing grouped raw batch entry for fixed-layout chunk offset.")
+            grouped_batch, local_index = raw_batch_entry
             try:
                 bundle = _finalize_generated_tensors(
                     config,
@@ -738,17 +801,17 @@ def _generate_batch_with_plan_iter(
                     seed=dataset_seed,
                     attempt=0,
                     attempts_used=1,
-                    device=effective_resolved_device,
+                    device=grouped_batch.effective_resolved_device,
                     n_train=int(plan.n_train),
                     n_test=int(plan.n_test),
                     requested_device=requested_device,
-                    resolved_device=effective_resolved_device,
-                    device_fallback_reason=device_fallback_reason,
-                    x=x_batch[offset],
-                    y=y_batch[offset],
-                    aux_meta=aux_meta_batch[offset],
+                    resolved_device=grouped_batch.effective_resolved_device,
+                    device_fallback_reason=grouped_batch.device_fallback_reason,
+                    x=grouped_batch.x_batch[local_index],
+                    y=grouped_batch.y_batch[local_index],
+                    aux_meta=grouped_batch.aux_meta_batch[local_index],
                     shift_params=shift_params,
-                    noise_runtime_selection=noise_runtime_selection,
+                    noise_runtime_selection=grouped_batch.selection,
                     dtype=dtype,
                     preserve_feature_schema=True,
                 )

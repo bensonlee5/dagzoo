@@ -10,6 +10,22 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.6.1] - 2026-03-08
+
+### Changed
+
+- Fixed-layout mixed-noise runs no longer fall all the way back to singleton
+  dataset generation when a chunk samples multiple runtime noise families.
+  Chunks now stay batched by subgrouped noise contract and preserve original
+  dataset order through finalization.
+- Fixed-layout batched tree execution now samples ODT splits, leaf indices, and
+  leaf-value gathers in tensorized batch form instead of using per-dataset
+  Python loops.
+- Fixed-layout batched activation and quadratic matrix paths now avoid
+  per-dataset or per-output Python loops, flatten fixed-activation application
+  across batch dimensions, and reduce repeated mean/std reduction overhead in
+  batched standardization.
+
 ## [0.6.0] - 2026-03-07
 
 ### Changed
