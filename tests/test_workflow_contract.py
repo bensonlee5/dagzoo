@@ -17,4 +17,5 @@ def test_workflow_has_parseable_yaml_frontmatter() -> None:
     assert 'project_slug: "4867d49bb182"' in frontmatter
     assert "workspace:" in frontmatter
     assert "codex:" in frontmatter
+    assert ".codex/skills/" not in body
     assert "You are working on a Linear ticket" in body

@@ -25,5 +25,5 @@ repos:
     entry: uv run mdformat
     language: system
     types: [markdown]
-    exclude: ^(docs/transforms.md|site/)
+    exclude: ^(WORKFLOW\.md|docs/transforms.md|site/)
     pass_filenames: true

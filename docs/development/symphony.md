@@ -6,8 +6,6 @@ repo-owned [`WORKFLOW.md`](../../WORKFLOW.md) contract.
 ## What lives in this repo
 
 - `WORKFLOW.md`: tracker/runtime contract for Symphony.
-- `.codex/worktree_init.sh`: bootstrap helper for a freshly created workspace.
-- `.codex/skills/`: repo-local skills referenced by the workflow.
 - `scripts/linear/github_to_linear.py`: one-shot GitHub Issues -> Linear migration and GitHub cutover tool.
 
 The Symphony runtime itself is not vendored here. Use the external
@@ -41,6 +39,22 @@ Symphony-native status model for this repo:
 - `Done`
 
 The migration tool bootstraps any missing workflow states on the owning team before importing issues.
+
+## Weekly Harness Audit
+
+The repo-owned weekly audit rubric lives at
+[`docs/development/harness_audit.md`](harness_audit.md).
+
+Default recurring audit contract:
+
+- Linear issue title: `ops(harness): weekly full-repo harness audit`
+- Schedule: Friday, 10:00 PM `America/Los_Angeles`
+- Creation state: `Todo`
+- Remediation issues: `Backlog`, label `harness`
+
+Use `scripts/linear/seed_harness_backlog.py` to seed the harness epic, child
+tickets, and the weekly audit issue body. If Linear recurrence is not available
+through the API, configure the final recurrence in the Linear UI after seeding.
 
 ## Running Symphony
 
