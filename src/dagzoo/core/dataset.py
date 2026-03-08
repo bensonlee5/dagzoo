@@ -6,7 +6,7 @@ from collections.abc import Iterator
 
 from dagzoo.config import GeneratorConfig
 from dagzoo.core.fixed_layout import (
-    generate_batch_fixed_layout_iter,
+    _generate_batch_with_plan_iter,
     prepare_canonical_fixed_layout_run,
 )
 from dagzoo.rng import SeedManager
@@ -85,7 +85,12 @@ def generate_batch_iter(
     seed: int | None = None,
     device: str | None = None,
 ) -> Iterator[DatasetBundle]:
-    """Yield datasets lazily using one fixed-layout plan sampled for the full run."""
+    """Yield datasets from one canonical fixed-layout run.
+
+    Classification runs may validate replayability for the requested run before
+    the first bundle is emitted so canonical batches do not fail after partial
+    output.
+    """
 
     if num_datasets < 0:
         raise ValueError(f"num_datasets must be >= 0, got {num_datasets}")
@@ -100,13 +105,12 @@ def generate_batch_iter(
         device=device,
     )
     for dataset_index, bundle in enumerate(
-        generate_batch_fixed_layout_iter(
+        _generate_batch_with_plan_iter(
             prepared.config,
             plan=prepared.plan,
             num_datasets=num_datasets,
             seed=prepared.run_seed,
             batch_size=prepared.batch_size,
-            device=prepared.requested_device,
         )
     ):
         yield _annotate_canonical_batch_metadata(

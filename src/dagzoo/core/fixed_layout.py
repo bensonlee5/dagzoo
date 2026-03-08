@@ -1,4 +1,4 @@
-"""Fixed-layout plan types, serialization, and batched generation helpers."""
+"""Canonical fixed-layout run preparation and internal batch helpers."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 import hashlib
 import json
-from typing import Any, cast
+from typing import Any
 
 import torch
 
@@ -23,7 +23,6 @@ from dagzoo.core.fixed_layout_batched import (
     build_fixed_layout_execution_plans,
     fixed_layout_plan_signature,
     generate_fixed_layout_graph_batch,
-    normalize_fixed_layout_node_plans,
 )
 from dagzoo.core.generation_context import (
     _attempt_seed,
@@ -31,25 +30,25 @@ from dagzoo.core.generation_context import (
     _resolve_run_seed,
     _resolve_split_sizes,
     _split_permutation_seed,
+    _torch_dtype,
     _validate_class_split_for_layout,
 )
-from dagzoo.core.generation_engine import _finalize_generated_tensors, _torch_dtype
+from dagzoo.core.generation_runtime import _finalize_generated_tensors
 from dagzoo.core.layout import _sample_layout
-from dagzoo.core.layout_types import FeatureType, LayoutPlan
+from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.core.noise_runtime import _noise_sampling_spec, _resolve_noise_runtime_selection
 from dagzoo.core.shift import resolve_shift_runtime_params
 from dagzoo.core.validation import _classification_split_valid, _stratified_split_indices
 from dagzoo.rng import SeedManager, offset_seed32
 from dagzoo.types import DatasetBundle
 
-_FIXED_LAYOUT_PLAN_SCHEMA_NAME = "dagzoo_fixed_layout_plan"
-_FIXED_LAYOUT_PLAN_SCHEMA_VERSION = 3
+_FIXED_LAYOUT_METADATA_SCHEMA_VERSION = 3
 _FIXED_LAYOUT_TARGET_CELLS = 4_000_000
 
 
 @dataclass(slots=True)
-class FixedLayoutPlan:
-    """Pre-sampled layout bundle for fixed-layout batch generation."""
+class _FixedLayoutPlan:
+    """Internal pre-sampled layout bundle for canonical fixed-layout generation."""
 
     layout: LayoutPlan
     requested_device: str
@@ -58,90 +57,8 @@ class FixedLayoutPlan:
     n_train: int
     n_test: int
     layout_signature: str
-    compatibility_snapshot: dict[str, Any]
     node_plans: list[dict[str, Any]] | None = None
     plan_signature: str | None = None
-    execution_contract: str = _FIXED_LAYOUT_EXECUTION_CONTRACT
-    plan_schema_version: int = _FIXED_LAYOUT_PLAN_SCHEMA_VERSION
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize one fixed-layout plan into a JSON/YAML-safe mapping."""
-
-        return {
-            "schema_name": _FIXED_LAYOUT_PLAN_SCHEMA_NAME,
-            "schema_version": int(self.plan_schema_version),
-            "layout": _layout_to_dict(self.layout),
-            "requested_device": str(self.requested_device),
-            "resolved_device": str(self.resolved_device),
-            "plan_seed": int(self.plan_seed),
-            "n_train": int(self.n_train),
-            "n_test": int(self.n_test),
-            "layout_signature": str(self.layout_signature),
-            "compatibility_snapshot": dict(self.compatibility_snapshot),
-            "node_plans": list(self.node_plans or []),
-            "plan_signature": None if self.plan_signature is None else str(self.plan_signature),
-            "execution_contract": str(self.execution_contract),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> FixedLayoutPlan:
-        """Deserialize one fixed-layout plan from a mapping payload."""
-
-        if not isinstance(data, dict):
-            raise ValueError("Fixed-layout plan payload must be a mapping.")
-        schema_name = str(data.get("schema_name", ""))
-        if schema_name and schema_name != _FIXED_LAYOUT_PLAN_SCHEMA_NAME:
-            raise ValueError(
-                "Unsupported fixed-layout plan schema_name "
-                f"{schema_name!r}; expected {_FIXED_LAYOUT_PLAN_SCHEMA_NAME!r}."
-            )
-        if "schema_version" not in data:
-            raise ValueError("Fixed-layout plan payload must include schema_version.")
-        schema_version = int(data["schema_version"])
-        if schema_version != _FIXED_LAYOUT_PLAN_SCHEMA_VERSION:
-            raise ValueError(
-                "Unsupported fixed-layout plan schema_version "
-                f"{schema_version!r}; expected {_FIXED_LAYOUT_PLAN_SCHEMA_VERSION!r}."
-            )
-        layout_payload = data.get("layout")
-        if not isinstance(layout_payload, dict):
-            raise ValueError("Fixed-layout plan payload must include a layout mapping.")
-        snapshot = data.get("compatibility_snapshot")
-        if not isinstance(snapshot, dict):
-            raise ValueError(
-                "Fixed-layout plan integrity mismatch: compatibility_snapshot must be a mapping."
-            )
-        node_plans_raw = data.get("node_plans", [])
-        if node_plans_raw is None:
-            node_plans = None
-        elif isinstance(node_plans_raw, list):
-            node_plans = [dict(plan) for plan in node_plans_raw]
-        else:
-            raise ValueError("Fixed-layout plan payload must include node_plans as a list.")
-        if "execution_contract" not in data:
-            raise ValueError("Fixed-layout plan payload must include execution_contract.")
-        execution_contract = str(data["execution_contract"])
-        if execution_contract != _FIXED_LAYOUT_EXECUTION_CONTRACT:
-            raise ValueError(
-                "Unsupported fixed-layout plan execution_contract "
-                f"{execution_contract!r}; expected {_FIXED_LAYOUT_EXECUTION_CONTRACT!r}."
-            )
-        return cls(
-            layout=_layout_from_dict(layout_payload),
-            requested_device=str(data["requested_device"]),
-            resolved_device=str(data["resolved_device"]),
-            plan_seed=int(data["plan_seed"]),
-            n_train=int(data["n_train"]),
-            n_test=int(data["n_test"]),
-            layout_signature=str(data["layout_signature"]),
-            compatibility_snapshot=dict(snapshot),
-            node_plans=node_plans,
-            plan_signature=(
-                None if data.get("plan_signature") is None else str(data["plan_signature"])
-            ),
-            execution_contract=execution_contract,
-            plan_schema_version=int(schema_version),
-        )
 
 
 @dataclass(slots=True)
@@ -149,29 +66,11 @@ class CanonicalFixedLayoutRun:
     """Prepared fixed-layout run context for canonical public generation."""
 
     config: GeneratorConfig
-    plan: FixedLayoutPlan
+    plan: _FixedLayoutPlan
     run_seed: int
     requested_device: str
     resolved_device: str
     batch_size: int
-
-
-_FIXED_LAYOUT_COMPAT_KEYS: tuple[str, ...] = (
-    "dataset.task",
-    "dataset.n_train",
-    "dataset.n_test",
-    "dataset.n_features_min",
-    "dataset.n_features_max",
-    "dataset.categorical_ratio_min",
-    "dataset.categorical_ratio_max",
-    "dataset.max_categorical_cardinality",
-    "dataset.n_classes_min",
-    "dataset.n_classes_max",
-    "graph.n_nodes_min",
-    "graph.n_nodes_max",
-    "shift.edge_logit_bias_shift",
-    "shift.mechanism_logit_tilt",
-)
 
 
 def _layout_to_dict(layout: LayoutPlan) -> dict[str, Any]:
@@ -200,29 +99,6 @@ def _layout_to_dict(layout: LayoutPlan) -> dict[str, Any]:
     }
 
 
-def _layout_from_dict(payload: dict[str, Any]) -> LayoutPlan:
-    adjacency = torch.as_tensor(payload["adjacency"], dtype=torch.bool, device="cpu")
-    feature_types = cast("list[FeatureType]", [str(value) for value in payload["feature_types"]])
-    return LayoutPlan(
-        n_features=int(payload["n_features"]),
-        n_cat=int(payload["n_cat"]),
-        cat_idx=[int(value) for value in payload["cat_idx"]],
-        cardinalities=[int(value) for value in payload["cardinalities"]],
-        card_by_feature={
-            int(key): int(value) for key, value in dict(payload["card_by_feature"]).items()
-        },
-        n_classes=int(payload["n_classes"]),
-        feature_types=feature_types,
-        graph_nodes=int(payload["graph_nodes"]),
-        graph_edges=int(payload["graph_edges"]),
-        graph_depth_nodes=int(payload["graph_depth_nodes"]),
-        graph_edge_density=float(payload["graph_edge_density"]),
-        adjacency=adjacency,
-        feature_node_assignment=[int(value) for value in payload["feature_node_assignment"]],
-        target_node_assignment=int(payload["target_node_assignment"]),
-    )
-
-
 def _layout_signature(layout: LayoutPlan) -> str:
     encoded = json.dumps(
         _layout_to_dict(layout),
@@ -230,33 +106,6 @@ def _layout_signature(layout: LayoutPlan) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.blake2s(encoded, digest_size=16).hexdigest()
-
-
-def _build_fixed_layout_compatibility_snapshot(
-    config: GeneratorConfig,
-    *,
-    resolved_device: str,
-    n_train: int,
-    n_test: int,
-) -> dict[str, Any]:
-    shift_params = resolve_shift_runtime_params(config)
-    return {
-        "dataset.task": str(config.dataset.task),
-        "dataset.n_train": int(n_train),
-        "dataset.n_test": int(n_test),
-        "dataset.n_features_min": int(config.dataset.n_features_min),
-        "dataset.n_features_max": int(config.dataset.n_features_max),
-        "dataset.categorical_ratio_min": float(config.dataset.categorical_ratio_min),
-        "dataset.categorical_ratio_max": float(config.dataset.categorical_ratio_max),
-        "dataset.max_categorical_cardinality": int(config.dataset.max_categorical_cardinality),
-        "dataset.n_classes_min": int(config.dataset.n_classes_min),
-        "dataset.n_classes_max": int(config.dataset.n_classes_max),
-        "graph.n_nodes_min": int(config.graph.n_nodes_min),
-        "graph.n_nodes_max": int(config.graph.n_nodes_max),
-        "shift.edge_logit_bias_shift": float(shift_params.edge_logit_bias_shift),
-        "shift.mechanism_logit_tilt": float(shift_params.mechanism_logit_tilt),
-        "runtime.resolved_device": str(resolved_device),
-    }
 
 
 def _validate_fixed_layout_rows_mode(config: GeneratorConfig) -> None:
@@ -268,7 +117,7 @@ def _validate_fixed_layout_rows_mode(config: GeneratorConfig) -> None:
 
 
 def _resolve_fixed_layout_batch_size(
-    plan: FixedLayoutPlan,
+    plan: _FixedLayoutPlan,
     *,
     num_datasets: int,
     batch_size: int | None,
@@ -319,7 +168,12 @@ def prepare_canonical_fixed_layout_run(
     device: str | None = None,
     batch_size: int | None = None,
 ) -> CanonicalFixedLayoutRun:
-    """Prepare one internal fixed-layout run context for public generation APIs."""
+    """Prepare one internal fixed-layout run context for public generation APIs.
+
+    Classification runs intentionally validate the requested run up front so a
+    canonical batch does not emit partial output and then fail on a later
+    dataset seed.
+    """
 
     if num_datasets < 0:
         raise ValueError(f"num_datasets must be >= 0, got {num_datasets}")
@@ -332,7 +186,7 @@ def prepare_canonical_fixed_layout_run(
         )
     )
     base_plan_seed = offset_seed32(run_seed, FIXED_LAYOUT_PLAN_SEED_OFFSET)
-    plan = sample_fixed_layout(
+    plan = _sample_fixed_layout(
         realized_config,
         seed=base_plan_seed,
         device=requested_device,
@@ -343,6 +197,9 @@ def prepare_canonical_fixed_layout_run(
         batch_size=batch_size,
     )
     if str(realized_config.dataset.task) == "classification":
+        # Canonical classification batches guarantee completion for the
+        # requested run. That requires validating the shared-plan replay
+        # schedule before any public bundle is emitted.
         attempts = max(1, int(realized_config.filter.max_attempts))
         for attempt in range(attempts):
             effective_batch_size = _resolve_fixed_layout_batch_size(
@@ -365,7 +222,7 @@ def prepare_canonical_fixed_layout_run(
                     "Failed to prepare a replayable canonical fixed-layout classification run "
                     f"after {attempts} attempts."
                 )
-            plan = sample_fixed_layout(
+            plan = _sample_fixed_layout(
                 realized_config,
                 seed=_attempt_seed(base_plan_seed, attempt + 1),
                 device=requested_device,
@@ -386,7 +243,7 @@ def _sample_fixed_layout_once(
     seed: int,
     requested_device: str,
     resolved_device: str,
-) -> FixedLayoutPlan:
+) -> _FixedLayoutPlan:
     """Sample one fixed-layout plan candidate without replay validation retries."""
 
     _validate_fixed_layout_rows_mode(config)
@@ -402,7 +259,7 @@ def _sample_fixed_layout_once(
         plan_seed=seed,
         mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
     )
-    return FixedLayoutPlan(
+    return _FixedLayoutPlan(
         layout=layout,
         requested_device=requested_device,
         resolved_device=resolved_device,
@@ -410,15 +267,8 @@ def _sample_fixed_layout_once(
         n_train=int(n_train),
         n_test=int(n_test),
         layout_signature=_layout_signature(layout),
-        compatibility_snapshot=_build_fixed_layout_compatibility_snapshot(
-            config,
-            resolved_device=resolved_device,
-            n_train=n_train,
-            n_test=n_test,
-        ),
         node_plans=node_plans,
         plan_signature=fixed_layout_plan_signature(node_plans),
-        execution_contract=_FIXED_LAYOUT_EXECUTION_CONTRACT,
     )
 
 
@@ -451,7 +301,7 @@ def _raw_classification_labels_support_split(
 def _fixed_layout_dataset_supports_classification_replay(
     config: GeneratorConfig,
     *,
-    plan: FixedLayoutPlan,
+    plan: _FixedLayoutPlan,
     dataset_seed: int,
     requested_device: str,
     resolved_device: str,
@@ -493,7 +343,7 @@ def _fixed_layout_dataset_supports_classification_replay(
 def _fixed_layout_plan_supports_classification_run(
     config: GeneratorConfig,
     *,
-    plan: FixedLayoutPlan,
+    plan: _FixedLayoutPlan,
     requested_device: str,
     resolved_device: str,
     run_seed: int,
@@ -570,7 +420,7 @@ def _fixed_layout_plan_supports_classification_run(
 def _fixed_layout_plan_supports_classification_replay(
     config: GeneratorConfig,
     *,
-    plan: FixedLayoutPlan,
+    plan: _FixedLayoutPlan,
     requested_device: str,
     resolved_device: str,
     validation_seed: int,
@@ -588,13 +438,13 @@ def _fixed_layout_plan_supports_classification_replay(
     )
 
 
-def sample_fixed_layout(
+def _sample_fixed_layout(
     config: GeneratorConfig,
     *,
     seed: int | None = None,
     device: str | None = None,
-) -> FixedLayoutPlan:
-    """Sample one reusable layout plan for fixed-layout batch generation."""
+) -> _FixedLayoutPlan:
+    """Sample one in-process layout plan for canonical fixed-layout generation."""
 
     run_seed = _resolve_run_seed(config, seed)
     requested_device = (device or config.runtime.device or "auto").lower()
@@ -634,12 +484,12 @@ def sample_fixed_layout(
     )
 
 
-def _annotate_fixed_layout_metadata(bundle: DatasetBundle, *, plan: FixedLayoutPlan) -> None:
+def _annotate_fixed_layout_metadata(bundle: DatasetBundle, *, plan: _FixedLayoutPlan) -> None:
     bundle.metadata["layout_mode"] = "fixed"
     bundle.metadata["layout_plan_seed"] = int(plan.plan_seed)
     bundle.metadata["layout_signature"] = str(plan.layout_signature)
-    bundle.metadata["layout_plan_schema_version"] = int(plan.plan_schema_version)
-    bundle.metadata["layout_execution_contract"] = str(plan.execution_contract)
+    bundle.metadata["layout_plan_schema_version"] = int(_FIXED_LAYOUT_METADATA_SCHEMA_VERSION)
+    bundle.metadata["layout_execution_contract"] = str(_FIXED_LAYOUT_EXECUTION_CONTRACT)
     if plan.plan_signature is not None:
         bundle.metadata["layout_plan_signature"] = str(plan.plan_signature)
 
@@ -672,103 +522,6 @@ def _extract_emitted_schema_signature(
         )
 
     return n_features, feature_types, feature_to_node
-
-
-def _validate_fixed_layout_plan_compatibility(
-    config: GeneratorConfig,
-    *,
-    plan: FixedLayoutPlan,
-    device: str | None = None,
-) -> tuple[str, str]:
-    _validate_fixed_layout_rows_mode(config)
-
-    snapshot = plan.compatibility_snapshot
-    if not isinstance(snapshot, dict):
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: compatibility_snapshot must be a mapping."
-        )
-    if int(plan.plan_schema_version) != _FIXED_LAYOUT_PLAN_SCHEMA_VERSION:
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: unsupported plan_schema_version "
-            f"{plan.plan_schema_version!r}."
-        )
-    if str(plan.execution_contract) != _FIXED_LAYOUT_EXECUTION_CONTRACT:
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: unsupported execution_contract "
-            f"{plan.execution_contract!r}."
-        )
-
-    computed_layout_signature = _layout_signature(plan.layout)
-    if str(plan.layout_signature) != computed_layout_signature:
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: layout_signature does not match plan.layout."
-        )
-    if plan.node_plans is None or not isinstance(plan.node_plans, list) or not plan.node_plans:
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: node_plans must be a non-empty list."
-        )
-    normalized_node_plans = normalize_fixed_layout_node_plans(plan.node_plans)
-    computed_plan_signature = fixed_layout_plan_signature(normalized_node_plans)
-    if plan.plan_signature is None or str(plan.plan_signature) != computed_plan_signature:
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: plan_signature does not match node_plans."
-        )
-
-    missing_keys = [key for key in _FIXED_LAYOUT_COMPAT_KEYS if key not in snapshot]
-    if missing_keys:
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: compatibility snapshot is missing keys: "
-            f"{', '.join(missing_keys)}."
-        )
-    if "runtime.resolved_device" not in snapshot:
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: compatibility snapshot is missing "
-            "runtime.resolved_device provenance."
-        )
-
-    if int(plan.n_train) != int(snapshot["dataset.n_train"]):
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: plan.n_train does not match "
-            "compatibility snapshot."
-        )
-    if int(plan.n_test) != int(snapshot["dataset.n_test"]):
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: plan.n_test does not match "
-            "compatibility snapshot."
-        )
-    if str(plan.resolved_device) != str(snapshot["runtime.resolved_device"]):
-        raise ValueError(
-            "Fixed-layout plan integrity mismatch: plan.resolved_device does not match "
-            "compatibility snapshot."
-        )
-
-    try:
-        requested_device = (device or config.runtime.device or "auto").lower()
-        resolved_device = _resolve_device(config, device)
-    except (RuntimeError, ValueError) as exc:
-        raise ValueError(
-            "Fixed-layout plan/config mismatch: unable to resolve the current replay "
-            f"device '{device or config.runtime.device or 'auto'}' for the current environment."
-        ) from exc
-
-    current_n_train, current_n_test = _resolve_split_sizes(config, dataset_seed=int(plan.plan_seed))
-    current_snapshot = _build_fixed_layout_compatibility_snapshot(
-        config,
-        resolved_device=resolved_device,
-        n_train=current_n_train,
-        n_test=current_n_test,
-    )
-    mismatches: list[str] = []
-    for key in _FIXED_LAYOUT_COMPAT_KEYS:
-        plan_value = snapshot[key]
-        config_value = current_snapshot[key]
-        if plan_value != config_value:
-            mismatches.append(f"{key} (plan={plan_value!r}, config={config_value!r})")
-    if mismatches:
-        raise ValueError(
-            "Fixed-layout plan/config mismatch for compatibility fields: " + "; ".join(mismatches)
-        )
-    return str(requested_device), str(resolved_device)
 
 
 def _generate_fixed_layout_graph_batch_with_fallback(
@@ -827,7 +580,7 @@ def _generate_fixed_layout_graph_batch_with_fallback(
 def _generate_fixed_layout_bundle_with_retries(
     config: GeneratorConfig,
     *,
-    plan: FixedLayoutPlan,
+    plan: _FixedLayoutPlan,
     dataset_seed: int,
     requested_device: str,
     resolved_device: str,
@@ -894,27 +647,23 @@ def _generate_fixed_layout_bundle_with_retries(
     )
 
 
-def generate_batch_fixed_layout_iter(
+def _generate_batch_with_plan_iter(
     config: GeneratorConfig,
     *,
-    plan: FixedLayoutPlan,
+    plan: _FixedLayoutPlan,
     num_datasets: int,
     seed: int | None = None,
     batch_size: int | None = None,
-    device: str | None = None,
 ) -> Iterator[DatasetBundle]:
-    """Yield datasets that share one pre-sampled fixed layout and split shape."""
+    """Yield datasets for one in-process fixed-layout plan."""
 
     if num_datasets < 0:
         raise ValueError(f"num_datasets must be >= 0, got {num_datasets}")
     if num_datasets == 0:
         return
 
-    requested_device, validated_resolved_device = _validate_fixed_layout_plan_compatibility(
-        config,
-        plan=plan,
-        device=device,
-    )
+    requested_device = str(plan.requested_device)
+    validated_resolved_device = str(plan.resolved_device)
     run_seed = _resolve_run_seed(config, seed)
     manager = SeedManager(run_seed)
     dtype = _torch_dtype(config)
@@ -1025,26 +774,3 @@ def generate_batch_fixed_layout_iter(
                 )
             yield bundle
         dataset_index += chunk_size
-
-
-def generate_batch_fixed_layout(
-    config: GeneratorConfig,
-    *,
-    plan: FixedLayoutPlan,
-    num_datasets: int,
-    seed: int | None = None,
-    batch_size: int | None = None,
-    device: str | None = None,
-) -> list[DatasetBundle]:
-    """Generate a materialized fixed-layout batch using a reusable plan."""
-
-    return list(
-        generate_batch_fixed_layout_iter(
-            config,
-            plan=plan,
-            num_datasets=num_datasets,
-            seed=seed,
-            batch_size=batch_size,
-            device=device,
-        )
-    )

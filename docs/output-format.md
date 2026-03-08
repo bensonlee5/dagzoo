@@ -123,12 +123,12 @@ Each line contains:
 | `filter`                     | object      | Filter results (see below)                                                                         |
 | `class_structure`            | object      | Present only for classification (see below)                                                        |
 | `missingness`                | object      | Present only when missingness is enabled                                                           |
-| `layout_mode`                | str         | Optional layout mode metadata (`"fixed"` for fixed-layout API)                                     |
-| `layout_plan_seed`           | int         | Optional fixed-layout plan seed                                                                    |
-| `layout_signature`           | str         | Optional deterministic fixed-layout fingerprint                                                    |
-| `layout_plan_signature`      | str         | Optional deterministic fingerprint for the frozen fixed-layout execution plan                      |
-| `layout_plan_schema_version` | int         | Optional fixed-layout plan schema version used to sample the shared plan                           |
-| `layout_execution_contract`  | str         | Optional fixed-layout execution contract for deterministic replay                                  |
+| `layout_mode`                | str         | Optional canonical layout metadata (`"fixed"` for canonical generation outputs)                    |
+| `layout_plan_seed`           | int         | Optional internal seed used to sample the shared per-run layout                                    |
+| `layout_signature`           | str         | Optional deterministic fingerprint for the shared sampled layout                                   |
+| `layout_plan_signature`      | str         | Optional deterministic fingerprint for the internal frozen node execution payload                  |
+| `layout_plan_schema_version` | int         | Optional internal metadata version for the canonical shared-layout payload                         |
+| `layout_execution_contract`  | str         | Optional internal execution contract identifier for canonical determinism                          |
 
 For canonical generation (`generate_one`, `generate_batch`, `generate_batch_iter`,
 and `dagzoo generate`), replay later bundles with the shared `seed`,
@@ -206,14 +206,14 @@ Present for all canonical generation outputs. These bundles share one sampled
 layout per run and preserve emitted column alignment (feature count, column
 order, and lineage feature-to-node mapping) within that run.
 
-| Key                          | Type | Description                                                   |
-| ---------------------------- | ---- | ------------------------------------------------------------- |
-| `layout_mode`                | str  | `"fixed"`                                                     |
-| `layout_plan_seed`           | int  | Seed used to sample the shared fixed-layout plan              |
-| `layout_signature`           | str  | Stable fingerprint for the shared sampled layout              |
-| `layout_plan_signature`      | str  | Stable fingerprint for the frozen node execution plan payload |
-| `layout_plan_schema_version` | int  | Serialized fixed-layout plan schema version                   |
-| `layout_execution_contract`  | str  | Fixed-layout execution contract (`chunk_batched_v1`)          |
+| Key                          | Type | Description                                             |
+| ---------------------------- | ---- | ------------------------------------------------------- |
+| `layout_mode`                | str  | `"fixed"`                                               |
+| `layout_plan_seed`           | int  | Internal seed used to sample the shared per-run layout  |
+| `layout_signature`           | str  | Stable fingerprint for the shared sampled layout        |
+| `layout_plan_signature`      | str  | Stable fingerprint for the frozen internal node payload |
+| `layout_plan_schema_version` | int  | Internal canonical layout metadata version              |
+| `layout_execution_contract`  | str  | Internal execution contract (`chunk_batched_v1`)        |
 
 Under `chunk_batched_v1`, canonical fixed-layout outputs are deterministic for
 the same run seed and realized run shape. Internal plan metadata records the
@@ -336,9 +336,6 @@ protected by a SHA-256 checksum recorded in the metadata.
 - Canonical generation (`generate_one`, `generate_batch`, `generate_batch_iter`)
   is fixed-layout-backed and preserves emitted feature schema across the run:
   constant-column removal and feature-column permutation are disabled.
-- Explicit fixed-layout generation (`generate_batch_fixed_layout`,
-  `generate_batch_fixed_layout_iter`) preserves the same emitted-schema contract
-  for saved-plan replay.
 - Numeric features are clipped and standardized (approximately zero mean,
   unit variance).
 - Classification target classes are randomly permuted (label indices carry
