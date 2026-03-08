@@ -20,11 +20,13 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
 - Variable `dataset.rows` modes now resolve once per run. All datasets emitted
   from the same `generate` run share the same realized `n_train` / `n_test`
   split, and `effective_config.yaml` records that realized split.
-- Single-worker benchmark generation now inherits the same canonical
-  fixed-layout generation path as `dagzoo generate`.
-- `dagzoo generate` and `dagzoo benchmark` now reject `runtime.worker_count > 1`
-  while parallel generation is temporarily removed from the active product
-  surface during fixed-layout batch optimization work.
+- `dagzoo benchmark` now uses the same canonical fixed-layout generation path as
+  `dagzoo generate`, reports `generation_mode="fixed_batched"` on that path,
+  and caps smoke-suite `dataset.rows` before run realization.
+- The old dynamic executor has been removed. Canonical split/finalization logic
+  now lives in shared internal runtime helpers used by fixed-layout execution.
+- Parallel-generation scaffolding and worker-partition wiring have been removed
+  from the active product surface.
 
 ### Breaking
 
@@ -36,8 +38,15 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
 - **BREAKING:** Generated bundles from the canonical `generate_*` APIs now carry
   fixed-layout provenance metadata (`layout_mode`, `layout_signature`,
   `layout_plan_seed`, `layout_plan_signature`, and execution-contract fields).
-- **BREAKING:** `runtime.worker_count > 1` is unsupported again for both
-  `dagzoo generate` and `dagzoo benchmark`.
+- **BREAKING:** The public `dagzoo fixed-layout ...` CLI workflow has been
+  removed, and the top-level fixed-layout generation exports are no longer part
+  of the public Python package surface.
+- **BREAKING:** `runtime.worker_count` and `runtime.worker_index` are no longer
+  supported runtime config keys for generation, benchmark, or diversity-audit
+  flows.
+- **BREAKING:** Local parallel-generation orchestration and the old dynamic
+  generation executor have been removed rather than left as dormant product
+  paths.
 
 ## [0.5.7] - 2026-03-07
 
