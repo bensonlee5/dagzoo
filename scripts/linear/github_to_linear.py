@@ -633,7 +633,7 @@ def build_issue_input(
     *,
     team_id: str,
     project_id: str,
-    state_id: str,
+    state_id: str | None,
     label_ids: list[str],
     parent_id: str | None,
     include_historical_timestamps: bool,
@@ -643,8 +643,9 @@ def build_issue_input(
         "projectId": project_id,
         "title": issue.title,
         "description": build_migrated_description(issue),
-        "stateId": state_id,
     }
+    if state_id is not None:
+        payload["stateId"] = state_id
     if label_ids:
         payload["labelIds"] = label_ids
     priority = desired_linear_priority(issue)
@@ -674,6 +675,7 @@ def migrate_issues(
 
     mapping = MappingFile.load(mapping_path, repo=repo, project_slug=project_slug)
     mapping.migrated_at = iso_now()
+    persist_mapping = not gh.dry_run
     project_id, team_id, _team_key = linear.get_project(project_slug)
     states, labels = linear.get_team_metadata(team_id)
     states = linear.ensure_workflow_states(team_id, states)
@@ -706,15 +708,22 @@ def migrate_issues(
             and parent_github_number in linear_refs_by_github_number
         ):
             parent_id = linear_refs_by_github_number[parent_github_number].id
-        state_name = desired_linear_state_name(issue)
-        state = states.get(state_name)
-        if state is None:
-            raise MigrationError(f"Missing Linear workflow state {state_name!r}")
+        state_name = (
+            entry.linear_state
+            if entry and entry.cutover_applied
+            else desired_linear_state_name(issue)
+        )
+        state_id: str | None = None
+        if entry is None or not entry.cutover_applied:
+            state = states.get(state_name)
+            if state is None:
+                raise MigrationError(f"Missing Linear workflow state {state_name!r}")
+            state_id = state.id
         payload = build_issue_input(
             issue,
             team_id=team_id,
             project_id=project_id,
-            state_id=state.id,
+            state_id=state_id,
             label_ids=label_ids,
             parent_id=parent_id,
             include_historical_timestamps=entry is None and recovered_ref is None,
@@ -740,7 +749,8 @@ def migrate_issues(
             )
         )
 
-    mapping_path.write_text(mapping.to_json())
+    if persist_mapping:
+        mapping_path.write_text(mapping.to_json())
 
     for child_number, parent_number in parent_map.items():
         child_entry = mapping.entry_for(child_number)
@@ -751,7 +761,8 @@ def migrate_issues(
         child_entry.parent_github_number = parent_number
         mapping.upsert(child_entry)
 
-    mapping_path.write_text(mapping.to_json())
+    if persist_mapping:
+        mapping_path.write_text(mapping.to_json())
     return mapping
 
 
@@ -826,7 +837,8 @@ def main(argv: list[str] | None = None) -> int:
         if not mapping.entries:
             raise MigrationError("Cutover requires a populated mapping file.")
         apply_cutover(gh=gh, mapping=mapping, issue_numbers=issue_numbers or None)
-        mapping_path.write_text(mapping.to_json())
+        if not args.dry_run:
+            mapping_path.write_text(mapping.to_json())
     return 0
 
 
