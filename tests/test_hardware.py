@@ -54,6 +54,60 @@ def test_hardware_policy_cuda_tiered_applied_when_h100_profile() -> None:
     assert cfg.dataset.n_train == original_train
     assert effective.dataset.n_train >= 4096
     assert effective.benchmark.preset_name == "cuda_h100_auto"
+    assert effective.runtime.fixed_layout_target_cells == 160_000_000
+
+
+def test_hardware_policy_raises_low_fixed_layout_target_cells_to_memory_scaled_floor() -> None:
+    cfg = GeneratorConfig()
+    cfg.runtime.device = "cuda"
+    cfg.runtime.fixed_layout_target_cells = 16_000_000
+
+    hw = HardwareInfo(
+        backend="cuda",
+        requested_device="cuda",
+        device_name="NVIDIA RTX 4090",
+        total_memory_gb=24.0,
+        peak_flops=165.2e12,
+        tier="cuda_desktop",
+    )
+    effective = apply_hardware_policy(cfg, hw, policy_name="cuda_tiered_v1")
+
+    assert effective.runtime.fixed_layout_target_cells == 48_000_000
+
+
+def test_hardware_policy_preserves_explicit_high_fixed_layout_target_cells_override() -> None:
+    cfg = GeneratorConfig()
+    cfg.runtime.device = "cuda"
+    cfg.runtime.fixed_layout_target_cells = 96_000_000
+
+    hw = HardwareInfo(
+        backend="cuda",
+        requested_device="cuda",
+        device_name="NVIDIA RTX 4090",
+        total_memory_gb=24.0,
+        peak_flops=165.2e12,
+        tier="cuda_desktop",
+    )
+    effective = apply_hardware_policy(cfg, hw, policy_name="cuda_tiered_v1")
+
+    assert effective.runtime.fixed_layout_target_cells == 96_000_000
+
+
+def test_hardware_policy_cuda_datacenter_scales_fixed_layout_target_cells_with_memory() -> None:
+    cfg = GeneratorConfig()
+    cfg.runtime.device = "cuda"
+
+    hw = HardwareInfo(
+        backend="cuda",
+        requested_device="cuda",
+        device_name="NVIDIA A100 80GB",
+        total_memory_gb=80.0,
+        peak_flops=312e12,
+        tier="cuda_datacenter",
+    )
+    effective = apply_hardware_policy(cfg, hw, policy_name="cuda_tiered_v1")
+
+    assert effective.runtime.fixed_layout_target_cells == 160_000_000
 
 
 def test_hardware_policy_unknown_name_raises() -> None:

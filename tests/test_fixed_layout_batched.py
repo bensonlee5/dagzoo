@@ -5,10 +5,16 @@ from unittest.mock import patch
 import pytest
 import torch
 
+from dagzoo.config import GeneratorConfig
+from dagzoo.core.fixed_layout import _sample_fixed_layout
 from dagzoo.core.fixed_layout_batched import (
     FixedLayoutBatchRng,
     _apply_activation_plan,
+    _lp_distances_to_centers,
+    _nearest_lp_center_indices,
     _sample_random_matrix_from_plan_batch,
+    generate_fixed_layout_graph_batch,
+    generate_fixed_layout_label_batch,
 )
 from dagzoo.functions.activations import _fixed_activation
 
@@ -126,3 +132,74 @@ def test_sample_random_matrix_from_plan_batch_supports_parametric_activation_wit
     )
     assert matrices.shape == (2, 5, 4, 3)
     assert torch.all(torch.isfinite(matrices))
+
+
+def test_nearest_lp_center_indices_matches_dense_reference() -> None:
+    generator = torch.Generator(device="cpu").manual_seed(23)
+    x = torch.randn(2, 3, 7, 4, generator=generator)
+    centers = torch.randn(2, 3, 5, 4, generator=generator)
+    p = torch.tensor([[0.5, 1.5, 2.0], [3.0, 4.0, 1.25]], dtype=torch.float32)
+
+    out = _nearest_lp_center_indices(x, centers, p=p)
+    dense = torch.pow(
+        torch.abs(x.unsqueeze(3) - centers.unsqueeze(2)),
+        p.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1),
+    ).sum(dim=4)
+    expected = torch.argmin(dense, dim=3)
+
+    torch.testing.assert_close(out, expected)
+
+
+def test_lp_distances_to_centers_matches_dense_reference() -> None:
+    generator = torch.Generator(device="cpu").manual_seed(29)
+    x = torch.randn(2, 11, 3, generator=generator)
+    centers = torch.randn(2, 6, 3, generator=generator)
+    p = torch.tensor([1.25, 3.0], dtype=torch.float32)
+
+    out = _lp_distances_to_centers(x, centers, p=p, take_root=True)
+    expected = torch.pow(
+        torch.pow(
+            torch.abs(x.unsqueeze(2) - centers.unsqueeze(1)),
+            p.view(-1, 1, 1, 1),
+        ).sum(dim=3),
+        1.0 / p.view(-1, 1, 1),
+    )
+
+    torch.testing.assert_close(out, expected)
+
+
+def test_generate_fixed_layout_label_batch_matches_graph_batch_targets() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.dataset.task = "classification"
+    cfg.dataset.n_train = 6
+    cfg.dataset.n_test = 4
+    cfg.dataset.n_features_min = 4
+    cfg.dataset.n_features_max = 4
+    cfg.dataset.n_classes_min = 3
+    cfg.dataset.n_classes_max = 3
+    cfg.graph.n_nodes_min = 2
+    cfg.graph.n_nodes_max = 3
+    plan = _sample_fixed_layout(cfg, seed=123, device="cpu")
+    dataset_seeds = [901, 902]
+
+    x_batch, y_batch, _aux = generate_fixed_layout_graph_batch(
+        cfg,
+        plan.layout,
+        node_plans=plan.node_plans or [],
+        dataset_seeds=dataset_seeds,
+        device="cpu",
+        noise_sigma_multiplier=1.0,
+        noise_spec=None,
+    )
+    label_batch, _aux_only = generate_fixed_layout_label_batch(
+        cfg,
+        plan.layout,
+        node_plans=plan.node_plans or [],
+        dataset_seeds=dataset_seeds,
+        device="cpu",
+        noise_sigma_multiplier=1.0,
+        noise_spec=None,
+    )
+
+    assert x_batch.shape[0] == label_batch.shape[0] == len(dataset_seeds)
+    torch.testing.assert_close(label_batch, y_batch)

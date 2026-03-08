@@ -153,6 +153,15 @@ def test_resolve_generate_config_applies_rows_override_after_policy_revalidation
     assert resolved.config.dataset.rows.start == 2000
     assert resolved.config.dataset.rows.stop == 60000
     assert resolved.config.dataset.n_test == 1024
+    assert resolved.config.runtime.fixed_layout_target_cells == 160_000_000
+
+    trace = serialize_resolution_events(resolved.trace_events)
+    assert any(
+        event["path"] == "runtime.fixed_layout_target_cells"
+        and event["source"] == "hardware_policy.cuda_tiered_v1"
+        and event["new_value"] == 160_000_000
+        for event in trace
+    )
 
 
 def test_resolve_benchmark_preset_config_applies_smoke_caps() -> None:
@@ -307,3 +316,4 @@ def test_resolve_benchmark_preset_config_preserves_dataset_rows_after_policy_tra
     assert resolved.config.dataset.rows.stop == 60000
     assert resolved.requested_device == "cuda"
     assert resolved.config.dataset.n_test == 1024
+    assert resolved.config.runtime.fixed_layout_target_cells == 160_000_000

@@ -2,8 +2,14 @@ import queue
 import threading
 import typing
 
-from dagzoo.bench.throughput import run_throughput_benchmark
+import pytest
+
+from dagzoo.bench.throughput import (
+    run_fixed_layout_target_cells_sweep,
+    run_throughput_benchmark,
+)
 from dagzoo.config import GeneratorConfig
+from dagzoo.hardware import HardwareInfo
 from dagzoo.rng import offset_seed32
 
 
@@ -157,3 +163,69 @@ def test_run_throughput_benchmark_callback_exception_does_not_hang_parallel_path
     error = result_queue.get_nowait()
     assert isinstance(error, RuntimeError)
     assert str(error) == "callback boom"
+
+
+def test_run_fixed_layout_target_cells_sweep_uses_tier_defaults(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "dagzoo.bench.throughput.detect_hardware",
+        lambda _requested_device: HardwareInfo(
+            backend="cpu",
+            requested_device="cpu",
+            device_name="cpu",
+            total_memory_gb=None,
+            peak_flops=float("inf"),
+            tier="cpu",
+        ),
+    )
+
+    observed_target_cells: list[int] = []
+
+    def _stub_run_throughput_benchmark(
+        cfg: GeneratorConfig,
+        *,
+        num_datasets: int,
+        warmup_datasets: int = 10,
+        device: str | None = None,
+        on_bundle=None,
+    ) -> dict[str, typing.Any]:
+        _ = warmup_datasets
+        _ = device
+        _ = on_bundle
+        observed_target_cells.append(int(cfg.runtime.fixed_layout_target_cells or 0))
+        return {
+            "preset": cfg.benchmark.preset_name,
+            "num_datasets": num_datasets,
+            "warmup_datasets": 1,
+            "elapsed_seconds": 1.0,
+            "datasets_per_second": float(cfg.runtime.fixed_layout_target_cells or 0) / 1_000_000.0,
+            "datasets_per_minute": float(cfg.runtime.fixed_layout_target_cells or 0) / 100_000.0,
+            "generation_mode": "fixed_batched",
+        }
+
+    monkeypatch.setattr(
+        "dagzoo.bench.throughput.run_throughput_benchmark",
+        _stub_run_throughput_benchmark,
+    )
+
+    cfg = _tiny_parallel_config()
+    sweep = run_fixed_layout_target_cells_sweep(
+        cfg,
+        num_datasets=3,
+        warmup_datasets=1,
+        device="cpu",
+    )
+
+    assert observed_target_cells == [4_000_000, 8_000_000, 12_000_000, 16_000_000]
+    assert sweep["recommended_fixed_layout_target_cells"] == 16_000_000
+    assert sweep["target_cells_values"] == [4_000_000, 8_000_000, 12_000_000, 16_000_000]
+
+
+def test_run_fixed_layout_target_cells_sweep_rejects_invalid_candidates() -> None:
+    with pytest.raises(ValueError, match="positive integers"):
+        run_fixed_layout_target_cells_sweep(
+            _tiny_parallel_config(),
+            num_datasets=2,
+            warmup_datasets=0,
+            device="cpu",
+            target_cells_values=[4_000_000, 0],
+        )

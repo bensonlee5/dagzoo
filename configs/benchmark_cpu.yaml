@@ -19,6 +19,7 @@ graph:
 runtime:
   device: cpu
   torch_dtype: float32
+  fixed_layout_target_cells: 12000000
 
 output:
   out_dir: data/benchmark_cpu

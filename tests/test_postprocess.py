@@ -1,12 +1,15 @@
 """Tests for postprocess/postprocess.py."""
 
+import pytest
 import torch
 
 from dagzoo.config import DatasetConfig
 from dagzoo.postprocess.postprocess import (
     _clip_and_standardize,
+    _clip_and_standardize_batch,
     inject_missingness,
     postprocess_dataset,
+    postprocess_fixed_schema_batch,
 )
 from conftest import make_generator as _make_generator
 
@@ -98,6 +101,17 @@ def test_clip_and_standardize_matches_loop_reference_for_mixed_types() -> None:
 
     out = _clip_and_standardize(x, feature_types)
     ref = _clip_and_standardize_reference_loop(x, feature_types)
+
+    torch.testing.assert_close(out, ref)
+
+
+def test_clip_and_standardize_batch_matches_scalar_helper() -> None:
+    g = _make_generator(19)
+    x = torch.randn(3, 96, 6, generator=g)
+    feature_types = ["num", "cat", "num", "num", "cat", "num"]
+
+    out = _clip_and_standardize_batch(x, feature_types)
+    ref = torch.stack([_clip_and_standardize(batch, feature_types) for batch in x], dim=0)
 
     torch.testing.assert_close(out, ref)
 
@@ -202,6 +216,67 @@ def test_feature_index_map_tracks_dropped_and_permuted_columns() -> None:
     assert all(0 <= int(i) < len(feature_types) for i in feature_index_map)
     assert 4 not in feature_index_map
     assert [feature_types[i] for i in feature_index_map] == ft_out
+
+
+@pytest.mark.parametrize("task", ["classification", "regression"])
+def test_postprocess_fixed_schema_batch_matches_scalar_preserve_schema(task: str) -> None:
+    g = _make_generator(20)
+    x_train = torch.randn(2, 32, 5, generator=g)
+    x_test = torch.randn(2, 16, 5, generator=g)
+    feature_types = ["num", "num", "cat", "num", "num"]
+    if task == "classification":
+        y_train = torch.tensor(
+            [
+                [0, 0, 1, 1] * 8,
+                [0, 1, 2, 0] * 8,
+            ],
+            dtype=torch.int64,
+        )
+        y_test = torch.tensor(
+            [
+                [0, 0, 1, 1] * 4,
+                [0, 1, 2, 0] * 4,
+            ],
+            dtype=torch.int64,
+        )
+    else:
+        y_train = torch.randn(2, 32, generator=g)
+        y_test = torch.randn(2, 16, generator=g)
+
+    seeds = [301, 302]
+    generator_states = []
+    for seed in seeds:
+        generator = _make_generator(seed)
+        generator_states.append(generator.get_state())
+    batched = postprocess_fixed_schema_batch(
+        x_train,
+        y_train,
+        x_test,
+        y_test,
+        feature_types,
+        task,
+        postprocess_generator_states=generator_states,
+    )
+    scalar = [
+        postprocess_dataset(
+            x_train[index],
+            y_train[index],
+            x_test[index],
+            y_test[index],
+            list(feature_types),
+            task,
+            _make_generator(seeds[index]),
+            "cpu",
+            preserve_feature_schema=True,
+        )
+        for index in range(2)
+    ]
+
+    for index, scalar_out in enumerate(scalar):
+        torch.testing.assert_close(batched[0][index], scalar_out[0])
+        torch.testing.assert_close(batched[1][index], scalar_out[1])
+        torch.testing.assert_close(batched[2][index], scalar_out[2])
+        torch.testing.assert_close(batched[3][index], scalar_out[3])
 
 
 def test_inject_missingness_disabled_noop() -> None:
