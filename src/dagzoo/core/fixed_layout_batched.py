@@ -49,6 +49,7 @@ _PRODUCT_COMPONENT_FAMILIES: tuple[MechanismFamily, ...] = (
     "linear",
     "quadratic",
 )
+_PAIRWISE_CENTER_BLOCK_SIZE = 32
 
 _FIXED_LAYOUT_EXECUTION_CONTRACT = "chunk_batched_v1"
 
@@ -468,6 +469,76 @@ def _batch_standardize(x: torch.Tensor) -> torch.Tensor:
     return (x - mean) / torch.clamp(std, min=1e-6)
 
 
+def _flatten_leading_dims(
+    x: torch.Tensor, *, trailing_dims: int
+) -> tuple[torch.Tensor, tuple[int, ...]]:
+    leading_shape = tuple(int(dim) for dim in x.shape[:-trailing_dims])
+    flat = max(1, math.prod(leading_shape))
+    return x.reshape(flat, *x.shape[-trailing_dims:]), leading_shape
+
+
+def _nearest_lp_center_indices(
+    x: torch.Tensor,
+    centers: torch.Tensor,
+    *,
+    p: torch.Tensor,
+    block_size: int = _PAIRWISE_CENTER_BLOCK_SIZE,
+) -> torch.Tensor:
+    x_flat, leading_shape = _flatten_leading_dims(x, trailing_dims=2)
+    centers_flat, _ = _flatten_leading_dims(centers, trailing_dims=2)
+    p_flat = p.reshape(-1)
+
+    best_distance: torch.Tensor | None = None
+    best_indices: torch.Tensor | None = None
+    for start in range(0, int(centers_flat.shape[1]), max(1, int(block_size))):
+        stop = min(start + max(1, int(block_size)), int(centers_flat.shape[1]))
+        center_block = centers_flat[:, start:stop, :]
+        diff = torch.abs(x_flat.unsqueeze(2) - center_block.unsqueeze(1))
+        block_distances = torch.pow(diff, p_flat.view(-1, 1, 1, 1)).sum(dim=3)
+        local_distance, local_indices = torch.min(block_distances, dim=2)
+        local_indices = local_indices + int(start)
+        if best_distance is None or best_indices is None:
+            best_distance = local_distance
+            best_indices = local_indices
+            continue
+        use_local = local_distance < best_distance
+        best_distance = torch.where(use_local, local_distance, best_distance)
+        best_indices = torch.where(use_local, local_indices, best_indices)
+
+    if best_indices is None:
+        raise RuntimeError("Expected at least one center when computing nearest center indices.")
+    return best_indices.reshape(*leading_shape, int(x.shape[-2]))
+
+
+def _lp_distances_to_centers(
+    x: torch.Tensor,
+    centers: torch.Tensor,
+    *,
+    p: torch.Tensor,
+    take_root: bool,
+    block_size: int = _PAIRWISE_CENTER_BLOCK_SIZE,
+) -> torch.Tensor:
+    x_flat, leading_shape = _flatten_leading_dims(x, trailing_dims=2)
+    centers_flat, _ = _flatten_leading_dims(centers, trailing_dims=2)
+    p_flat = p.reshape(-1)
+    blocks: list[torch.Tensor] = []
+    for start in range(0, int(centers_flat.shape[1]), max(1, int(block_size))):
+        stop = min(start + max(1, int(block_size)), int(centers_flat.shape[1]))
+        center_block = centers_flat[:, start:stop, :]
+        diff = torch.abs(x_flat.unsqueeze(2) - center_block.unsqueeze(1))
+        block_distances = torch.pow(diff, p_flat.view(-1, 1, 1, 1)).sum(dim=3)
+        if take_root:
+            block_distances = torch.pow(
+                block_distances,
+                p_flat.reciprocal().view(-1, 1, 1),
+            )
+        blocks.append(block_distances)
+    if not blocks:
+        raise RuntimeError("Expected at least one center block when computing distances.")
+    distances = torch.cat(blocks, dim=2)
+    return distances.reshape(*leading_shape, int(x.shape[-2]), int(centers.shape[-2]))
+
+
 @dataclass(slots=True)
 class FixedLayoutBatchRng:
     """Chunk-scoped RNG for fixed-layout batched generation."""
@@ -518,7 +589,13 @@ class FixedLayoutBatchRng:
             low=0.0,
             high=1.0,
         )
-        return torch.argsort(scores, dim=-1)[..., : int(sample_size)].to(torch.long)
+        return torch.topk(
+            scores,
+            k=int(sample_size),
+            dim=-1,
+            largest=False,
+            sorted=True,
+        ).indices.to(torch.long)
 
     def categorical(self, probs: torch.Tensor) -> torch.Tensor:
         flat = probs.reshape(-1, probs.shape[-1])
@@ -964,11 +1041,7 @@ def _apply_discretization_batch(
         center_idx.unsqueeze(-1).expand(-1, -1, x.shape[2]),
     )
     p = rng.log_uniform((rng.batch_size,), low=0.5, high=4.0)
-    dist = torch.pow(
-        torch.abs(x.unsqueeze(2) - centers.unsqueeze(1)),
-        p.view(-1, 1, 1, 1),
-    ).sum(dim=3)
-    nearest = torch.argmin(dist, dim=2)
+    nearest = _nearest_lp_center_indices(x, centers, p=p)
     gathered = torch.gather(
         centers,
         1,
@@ -1087,10 +1160,12 @@ def _apply_em_batch(
     )
     p_val = rng.log_uniform((rng.batch_size,), low=1.0, high=4.0)
     q_val = rng.log_uniform((rng.batch_size,), low=1.0, high=2.0)
-    dist_p = torch.pow(
-        torch.abs(x.unsqueeze(2) - centers.unsqueeze(1)),
-        p_val.view(-1, 1, 1, 1),
-    ).sum(dim=3) ** (1.0 / p_val.view(-1, 1, 1))
+    dist_p = _lp_distances_to_centers(
+        x,
+        centers,
+        p=p_val,
+        take_root=True,
+    )
     logits = -0.5 * torch.log(2.0 * math.pi * sigma**2).unsqueeze(1) - torch.pow(
         dist_p / torch.clamp(sigma.unsqueeze(1), min=1e-6),
         q_val.view(-1, 1, 1),
@@ -1263,11 +1338,11 @@ def _apply_categorical_group_batch(
         )
         centers = _gather_group_centers(y, center_idx)
         p = rng.log_uniform((batch_size, group_size), low=0.5, high=4.0)
-        dist = torch.pow(
-            torch.abs(y.permute(0, 2, 1, 3).unsqueeze(3) - centers.unsqueeze(2)),
-            p.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1),
-        ).sum(dim=4)
-        labels_bg = torch.argmin(dist, dim=3)
+        labels_bg = _nearest_lp_center_indices(
+            y.permute(0, 2, 1, 3),
+            centers,
+            p=p,
+        )
         if n_centers < category_count:
             labels_bg = labels_bg % category_count
         labels = labels_bg.permute(0, 2, 1)
@@ -1469,7 +1544,7 @@ def _apply_node_plan_batch(
     return latent, extracted
 
 
-def generate_fixed_layout_graph_batch(
+def _generate_fixed_layout_raw_batch(
     config: GeneratorConfig,
     layout: LayoutPlan,
     *,
@@ -1478,8 +1553,9 @@ def generate_fixed_layout_graph_batch(
     device: str,
     noise_sigma_multiplier: float,
     noise_spec: NoiseSamplingSpec | None,
-) -> tuple[torch.Tensor, torch.Tensor, list[dict[str, Any]]]:
-    """Generate one fixed-layout microbatch of raw `x`/`y` tensors."""
+    emit_features: bool,
+) -> tuple[torch.Tensor | None, torch.Tensor, list[dict[str, Any]]]:
+    """Generate one fixed-layout microbatch of raw tensors."""
 
     if not dataset_seeds:
         raise ValueError("dataset_seeds must be non-empty.")
@@ -1487,16 +1563,17 @@ def generate_fixed_layout_graph_batch(
     n_rows = int(config.dataset.n_train + config.dataset.n_test)
     num_features = int(layout.n_features)
     dtype = torch.float32
-    normalized_node_plans = normalize_fixed_layout_node_plans(node_plans)
     batch_seed = SeedManager(int(dataset_seeds[0])).child("fixed_layout_chunk", batch_size)
     rng = FixedLayoutBatchRng(seed=batch_seed, batch_size=batch_size, device=device)
 
     node_outputs: list[torch.Tensor | None] = [None] * int(layout.graph_nodes)
-    feature_values: list[torch.Tensor | None] = [None] * num_features
+    feature_values: list[torch.Tensor | None] | None = (
+        [None] * num_features if emit_features else None
+    )
     target_values: torch.Tensor | None = None
     aux_meta_batch = [{"filter": {"mode": "deferred", "status": "not_run"}} for _ in dataset_seeds]
 
-    for node_index, node_plan in enumerate(normalized_node_plans):
+    for node_index, node_plan in enumerate(node_plans):
         parent_tensors = []
         for parent_index in node_plan["parent_indices"]:
             parent_output = node_outputs[int(parent_index)]
@@ -1515,6 +1592,8 @@ def generate_fixed_layout_graph_batch(
         node_outputs[node_index] = latent
         for key, values in extracted.items():
             if key.startswith("feature_"):
+                if feature_values is None:
+                    continue
                 feature_index = int(key.split("_", 1)[1])
                 feature_values[feature_index] = values
             elif key == "target":
@@ -1522,23 +1601,25 @@ def generate_fixed_layout_graph_batch(
             else:
                 raise ValueError(f"Unexpected extracted fixed-layout key {key!r}.")
 
-    x = torch.zeros((batch_size, n_rows, num_features), dtype=dtype, device=device)
-    feature_types = list(layout.feature_types)
-    card_by_feature = dict(layout.card_by_feature)
-    for feature_index in range(num_features):
-        feature_tensor: torch.Tensor | None = feature_values[feature_index]
-        if feature_tensor is None:
-            if feature_types[feature_index] == "cat":
-                cardinality = int(card_by_feature[feature_index])
-                feature_tensor = rng.randint(0, cardinality, (batch_size, n_rows))
-            else:
-                feature_tensor = sample_noise_from_spec(
-                    (batch_size, n_rows),
-                    generator=rng.generator,
-                    device=device,
-                    noise_spec=noise_spec,
-                )
-        x[:, :, feature_index] = feature_tensor.to(dtype)
+    x: torch.Tensor | None = None
+    if feature_values is not None:
+        x = torch.zeros((batch_size, n_rows, num_features), dtype=dtype, device=device)
+        feature_types = list(layout.feature_types)
+        card_by_feature = dict(layout.card_by_feature)
+        for feature_index in range(num_features):
+            feature_tensor: torch.Tensor | None = feature_values[feature_index]
+            if feature_tensor is None:
+                if feature_types[feature_index] == "cat":
+                    cardinality = int(card_by_feature[feature_index])
+                    feature_tensor = rng.randint(0, cardinality, (batch_size, n_rows))
+                else:
+                    feature_tensor = sample_noise_from_spec(
+                        (batch_size, n_rows),
+                        generator=rng.generator,
+                        device=device,
+                        noise_spec=noise_spec,
+                    )
+            x[:, :, feature_index] = feature_tensor.to(dtype)
 
     if target_values is None:
         if str(config.dataset.task) == "classification":
@@ -1556,3 +1637,55 @@ def generate_fixed_layout_graph_batch(
         else:
             y = target_values.to(dtype)
     return x, y, aux_meta_batch
+
+
+def generate_fixed_layout_graph_batch(
+    config: GeneratorConfig,
+    layout: LayoutPlan,
+    *,
+    node_plans: list[dict[str, Any]],
+    dataset_seeds: list[int],
+    device: str,
+    noise_sigma_multiplier: float,
+    noise_spec: NoiseSamplingSpec | None,
+) -> tuple[torch.Tensor, torch.Tensor, list[dict[str, Any]]]:
+    """Generate one fixed-layout microbatch of raw `x`/`y` tensors."""
+
+    x, y, aux_meta_batch = _generate_fixed_layout_raw_batch(
+        config,
+        layout,
+        node_plans=node_plans,
+        dataset_seeds=dataset_seeds,
+        device=device,
+        noise_sigma_multiplier=noise_sigma_multiplier,
+        noise_spec=noise_spec,
+        emit_features=True,
+    )
+    if x is None:
+        raise RuntimeError("Expected fixed-layout feature batch to be materialized.")
+    return x, y, aux_meta_batch
+
+
+def generate_fixed_layout_label_batch(
+    config: GeneratorConfig,
+    layout: LayoutPlan,
+    *,
+    node_plans: list[dict[str, Any]],
+    dataset_seeds: list[int],
+    device: str,
+    noise_sigma_multiplier: float,
+    noise_spec: NoiseSamplingSpec | None,
+) -> tuple[torch.Tensor, list[dict[str, Any]]]:
+    """Generate one fixed-layout microbatch of raw target tensors only."""
+
+    _x, y, aux_meta_batch = _generate_fixed_layout_raw_batch(
+        config,
+        layout,
+        node_plans=node_plans,
+        dataset_seeds=dataset_seeds,
+        device=device,
+        noise_sigma_multiplier=noise_sigma_multiplier,
+        noise_spec=noise_spec,
+        emit_features=False,
+    )
+    return y, aux_meta_batch

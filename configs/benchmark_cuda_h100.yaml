@@ -19,6 +19,7 @@ graph:
 runtime:
   device: cuda
   torch_dtype: float32
+  fixed_layout_target_cells: 32000000
 
 output:
   out_dir: data/benchmark_cuda_h100

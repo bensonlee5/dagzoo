@@ -10,6 +10,33 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.6.2] - 2026-03-08
+
+### Changed
+
+- Fixed-layout auto batch sizing now accepts an optional
+  `runtime.fixed_layout_target_cells` override, and the built-in benchmark CPU,
+  CUDA desktop, and CUDA H100 presets pin explicit target-cell budgets instead
+  of relying on the single global default.
+- CUDA config resolution now fills `runtime.fixed_layout_target_cells` from a
+  memory-scaled floor for desktop, datacenter, and H100-class hardware when the
+  config leaves that field unset, even when `--hardware-policy none` is used.
+  Explicit preset or user-configured values are preserved. `cuda_tiered_v1`
+  reuses the same floor logic alongside its broader tier-specific config
+  transforms, including the unknown-CUDA fallback tier.
+- Added an internal throughput sweep helper that benchmarks a small grid of
+  `fixed_layout_target_cells` values and reports the best-performing candidate
+  for the detected hardware tier. CUDA sweeps now start at the active
+  memory-scaled floor/current target and explore upward instead of using a
+  stale low static grid.
+
+### Breaking
+
+- **BREAKING:** Emitted dataset metadata now serializes the optional
+  `config.runtime.fixed_layout_target_cells` field inside the persisted config
+  payload when present. Consumers that validate the nested config payload
+  against an exact schema should allow that key.
+
 ## [0.6.1] - 2026-03-08
 
 ### Changed

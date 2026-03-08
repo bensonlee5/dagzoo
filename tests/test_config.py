@@ -211,6 +211,7 @@ def test_load_cuda_presets() -> None:
     cfg_h100 = GeneratorConfig.from_yaml("configs/preset_cuda_h100.yaml")
     assert cfg_h100.runtime.device == "cuda"
     assert cfg_h100.dataset.n_features_max >= 128
+    assert cfg_h100.runtime.fixed_layout_target_cells == 32_000_000
 
 
 def test_load_diagnostics_preset() -> None:
@@ -244,6 +245,9 @@ def test_load_benchmark_profiles() -> None:
     assert cfg_cpu.runtime.device == "cpu"
     assert cfg_desktop.runtime.device == "cuda"
     assert cfg_h100.runtime.device == "cuda"
+    assert cfg_cpu.runtime.fixed_layout_target_cells == 12_000_000
+    assert cfg_desktop.runtime.fixed_layout_target_cells == 16_000_000
+    assert cfg_h100.runtime.fixed_layout_target_cells == 32_000_000
     assert "cpu" in cfg_h100.benchmark.presets
 
 
@@ -261,6 +265,7 @@ def test_runtime_config_from_dict() -> None:
             "runtime": {
                 "device": "cpu",
                 "torch_dtype": "float64",
+                "fixed_layout_target_cells": "8000000",
             },
             "diagnostics": {
                 "enabled": True,
@@ -274,6 +279,7 @@ def test_runtime_config_from_dict() -> None:
     )
     assert cfg.runtime.device == "cpu"
     assert cfg.runtime.torch_dtype == "float64"
+    assert cfg.runtime.fixed_layout_target_cells == 8_000_000
     assert cfg.diagnostics.enabled is True
     assert cfg.diagnostics.histogram_bins == 12
     assert cfg.diagnostics.max_values_per_metric == 1234
@@ -293,6 +299,12 @@ def test_runtime_config_rejects_generation_engine_key() -> None:
 def test_runtime_config_rejects_hardware_aware_key() -> None:
     with pytest.raises(TypeError, match="hardware_aware"):
         GeneratorConfig.from_dict({"runtime": {"hardware_aware": True}})
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "abc"])
+def test_runtime_config_rejects_invalid_fixed_layout_target_cells(value: object) -> None:
+    with pytest.raises(ValueError, match=r"runtime\.fixed_layout_target_cells must"):
+        GeneratorConfig.from_dict({"runtime": {"fixed_layout_target_cells": value}})
 
 
 def test_legacy_filter_keys_are_rejected() -> None:

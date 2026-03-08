@@ -815,6 +815,13 @@ def _normalize_runtime_fields(runtime: RuntimeConfig) -> None:
     if not runtime.torch_dtype:
         raise ValueError("runtime.torch_dtype must be a non-empty string.")
 
+    if runtime.fixed_layout_target_cells is not None:
+        runtime.fixed_layout_target_cells = _validate_int_field(
+            field_name="runtime.fixed_layout_target_cells",
+            value=runtime.fixed_layout_target_cells,
+            minimum=1,
+        )
+
 
 def _normalize_output_fields(_output: OutputConfig) -> None:
     """Stage 1: output section has no additional field normalization."""
@@ -1149,6 +1156,7 @@ class NoiseConfig:
 class RuntimeConfig:
     device: str = "auto"
     torch_dtype: str = "float32"
+    fixed_layout_target_cells: int | None = None
 
 
 @dataclass(slots=True)

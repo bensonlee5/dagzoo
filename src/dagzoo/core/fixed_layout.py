@@ -23,6 +23,8 @@ from dagzoo.core.fixed_layout_batched import (
     build_fixed_layout_execution_plans,
     fixed_layout_plan_signature,
     generate_fixed_layout_graph_batch,
+    generate_fixed_layout_label_batch,
+    normalize_fixed_layout_node_plans,
 )
 from dagzoo.core.generation_context import (
     _attempt_seed,
@@ -33,7 +35,11 @@ from dagzoo.core.generation_context import (
     _torch_dtype,
     _validate_class_split_for_layout,
 )
-from dagzoo.core.generation_runtime import _finalize_generated_tensors
+from dagzoo.core.generation_runtime import (
+    _build_fixed_schema_finalization_context,
+    _finalize_generated_chunk_preserve_schema,
+    _finalize_generated_tensors,
+)
 from dagzoo.core.layout import _sample_layout
 from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.core.noise_runtime import (
@@ -97,6 +103,23 @@ class _GroupedRawBatch:
     aux_meta_batch: list[dict[str, Any]]
     effective_resolved_device: str
     device_fallback_reason: str | None
+
+
+def _sample_fixed_layout_candidate(
+    config: GeneratorConfig,
+    *,
+    seed: int,
+    requested_device: str,
+    resolved_device: str,
+) -> _FixedLayoutPlan:
+    """Sample one fixed-layout plan candidate without replay validation."""
+
+    return _sample_fixed_layout_once(
+        config,
+        seed=seed,
+        requested_device=requested_device,
+        resolved_device=resolved_device,
+    )
 
 
 def _layout_to_dict(layout: LayoutPlan) -> dict[str, Any]:
@@ -219,18 +242,28 @@ def _validate_fixed_layout_rows_mode(config: GeneratorConfig) -> None:
         )
 
 
+def _effective_fixed_layout_target_cells(config: GeneratorConfig) -> int:
+    """Return the configured fixed-layout auto-batch target cell budget."""
+
+    target_cells = config.runtime.fixed_layout_target_cells
+    if target_cells is None:
+        return int(_FIXED_LAYOUT_TARGET_CELLS)
+    return int(target_cells)
+
+
 def _resolve_fixed_layout_batch_size(
     plan: _FixedLayoutPlan,
     *,
     num_datasets: int,
     batch_size: int | None,
+    target_cells: int | None = None,
 ) -> int:
     if batch_size is not None:
         return max(1, min(int(batch_size), int(num_datasets)))
     per_dataset_cells = max(
         1, int(plan.n_train + plan.n_test) * max(1, int(plan.layout.n_features))
     )
-    auto_batch = max(1, _FIXED_LAYOUT_TARGET_CELLS // per_dataset_cells)
+    auto_batch = max(1, int(target_cells or _FIXED_LAYOUT_TARGET_CELLS) // per_dataset_cells)
     return max(1, min(int(num_datasets), int(auto_batch)))
 
 
@@ -289,47 +322,53 @@ def prepare_canonical_fixed_layout_run(
         )
     )
     base_plan_seed = offset_seed32(run_seed, FIXED_LAYOUT_PLAN_SEED_OFFSET)
-    plan = _sample_fixed_layout(
-        realized_config,
-        seed=base_plan_seed,
-        device=requested_device,
-    )
-    effective_batch_size = _resolve_fixed_layout_batch_size(
-        plan,
-        num_datasets=max(1, int(num_datasets)),
-        batch_size=batch_size,
-    )
-    if str(realized_config.dataset.task) == "classification":
-        # Canonical classification batches guarantee completion for the
-        # requested run. That requires validating the shared-plan replay
-        # schedule before any public bundle is emitted.
-        attempts = max(1, int(realized_config.filter.max_attempts))
-        for attempt in range(attempts):
-            effective_batch_size = _resolve_fixed_layout_batch_size(
-                plan,
-                num_datasets=max(1, int(num_datasets)),
-                batch_size=batch_size,
-            )
-            if _fixed_layout_plan_supports_classification_run(
+    attempts = max(1, int(realized_config.filter.max_attempts))
+    last_error = "unknown"
+    for attempt in range(attempts):
+        candidate_seed = _attempt_seed(base_plan_seed, attempt)
+        plan = (
+            _sample_fixed_layout_candidate(
                 realized_config,
-                plan=plan,
+                seed=candidate_seed,
                 requested_device=requested_device,
                 resolved_device=resolved_device,
-                run_seed=run_seed,
-                num_datasets=max(1, int(num_datasets)),
-                batch_size=effective_batch_size,
-            ):
-                break
-            if attempt == attempts - 1:
-                raise ValueError(
-                    "Failed to prepare a replayable canonical fixed-layout classification run "
-                    f"after {attempts} attempts."
-                )
-            plan = _sample_fixed_layout(
+            )
+            if str(realized_config.dataset.task) == "classification"
+            else _sample_fixed_layout(
                 realized_config,
-                seed=_attempt_seed(base_plan_seed, attempt + 1),
+                seed=candidate_seed,
                 device=requested_device,
             )
+        )
+        effective_batch_size = _resolve_fixed_layout_batch_size(
+            plan,
+            num_datasets=max(1, int(num_datasets)),
+            batch_size=batch_size,
+            target_cells=_effective_fixed_layout_target_cells(realized_config),
+        )
+        if str(realized_config.dataset.task) != "classification":
+            break
+        if _fixed_layout_plan_supports_classification_run(
+            realized_config,
+            plan=plan,
+            requested_device=requested_device,
+            resolved_device=resolved_device,
+            run_seed=run_seed,
+            num_datasets=max(1, int(num_datasets)),
+            batch_size=effective_batch_size,
+        ):
+            break
+        last_error = "invalid_class_split"
+        if attempt == attempts - 1:
+            raise ValueError(
+                "Failed to prepare a replayable canonical fixed-layout classification run "
+                f"after {attempts} attempts. Last reason: {last_error}."
+            )
+    else:
+        raise ValueError(
+            "Failed to prepare a fixed-layout run after "
+            f"{attempts} attempts. Last reason: {last_error}."
+        )
     return CanonicalFixedLayoutRun(
         config=realized_config,
         plan=plan,
@@ -356,11 +395,13 @@ def _sample_fixed_layout_once(
     n_train, n_test = _resolve_split_sizes(config, dataset_seed=seed)
     _validate_class_split_for_layout(config, layout=layout, n_train=n_train, n_test=n_test)
     shift_params = resolve_shift_runtime_params(config)
-    node_plans = build_fixed_layout_execution_plans(
-        config,
-        layout,
-        plan_seed=seed,
-        mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
+    node_plans = normalize_fixed_layout_node_plans(
+        build_fixed_layout_execution_plans(
+            config,
+            layout,
+            plan_seed=seed,
+            mechanism_logit_tilt=float(shift_params.mechanism_logit_tilt),
+        )
     )
     return _FixedLayoutPlan(
         layout=layout,
@@ -421,8 +462,8 @@ def _fixed_layout_dataset_supports_classification_replay(
     attempts = max(1, int(config.filter.max_attempts))
 
     for attempt in range(attempts):
-        _, y_batch, _, _effective_resolved_device, _device_fallback_reason = (
-            _generate_fixed_layout_graph_batch_with_fallback(
+        y_batch, _aux_meta_batch, _effective_resolved_device, _device_fallback_reason = (
+            _generate_fixed_layout_label_batch_with_fallback(
                 config,
                 plan.layout,
                 node_plans=plan.node_plans,
@@ -471,26 +512,30 @@ def _fixed_layout_plan_supports_classification_run(
             config,
             dataset_seeds=dataset_seeds,
         )
-        grouped_raw_batches = _generate_grouped_raw_batches(
-            config,
-            plan.layout,
-            node_plans=plan.node_plans,
-            grouped_noise_runtime=grouped_noise_runtime,
-            requested_device=requested_device,
-            resolved_device=resolved_device,
-            noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
-        )
-        raw_batch_by_offset: list[tuple[_GroupedRawBatch, int] | None] = [None] * chunk_size
-        for grouped_batch in grouped_raw_batches:
-            for local_index, chunk_offset in enumerate(grouped_batch.chunk_offsets):
-                raw_batch_by_offset[chunk_offset] = (grouped_batch, int(local_index))
+        raw_batch_by_offset: list[tuple[torch.Tensor, int] | None] = [None] * chunk_size
+        for group in grouped_noise_runtime:
+            noise_spec = _noise_sampling_spec(group.selection)
+            y_batch, _aux_meta_batch, _effective_resolved_device, _device_fallback_reason = (
+                _generate_fixed_layout_label_batch_with_fallback(
+                    config,
+                    plan.layout,
+                    node_plans=plan.node_plans,
+                    dataset_seeds=group.data_seeds,
+                    requested_device=requested_device,
+                    resolved_device=resolved_device,
+                    noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
+                    noise_spec=noise_spec,
+                )
+            )
+            for local_index, chunk_offset in enumerate(group.chunk_offsets):
+                raw_batch_by_offset[chunk_offset] = (y_batch, int(local_index))
         for offset, dataset_seed in enumerate(dataset_seeds):
             raw_batch_entry = raw_batch_by_offset[offset]
             if raw_batch_entry is None:
                 raise RuntimeError("Missing grouped raw batch entry for fixed-layout chunk offset.")
-            grouped_batch, local_index = raw_batch_entry
+            y_batch, local_index = raw_batch_entry
             if _raw_classification_labels_support_split(
-                grouped_batch.y_batch[local_index],
+                y_batch[local_index],
                 dataset_seed=dataset_seed,
                 attempt=0,
                 n_train=int(plan.n_train),
@@ -668,6 +713,58 @@ def _generate_fixed_layout_graph_batch_with_fallback(
     return x_batch, y_batch, aux_meta_batch, resolved_device, None
 
 
+def _generate_fixed_layout_label_batch_with_fallback(
+    config: GeneratorConfig,
+    layout: LayoutPlan,
+    *,
+    node_plans: list[dict[str, Any]],
+    dataset_seeds: list[int],
+    requested_device: str,
+    resolved_device: str,
+    noise_sigma_multiplier: float,
+    noise_spec: Any,
+) -> tuple[torch.Tensor, list[dict[str, Any]], str, str | None]:
+    if requested_device == "auto" and resolved_device == "mps":
+        try:
+            y_batch, aux_meta_batch = generate_fixed_layout_label_batch(
+                config,
+                layout,
+                node_plans=node_plans,
+                dataset_seeds=dataset_seeds,
+                device=resolved_device,
+                noise_sigma_multiplier=noise_sigma_multiplier,
+                noise_spec=noise_spec,
+            )
+            return y_batch, aux_meta_batch, resolved_device, None
+        except Exception as exc:
+            y_batch, aux_meta_batch = generate_fixed_layout_label_batch(
+                config,
+                layout,
+                node_plans=node_plans,
+                dataset_seeds=dataset_seeds,
+                device="cpu",
+                noise_sigma_multiplier=noise_sigma_multiplier,
+                noise_spec=noise_spec,
+            )
+            return (
+                y_batch,
+                aux_meta_batch,
+                "cpu",
+                f"auto_mps_runtime_error:{exc.__class__.__name__}",
+            )
+
+    y_batch, aux_meta_batch = generate_fixed_layout_label_batch(
+        config,
+        layout,
+        node_plans=node_plans,
+        dataset_seeds=dataset_seeds,
+        device=resolved_device,
+        noise_sigma_multiplier=noise_sigma_multiplier,
+        noise_spec=noise_spec,
+    )
+    return y_batch, aux_meta_batch, resolved_device, None
+
+
 def _generate_fixed_layout_bundle_with_retries(
     config: GeneratorConfig,
     *,
@@ -760,11 +857,19 @@ def _generate_batch_with_plan_iter(
     dtype = _torch_dtype(config)
     shift_params = resolve_shift_runtime_params(config)
     expected_schema: tuple[int, tuple[str, ...], tuple[int, ...]] | None = None
+    finalization_context = _build_fixed_schema_finalization_context(
+        config,
+        plan.layout,
+        n_train=int(plan.n_train),
+        n_test=int(plan.n_test),
+        shift_params=shift_params,
+    )
 
     effective_batch_size = _resolve_fixed_layout_batch_size(
         plan,
         num_datasets=num_datasets,
         batch_size=batch_size,
+        target_cells=_effective_fixed_layout_target_cells(config),
     )
     dataset_index = 0
     while dataset_index < num_datasets:
@@ -785,39 +890,45 @@ def _generate_batch_with_plan_iter(
             resolved_device=validated_resolved_device,
             noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
         )
-        raw_batch_by_offset: list[tuple[_GroupedRawBatch, int] | None] = [None] * chunk_size
+        raw_batch_by_offset: list[tuple[_GroupedRawBatch, int, DatasetBundle | None] | None] = [
+            None
+        ] * chunk_size
         for grouped_batch in grouped_raw_batches:
+            group_dataset_seeds = [
+                int(dataset_seeds[int(chunk_offset)])
+                for chunk_offset in grouped_batch.chunk_offsets
+            ]
+            finalized_group = _finalize_generated_chunk_preserve_schema(
+                config,
+                plan.layout,
+                context=finalization_context,
+                seeds=group_dataset_seeds,
+                attempt=0,
+                attempts_used=1,
+                device=grouped_batch.effective_resolved_device,
+                n_train=int(plan.n_train),
+                n_test=int(plan.n_test),
+                requested_device=requested_device,
+                resolved_device=grouped_batch.effective_resolved_device,
+                device_fallback_reason=grouped_batch.device_fallback_reason,
+                x=grouped_batch.x_batch,
+                y=grouped_batch.y_batch,
+                aux_meta_batch=grouped_batch.aux_meta_batch,
+                noise_runtime_selection=grouped_batch.selection,
+                dtype=dtype,
+            )
             for local_index, chunk_offset in enumerate(grouped_batch.chunk_offsets):
-                raw_batch_by_offset[chunk_offset] = (grouped_batch, int(local_index))
+                raw_batch_by_offset[chunk_offset] = (
+                    grouped_batch,
+                    int(local_index),
+                    finalized_group[local_index],
+                )
         for offset, dataset_seed in enumerate(dataset_seeds):
             raw_batch_entry = raw_batch_by_offset[offset]
             if raw_batch_entry is None:
                 raise RuntimeError("Missing grouped raw batch entry for fixed-layout chunk offset.")
-            grouped_batch, local_index = raw_batch_entry
-            try:
-                bundle = _finalize_generated_tensors(
-                    config,
-                    plan.layout,
-                    seed=dataset_seed,
-                    attempt=0,
-                    attempts_used=1,
-                    device=grouped_batch.effective_resolved_device,
-                    n_train=int(plan.n_train),
-                    n_test=int(plan.n_test),
-                    requested_device=requested_device,
-                    resolved_device=grouped_batch.effective_resolved_device,
-                    device_fallback_reason=grouped_batch.device_fallback_reason,
-                    x=grouped_batch.x_batch[local_index],
-                    y=grouped_batch.y_batch[local_index],
-                    aux_meta=grouped_batch.aux_meta_batch[local_index],
-                    shift_params=shift_params,
-                    noise_runtime_selection=grouped_batch.selection,
-                    dtype=dtype,
-                    preserve_feature_schema=True,
-                )
-            except ValueError as exc:
-                if str(exc) != "invalid_class_split":
-                    raise
+            grouped_batch, local_index, bundle = raw_batch_entry
+            if bundle is None:
                 bundle = _generate_fixed_layout_bundle_with_retries(
                     config,
                     plan=plan,
