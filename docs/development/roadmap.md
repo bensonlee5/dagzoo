@@ -7,7 +7,7 @@ It maps the mission and strategic pillars in `README.md` to:
 - current implemented capabilities
 - known gaps
 - prioritized roadmap items with explicit exit criteria
-- canonical status/rank sequencing and GitHub issue tracking
+- canonical status/rank sequencing and tracker links
 
 Related docs:
 
@@ -30,10 +30,15 @@ Related docs:
 
 - status and milestone lane
 - priority rank
-- GitHub epic/issue mapping
+- active Linear issue mapping plus historical GitHub references for completed work
 - dependencies and exit criteria
 
 If any other document disagrees with this file, this file is authoritative.
+
+Active execution now lives in the Linear project `dagzoo`
+(`https://linear.app/bl-personal/project/dagzoo-4867d49bb182/overview`).
+The GitHub-to-Linear migration map is committed at
+`reference/linear_issue_map_2026-03-08.json`.
 
 ## PFN Utility Prioritization Lens
 
@@ -46,7 +51,7 @@ Roadmap ranking is currently optimized for downstream PFN utility:
 
 Lower rank means higher priority. Rank `0` is reserved for completed items retained for traceability.
 
-| Rank | Roadmap ID | Item                                                         | Status      | Milestone | GitHub Tracking                                                                        |
+| Rank | Roadmap ID | Item                                                         | Status      | Milestone | Tracker Links                                                                          |
 | ---- | ---------- | ------------------------------------------------------------ | ----------- | --------- | -------------------------------------------------------------------------------------- |
 | 0    | RD-001     | Ground-truth DAG artifact export                             | implemented | Now       | `#44 -> #45 -> #46 -> #47 -> #48` (completed)                                          |
 | 0    | RD-003     | Missingness generation (MCAR/MAR/MNAR)                       | implemented | Now       | `#15 -> #17 -> #18` (completed)                                                        |
@@ -54,14 +59,14 @@ Lower rank means higher priority. Rank `0` is reserved for completed items retai
 | 0    | RD-006     | Curriculum complexity scaling (features + graph)             | retired     | Now       | `#49 -> #50 -> #51 -> #90 -> #52 -> #53` (historical), `#142` (rows-based replacement) |
 | 0    | RD-004     | Shift-aware SCM generation                                   | implemented | Now       | `#64 -> #72 -> #73 -> #74 -> #75` (completed)                                          |
 | 0    | RD-012     | Noise family diversification for synthetic generation        | implemented | Now       | `#24 -> #25 -> #26 -> #27` (completed)                                                 |
-| 3    | RD-011     | Mechanism family mix expansion (BNN/GP kernels/interactions) | planned     | Next      | `#28 -> #29 -> #30 -> #68 -> #69 -> #31 -> #32`                                        |
-| 5    | RD-013     | Time-series generation tracks for PFN pretraining            | research    | Next      | `#110 -> #111 -> #112 -> #113 -> #114`                                                 |
+| 3    | RD-011     | Mechanism family mix expansion (BNN/GP kernels/interactions) | planned     | Next      | `BL-26 -> BL-27 -> BL-28 -> BL-51 -> BL-52 -> BL-29 -> BL-30`                          |
+| 5    | RD-013     | Time-series generation tracks for PFN pretraining            | research    | Next      | `BL-73 -> BL-74 -> BL-75 -> BL-76 -> BL-77`                                            |
 | 6    | RD-014     | Run-time bottleneck observability and telemetry              | research    | Next      | `epic TBD; dependency chain TBD`                                                       |
-| 7    | RD-007     | Many-class and high-cardinality expansion                    | research    | Next      | `#19 -> #43 -> (#20 -> #21 -> #22 -> #23)`                                             |
-| 8    | RD-005     | Robustness stress profiles (hard-task/adversarial regimes)   | research    | Next      | `#65 -> #76 -> #79 -> #78 -> #77`                                                      |
-| 9    | RD-009     | Parallel/distributed generation and writing                  | research    | Next      | `#66 -> #80 -> #81 -> #82 -> #83`                                                      |
-| 10   | RD-002     | Interventional and counterfactual generation modes           | research    | Later     | `#67 -> #84 -> #85 -> #86 -> #87`                                                      |
-| 11   | RD-010     | Hardware-adaptive autotuning beyond coarse FLOPs tiers       | planned     | Later     | `#54 -> #55 -> #56 -> #70 -> #57 -> #71 -> #58`                                        |
+| 7    | RD-007     | Many-class and high-cardinality expansion                    | research    | Next      | `BL-17 -> BL-31 -> (BL-18 -> BL-19 -> BL-20 -> BL-21)`                                 |
+| 8    | RD-005     | Robustness stress profiles (hard-task/adversarial regimes)   | research    | Next      | `BL-48 -> BL-59 -> BL-62 -> BL-61 -> BL-60`                                            |
+| 9    | RD-009     | Parallel/distributed generation and writing                  | research    | Next      | `BL-49 -> BL-63 -> BL-64 -> BL-65 -> BL-66`                                            |
+| 10   | RD-002     | Interventional and counterfactual generation modes           | research    | Later     | `BL-50 -> BL-67 -> BL-68 -> BL-69 -> BL-70`                                            |
+| 11   | RD-010     | Hardware-adaptive autotuning beyond coarse FLOPs tiers       | planned     | Later     | `BL-42 -> BL-43 -> BL-44 -> BL-53 -> BL-45 -> BL-54 -> BL-46`                          |
 
 ## Current Capability Matrix
 
@@ -228,7 +233,7 @@ metadata JSON contract, and DAG lineage schema.
 - Mission alignment: causal discovery
 - Pillar alignment: causal structural integrity
 - Goal: support observational + interventional sampling tracks with explicit intervention specs.
-- GitHub tracking: epic `#67`; dependency chain `#84 -> #85 -> #86 -> #87`
+- Linear tracking: epic `BL-50`; dependency chain `BL-67 -> BL-68 -> BL-69 -> BL-70`
 - Repo touchpoints: `src/dagzoo/config.py`, `src/dagzoo/core/dataset.py`, `src/dagzoo/core/node_pipeline.py`, `src/dagzoo/cli.py`
 - Exit criteria:
   - Config supports opt-in intervention mode with safe default (`off`).
@@ -279,7 +284,7 @@ metadata JSON contract, and DAG lineage schema.
 - Mission alignment: robustness testing
 - Pillar alignment: tabular realism
 - Goal: define reproducible stress presets (low-SNR, class imbalance, harder interactions).
-- GitHub tracking: epic `#65`; dependency chain `#76 -> #79 -> #78 -> #77`
+- Linear tracking: epic `BL-48`; dependency chain `BL-59 -> BL-62 -> BL-61 -> BL-60`
 - Repo touchpoints: `src/dagzoo/config.py`, `src/dagzoo/functions/random_functions.py`, `src/dagzoo/postprocess/postprocess.py`, `src/dagzoo/bench/`
 - Exit criteria:
   - Presets are selectable via config/CLI and remain opt-in.
@@ -305,13 +310,13 @@ metadata JSON contract, and DAG lineage schema.
 - Mission alignment: foundation model pretraining
 - Pillar alignment: tabular realism, causal structural integrity
 - Goal: assess feasibility and, only if viable, raise practical class/cardinality limits while preserving filter quality.
-- Current rollout envelope (`#20`): enforce `dataset.n_classes_max <= 32` as the narrow-go safety cap until follow-on hardening (`#21`-`#23`) lands.
-- `#22` scope: class-aware RF filter thresholding plus metadata diagnostics so many-class accept/reject behavior remains interpretable.
-- GitHub tracking: epic `#19`; research gate `#43`; conditional chain `#20 -> #21 -> #22 -> #23`
+- Current rollout envelope (`BL-18`): enforce `dataset.n_classes_max <= 32` as the narrow-go safety cap until follow-on hardening (`BL-19`-`BL-21`) lands.
+- `BL-20` scope: class-aware RF filter thresholding plus metadata diagnostics so many-class accept/reject behavior remains interpretable.
+- Linear tracking: epic `BL-17`; research gate `BL-31`; conditional chain `BL-18 -> BL-19 -> BL-20 -> BL-21`
 - Repo touchpoints: `src/dagzoo/config.py`, `src/dagzoo/converters/categorical.py`, `src/dagzoo/filtering/extra_trees_filter.py`
 - Exit criteria:
   - Feasibility report produces explicit `go` / `narrow-go` / `no-go` decision under predefined thresholds.
-  - If `go` or `narrow-go`: implementation chain (`#20`-`#23`) lands with backward-compatible defaults.
+  - If `go` or `narrow-go`: implementation chain (`BL-18`-`BL-21`) lands with backward-compatible defaults.
   - If `no-go`: roadmap records deferral or narrowed scope with rationale.
 
 ### RD-008: Meta-Feature Coverage Steering
@@ -333,7 +338,7 @@ metadata JSON contract, and DAG lineage schema.
 - Mission alignment: foundation model pretraining
 - Pillar alignment: hardware-native performance
 - Goal: support multi-worker generation and shard writing with deterministic seed partitioning.
-- GitHub tracking: epic `#66`; dependency chain `#80 -> #81 -> #82 -> #83`
+- Linear tracking: epic `BL-49`; dependency chain `BL-63 -> BL-64 -> BL-65 -> BL-66`
 - Repo touchpoints: `src/dagzoo/core/dataset.py`, `src/dagzoo/io/parquet_writer.py`, `src/dagzoo/cli.py`
 - Planned sequencing:
   - T1: internal GPU micro-batching for dataset generation hot paths (no new user toggles in first rollout).
@@ -351,7 +356,7 @@ metadata JSON contract, and DAG lineage schema.
 - Mission alignment: foundation model pretraining
 - Pillar alignment: hardware-native performance
 - Goal: evolve hardware-aware scaling from static coarse profile tiers to bounded adaptive tuning based on observed throughput/memory behavior when throughput/cost becomes a practical bottleneck.
-- GitHub tracking: epic `#54`; dependency chain `#55 -> #56 -> #70 -> #57 -> #71 -> #58`
+- Linear tracking: epic `BL-42`; dependency chain `BL-43 -> BL-44 -> BL-53 -> BL-45 -> BL-54 -> BL-46`
 - Repo touchpoints: `src/dagzoo/hardware.py`, `src/dagzoo/config.py`, `src/dagzoo/cli.py`, `src/dagzoo/bench/suite.py`, `src/dagzoo/bench/report.py`
 - Exit criteria:
   - Adaptive mode improves throughput versus profile baseline on at least one CUDA hardware class without violating memory guardrails.
@@ -366,7 +371,7 @@ metadata JSON contract, and DAG lineage schema.
 - Mission alignment: foundation model pretraining, robustness testing
 - Pillar alignment: causal structural integrity, tabular realism
 - Goal: add explicit mechanism-family mix controls and broaden function families (including BNN/GP-kernel/interactions) to increase structural diversity that materially affects generated datasets for PFN pretraining.
-- GitHub tracking: epic `#28`; dependency chain `#29 -> #30 -> #68 -> #69 -> #31 -> #32`
+- Linear tracking: epic `BL-26`; dependency chain `BL-27 -> BL-28 -> BL-51 -> BL-52 -> BL-29 -> BL-30`
 - Repo touchpoints: `src/dagzoo/config.py`, `src/dagzoo/functions/random_functions.py`, `src/dagzoo/core/node_pipeline.py`, `src/dagzoo/core/dataset.py`, `src/dagzoo/bench/suite.py`
 - Exit criteria:
   - Config supports explicit mechanism-family mix controls with backward-compatible defaults.
@@ -400,7 +405,7 @@ metadata JSON contract, and DAG lineage schema.
 - Mission alignment: foundation model pretraining, robustness testing
 - Pillar alignment: tabular realism
 - Goal: add an opt-in temporal generation track for sequence datasets so PFN pretraining workflows cover classification/regression/time-series under one reproducible generator framework.
-- GitHub tracking: epic `#110`; dependency chain `#111 -> #112 -> #113 -> #114`
+- Linear tracking: epic `BL-73`; dependency chain `BL-74 -> BL-75 -> BL-76 -> BL-77`
 - Repo touchpoints: `src/dagzoo/config.py`, `src/dagzoo/core/dataset.py`, `src/dagzoo/core/node_pipeline.py`, `src/dagzoo/diagnostics/`, `src/dagzoo/bench/`, `docs/`
 - Exit criteria:
   - Temporal mode is opt-in and backward-compatible (`off` by default).
@@ -456,10 +461,10 @@ metadata JSON contract, and DAG lineage schema.
 ## Dependencies and Sequencing
 
 - RD-003 and RD-008 are implemented and provide a stronger baseline for remaining realism and robustness roadmap work.
-- RD-007 is explicitly research-gated by `#19/#43` before conditional rollout issues (`#20`-`#23`) proceed.
-- RD-011 is the primary near-term diversity lever and is tracked in epic `#28`.
+- RD-007 is explicitly research-gated by `BL-17` / `BL-31` before conditional rollout issues (`BL-18`-`BL-21`) proceed.
+- RD-011 is the primary near-term diversity lever and is tracked in epic `BL-26`.
 - RD-012 is implemented via epic `#24` and provides explicit noise-family controls for stress-profile composition.
-- RD-013 introduces sequence/temporal generation coverage and is tracked in epic `#110`.
+- RD-013 introduces sequence/temporal generation coverage and is tracked in epic `BL-73`.
 - RD-014 should precede or run in parallel with RD-010 so adaptive tuning decisions are guided by stage-level bottleneck evidence.
 - RD-014 should inform RD-009 worker/sharding design by identifying true single-process bottlenecks first.
 - RD-014 remains observability-only and must not change default runtime behavior when disabled.
