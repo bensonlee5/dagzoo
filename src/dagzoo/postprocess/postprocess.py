@@ -28,53 +28,107 @@ def _remove_constant_columns(
     return x[:, keep], kept_types, keep_indices
 
 
-def _clip_and_standardize(x: torch.Tensor, feature_types: list[str]) -> torch.Tensor:
-    """Clip numeric outliers and standardize numeric columns."""
+def _clip_and_standardize_rows(x: torch.Tensor, feature_types: list[str]) -> torch.Tensor:
+    """Clip numeric outliers and standardize numeric columns along the row axis."""
 
     out = x.clone()
     numeric_indices = [i for i, t in enumerate(feature_types) if t != "cat"]
     if not numeric_indices:
         return out
 
-    # Standardize all numeric columns in one batched pass.
     numeric_index = torch.tensor(numeric_indices, device=out.device, dtype=torch.long)
-    numeric = out.index_select(dim=1, index=numeric_index)
+    feature_dim = out.ndim - 1
+    row_dim = out.ndim - 2
+    numeric = out.index_select(dim=feature_dim, index=numeric_index)
     quantiles = torch.quantile(
         numeric.float(),
         torch.tensor([0.01, 0.99], device=numeric.device),
-        dim=0,
+        dim=row_dim,
     )
-    lo = quantiles[0].unsqueeze(0)
-    hi = quantiles[1].unsqueeze(0)
+    lo = quantiles[0].unsqueeze(row_dim)
+    hi = quantiles[1].unsqueeze(row_dim)
     numeric = torch.clamp(numeric, lo, hi)
-    mu = torch.mean(numeric, dim=0, keepdim=True)
-    sd = torch.std(numeric, dim=0, correction=0, keepdim=True).clamp_min(1e-6)
-    out[:, numeric_index] = (numeric - mu) / sd
+    mu = torch.mean(numeric, dim=row_dim, keepdim=True)
+    sd = torch.std(numeric, dim=row_dim, correction=0, keepdim=True).clamp_min(1e-6)
+    out.index_copy_(feature_dim, numeric_index, (numeric - mu) / sd)
     return out
+
+
+def _clip_and_standardize(x: torch.Tensor, feature_types: list[str]) -> torch.Tensor:
+    """Clip numeric outliers and standardize numeric columns."""
+
+    return _clip_and_standardize_rows(x, feature_types)
 
 
 def _clip_and_standardize_batch(x: torch.Tensor, feature_types: list[str]) -> torch.Tensor:
     """Clip numeric outliers and standardize numeric columns for one dataset batch."""
 
-    out = x.clone()
-    numeric_indices = [i for i, t in enumerate(feature_types) if t != "cat"]
-    if not numeric_indices:
-        return out
+    return _clip_and_standardize_rows(x, feature_types)
 
-    numeric_index = torch.tensor(numeric_indices, device=out.device, dtype=torch.long)
-    numeric = out.index_select(dim=2, index=numeric_index)
+
+def _postprocess_feature_splits(
+    x_train: torch.Tensor,
+    x_test: torch.Tensor,
+    feature_types: list[str],
+    *,
+    generator: torch.Generator | None,
+    preserve_feature_schema: bool,
+) -> tuple[torch.Tensor, torch.Tensor, list[str], list[int]]:
+    """Postprocess feature tensors for both scalar and fixed-schema batched flows."""
+
+    row_dim = x_train.ndim - 2
+    x_all = torch.cat([x_train, x_test], dim=row_dim).to(torch.float32)
+    if preserve_feature_schema:
+        feature_types_out = list(feature_types)
+        feature_index_map = [int(i) for i in range(int(x_all.shape[-1]))]
+    else:
+        if x_all.ndim != 2:
+            raise ValueError("Constant-column removal is only supported for unbatched features.")
+        x_all, feature_types_out, feature_index_map = _remove_constant_columns(x_all, feature_types)
+
+    x_all = _clip_and_standardize_rows(x_all, feature_types_out)
+
+    if not preserve_feature_schema:
+        if generator is None:
+            raise ValueError("generator is required when preserve_feature_schema is False.")
+        perm_cpu = torch.randperm(x_all.shape[-1], generator=generator, device="cpu")
+        perm_list = [int(i) for i in perm_cpu.tolist()]
+        perm = perm_cpu.to(device=x_all.device)
+        x_all = x_all.index_select(dim=x_all.ndim - 1, index=perm)
+        feature_types_out = [feature_types_out[i] for i in perm_list]
+        feature_index_map = [feature_index_map[i] for i in perm_list]
+
+    n_train = int(x_train.shape[row_dim])
+    n_test = int(x_test.shape[row_dim])
+    x_train_p = x_all.narrow(row_dim, 0, n_train)
+    x_test_p = x_all.narrow(row_dim, n_train, n_test)
+    return x_train_p, x_test_p, feature_types_out, feature_index_map
+
+
+def _postprocess_regression_targets(
+    y_train: torch.Tensor,
+    y_test: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Clip and standardize regression targets for scalar or batched inputs."""
+
+    row_dim = y_train.ndim - 1
+    y_all = torch.cat([y_train, y_test], dim=row_dim).to(torch.float32)
     quantiles = torch.quantile(
-        numeric.float(),
-        torch.tensor([0.01, 0.99], device=numeric.device),
-        dim=1,
+        y_all.float(),
+        torch.tensor([0.01, 0.99], device=y_all.device),
+        dim=row_dim,
     )
-    lo = quantiles[0].unsqueeze(1)
-    hi = quantiles[1].unsqueeze(1)
-    numeric = torch.clamp(numeric, lo, hi)
-    mu = torch.mean(numeric, dim=1, keepdim=True)
-    sd = torch.std(numeric, dim=1, correction=0, keepdim=True).clamp_min(1e-6)
-    out[:, :, numeric_index] = (numeric - mu) / sd
-    return out
+    lo = quantiles[0].unsqueeze(row_dim)
+    hi = quantiles[1].unsqueeze(row_dim)
+    y_all = torch.clamp(y_all, lo, hi)
+    mu = torch.mean(y_all, dim=row_dim, keepdim=True)
+    sd = torch.std(y_all, dim=row_dim, correction=0, keepdim=True).clamp_min(1e-6)
+    y_all = (y_all - mu) / sd
+    n_train = int(y_train.shape[row_dim])
+    n_test = int(y_test.shape[row_dim])
+    y_train_p = y_all.narrow(row_dim, 0, n_train)
+    y_test_p = y_all.narrow(row_dim, n_train, n_test)
+    return y_train_p, y_test_p
 
 
 def _has_at_least_two_classes(y: torch.Tensor) -> bool:
@@ -82,6 +136,33 @@ def _has_at_least_two_classes(y: torch.Tensor) -> bool:
 
     y_i64 = y.to(torch.int64)
     return bool(torch.min(y_i64) != torch.max(y_i64))
+
+
+def _postprocess_classification_labels(
+    y_train: torch.Tensor,
+    y_test: torch.Tensor,
+    generator: torch.Generator,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Remap classification labels into dense space with deterministic permutation."""
+
+    n_train = int(y_train.shape[0])
+    y_all_original = torch.cat([y_train, y_test], dim=0).to(torch.int64)
+    classes, inverse = torch.unique(y_all_original, sorted=True, return_inverse=True)
+    y_all_original_dense = inverse.to(torch.int64)
+
+    perm_dense_cpu = torch.randperm(classes.numel(), generator=generator, device="cpu")
+    perm_dense = perm_dense_cpu.to(device=inverse.device)
+    y_all_permuted_dense = perm_dense[inverse].to(torch.int64)
+    y_train_candidate = y_all_permuted_dense[:n_train]
+    y_test_candidate = y_all_permuted_dense[n_train:]
+
+    if not _has_at_least_two_classes(y_train_candidate) or not _has_at_least_two_classes(
+        y_test_candidate
+    ):
+        y_all_dense = y_all_original_dense
+    else:
+        y_all_dense = y_all_permuted_dense
+    return y_all_dense[:n_train], y_all_dense[n_train:]
 
 
 @overload
@@ -142,66 +223,28 @@ def postprocess_dataset(
     """
     _ = device
 
-    x_all = torch.cat([x_train, x_test], dim=0).to(torch.float32)
-    if preserve_feature_schema:
-        feature_types = list(feature_types)
-        feature_index_map = [int(i) for i in range(x_all.shape[1])]
-    else:
-        x_all, feature_types, feature_index_map = _remove_constant_columns(x_all, feature_types)
-    x_all = _clip_and_standardize(x_all, feature_types)
-
-    if not preserve_feature_schema:
-        # Keep permutation RNG on CPU while applying it on the feature tensor device.
-        perm_cpu = torch.randperm(x_all.shape[1], generator=generator, device="cpu")
-        perm_list = [int(i) for i in perm_cpu.tolist()]
-        perm = perm_cpu.to(device=x_all.device)
-        x_all = x_all[:, perm]
-        feature_types = [feature_types[i] for i in perm_list]
-        feature_index_map = [feature_index_map[i] for i in perm_list]
-
-    n_train = x_train.shape[0]
-    x_train_p = x_all[:n_train]
-    x_test_p = x_all[n_train:]
+    x_train_p, x_test_p, feature_types, feature_index_map = _postprocess_feature_splits(
+        x_train,
+        x_test,
+        feature_types,
+        generator=generator,
+        preserve_feature_schema=preserve_feature_schema,
+    )
 
     if task == "regression":
-        y_all = torch.cat([y_train, y_test], dim=0).to(torch.float32)
-        q = torch.quantile(y_all.float(), torch.tensor([0.01, 0.99], device=y_all.device))
-        lo, hi = q[0], q[1]
-        y_all = torch.clamp(y_all, lo, hi)
-        mu = torch.mean(y_all)
-        sd = torch.std(y_all, correction=0).clamp_min(1e-6)
-        y_all = (y_all - mu) / sd
+        y_train_p, y_test_p = _postprocess_regression_targets(y_train, y_test)
         if return_feature_index_map:
             return (
                 x_train_p,
-                y_all[:n_train],
+                y_train_p,
                 x_test_p,
-                y_all[n_train:],
+                y_test_p,
                 feature_types,
                 feature_index_map,
             )
-        return x_train_p, y_all[:n_train], x_test_p, y_all[n_train:], feature_types
+        return x_train_p, y_train_p, x_test_p, y_test_p, feature_types
 
-    y_all_original = torch.cat([y_train, y_test], dim=0).to(torch.int64)
-    classes, inverse = torch.unique(y_all_original, sorted=True, return_inverse=True)
-    y_all_original_dense = inverse.to(torch.int64)
-
-    # Apply a class-id permutation directly in dense label space.
-    perm_dense_cpu = torch.randperm(classes.numel(), generator=generator, device="cpu")
-    perm_dense = perm_dense_cpu.to(device=inverse.device)
-    y_all_permuted_dense = perm_dense[inverse].to(torch.int64)
-    y_train_candidate = y_all_permuted_dense[:n_train]
-    y_test_candidate = y_all_permuted_dense[n_train:]
-
-    if not _has_at_least_two_classes(y_train_candidate) or not _has_at_least_two_classes(
-        y_test_candidate
-    ):
-        # Fall back to original labels if permutation collapses effective class diversity.
-        y_all_dense = y_all_original_dense
-    else:
-        y_all_dense = y_all_permuted_dense
-    y_train_p = y_all_dense[:n_train]
-    y_test_p = y_all_dense[n_train:]
+    y_train_p, y_test_p = _postprocess_classification_labels(y_train, y_test, generator)
 
     if return_feature_index_map:
         return x_train_p, y_train_p, x_test_p, y_test_p, feature_types, feature_index_map
@@ -229,53 +272,30 @@ def postprocess_fixed_schema_batch(
             "postprocess_generator_states must align with the leading batch dimension."
         )
 
-    n_train = int(x_train.shape[1])
-    x_all = torch.cat([x_train, x_test], dim=1).to(torch.float32)
-    x_all = _clip_and_standardize_batch(x_all, feature_types)
-    x_train_p = x_all[:, :n_train, :]
-    x_test_p = x_all[:, n_train:, :]
+    x_train_p, x_test_p, _feature_types, _feature_index_map = _postprocess_feature_splits(
+        x_train,
+        x_test,
+        feature_types,
+        generator=None,
+        preserve_feature_schema=True,
+    )
 
     if task == "regression":
-        y_all = torch.cat([y_train, y_test], dim=1).to(torch.float32)
-        quantiles = torch.quantile(
-            y_all.float(),
-            torch.tensor([0.01, 0.99], device=y_all.device),
-            dim=1,
-        )
-        lo = quantiles[0].unsqueeze(1)
-        hi = quantiles[1].unsqueeze(1)
-        y_all = torch.clamp(y_all, lo, hi)
-        mu = torch.mean(y_all, dim=1, keepdim=True)
-        sd = torch.std(y_all, dim=1, correction=0, keepdim=True).clamp_min(1e-6)
-        y_all = (y_all - mu) / sd
-        return x_train_p, y_all[:, :n_train], x_test_p, y_all[:, n_train:]
+        y_train_p, y_test_p = _postprocess_regression_targets(y_train, y_test)
+        return x_train_p, y_train_p, x_test_p, y_test_p
 
     y_train_batches: list[torch.Tensor] = []
     y_test_batches: list[torch.Tensor] = []
     for batch_index, generator_state in enumerate(postprocess_generator_states):
         generator = torch.Generator(device="cpu")
         generator.set_state(generator_state)
-        y_all_original = torch.cat([y_train[batch_index], y_test[batch_index]], dim=0).to(
-            torch.int64
+        y_train_p, y_test_p = _postprocess_classification_labels(
+            y_train[batch_index],
+            y_test[batch_index],
+            generator,
         )
-        classes, inverse = torch.unique(y_all_original, sorted=True, return_inverse=True)
-        y_all_original_dense = inverse.to(torch.int64)
-
-        perm_dense_cpu = torch.randperm(classes.numel(), generator=generator, device="cpu")
-        perm_dense = perm_dense_cpu.to(device=inverse.device)
-        y_all_permuted_dense = perm_dense[inverse].to(torch.int64)
-        y_train_candidate = y_all_permuted_dense[:n_train]
-        y_test_candidate = y_all_permuted_dense[n_train:]
-
-        if not _has_at_least_two_classes(y_train_candidate) or not _has_at_least_two_classes(
-            y_test_candidate
-        ):
-            y_all_dense = y_all_original_dense
-        else:
-            y_all_dense = y_all_permuted_dense
-
-        y_train_batches.append(y_all_dense[:n_train])
-        y_test_batches.append(y_all_dense[n_train:])
+        y_train_batches.append(y_train_p)
+        y_test_batches.append(y_test_p)
 
     return x_train_p, torch.stack(y_train_batches), x_test_p, torch.stack(y_test_batches)
 
