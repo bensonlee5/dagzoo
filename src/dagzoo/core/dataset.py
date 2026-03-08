@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from dagzoo.config import GeneratorConfig
-from dagzoo.core.fixed_layout import (
+from dagzoo.core.fixed_layout_runtime import (
     _generate_batch_with_plan_iter,
     prepare_canonical_fixed_layout_run,
 )

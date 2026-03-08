@@ -83,7 +83,7 @@ from dagzoo.core.config_resolution import (
     serialize_resolution_events,
 )
 from dagzoo.core.dataset import generate_batch_iter, generate_one
-from dagzoo.core.fixed_layout import realize_generation_config_for_run
+from dagzoo.core.fixed_layout_runtime import realize_generation_config_for_run
 from dagzoo.core.shift import resolve_shift_runtime_params
 from dagzoo.diagnostics import (
     CoverageAggregator,

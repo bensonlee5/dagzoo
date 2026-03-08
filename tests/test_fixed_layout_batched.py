@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from dagzoo.config import GeneratorConfig
-from dagzoo.core.fixed_layout import _sample_fixed_layout
+from dagzoo.core.fixed_layout_runtime import _sample_fixed_layout
 from dagzoo.core.fixed_layout_batched import (
     FixedLayoutBatchRng,
     _apply_activation_plan,
