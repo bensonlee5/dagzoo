@@ -18,13 +18,16 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
   `runtime.fixed_layout_target_cells` override, and the built-in benchmark CPU,
   CUDA desktop, and CUDA H100 presets pin explicit target-cell budgets instead
   of relying on the single global default.
-- `cuda_tiered_v1` hardware policy now raises
-  `runtime.fixed_layout_target_cells` to a memory-scaled CUDA floor for
-  desktop, datacenter, and H100-class hardware, while still preserving higher
-  user-configured values.
+- CUDA config resolution now raises `runtime.fixed_layout_target_cells` to a
+  memory-scaled floor for desktop, datacenter, and H100-class hardware even
+  when `--hardware-policy none` is used, while still preserving higher
+  user-configured values. `cuda_tiered_v1` reuses the same floor logic alongside
+  its broader tier-specific config transforms.
 - Added an internal throughput sweep helper that benchmarks a small grid of
   `fixed_layout_target_cells` values and reports the best-performing candidate
-  for the detected hardware tier.
+  for the detected hardware tier. CUDA sweeps now start at the active
+  memory-scaled floor/current target and explore upward instead of using a
+  stale low static grid.
 
 ### Breaking
 

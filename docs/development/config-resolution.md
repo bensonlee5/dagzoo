@@ -17,6 +17,8 @@ ______________________________________________________________________
 1. Base YAML (`--config`)
 1. CLI device override (`--device`) -> `runtime.device`
 1. Hardware policy transforms (`--hardware-policy`)
+1. Default CUDA fixed-layout auto-batch floor
+   (`runtime.fixed_layout_target_cells`) based on detected GPU memory
 1. CLI rows override (`--rows`) -> `dataset.rows`
 1. Missingness CLI overrides:
    - `--missing-rate`
@@ -43,6 +45,8 @@ Each preset in `dagzoo benchmark` resolves independently in this order:
    - preset-defined device, or
    - CLI `--device` when a single preset run is selected
 1. Hardware policy transforms (`--hardware-policy`)
+1. Default CUDA fixed-layout auto-batch floor
+   (`runtime.fixed_layout_target_cells`) based on detected GPU memory
 1. Suite caps for `--suite smoke`:
    - `dataset.n_train <= 256`
    - `dataset.n_test <= 128`
@@ -113,6 +117,10 @@ Trace artifacts are ordered lists of field-level override events:
   source: benchmark.suite_smoke_caps
   old_value: 512
   new_value: 256
+- path: runtime.fixed_layout_target_cells
+  source: hardware.default_cuda_fixed_layout_target_cells
+  old_value: 32000000
+  new_value: 160000000
 ```
 
 Fields:

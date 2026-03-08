@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from typing import Any
@@ -15,15 +16,20 @@ from dagzoo.bench.constants import (
 from dagzoo.config import GeneratorConfig
 from dagzoo.core.dataset import generate_batch_iter
 from dagzoo.hardware import detect_hardware
+from dagzoo.hardware_policy import (
+    resolve_cuda_fixed_layout_target_cells_limits,
+    round_fixed_layout_target_cells,
+)
 from dagzoo.rng import offset_seed32
 from dagzoo.types import DatasetBundle
 
-_FIXED_LAYOUT_TARGET_CELLS_SWEEP_BY_TIER: dict[str, tuple[int, ...]] = {
-    "cpu": (4_000_000, 8_000_000, 12_000_000, 16_000_000),
-    "cuda_desktop": (8_000_000, 16_000_000, 24_000_000, 32_000_000),
-    "cuda_datacenter": (16_000_000, 24_000_000, 32_000_000, 48_000_000),
-    "cuda_h100": (16_000_000, 32_000_000, 48_000_000, 64_000_000),
-}
+_CPU_FIXED_LAYOUT_TARGET_CELLS_SWEEP: tuple[int, ...] = (
+    4_000_000,
+    8_000_000,
+    12_000_000,
+    16_000_000,
+)
+_CUDA_FIXED_LAYOUT_TARGET_CELLS_SWEEP_MULTIPLIERS: tuple[float, ...] = (1.0, 1.5, 2.0, 3.0)
 
 
 def _default_fixed_layout_target_cells_sweep_values(
@@ -35,10 +41,22 @@ def _default_fixed_layout_target_cells_sweep_values(
 
     requested_device = device or config.runtime.device
     hardware = detect_hardware(requested_device)
-    return _FIXED_LAYOUT_TARGET_CELLS_SWEEP_BY_TIER.get(
-        str(hardware.tier),
-        _FIXED_LAYOUT_TARGET_CELLS_SWEEP_BY_TIER["cpu"],
-    )
+    if hardware.backend != "cuda":
+        return _CPU_FIXED_LAYOUT_TARGET_CELLS_SWEEP
+
+    target_floor, target_cap = resolve_cuda_fixed_layout_target_cells_limits(hardware)
+    current_target = int(config.runtime.fixed_layout_target_cells or 0)
+    baseline = max(current_target, int(target_floor or 0))
+    if baseline <= 0:
+        return _CPU_FIXED_LAYOUT_TARGET_CELLS_SWEEP
+
+    effective_cap = max(int(target_cap or baseline), baseline)
+    candidates: list[int] = []
+    for multiplier in _CUDA_FIXED_LAYOUT_TARGET_CELLS_SWEEP_MULTIPLIERS:
+        scaled = int(math.ceil(float(baseline) * float(multiplier)))
+        rounded = round_fixed_layout_target_cells(scaled)
+        candidates.append(max(baseline, min(rounded, effective_cap)))
+    return tuple(sorted(set(candidates)))
 
 
 def run_fixed_layout_target_cells_sweep(

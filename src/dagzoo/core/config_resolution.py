@@ -7,9 +7,13 @@ from typing import Any
 
 from dagzoo.config import GeneratorConfig
 from dagzoo.hardware import HardwareInfo, detect_hardware
-from dagzoo.hardware_policy import apply_hardware_policy
+from dagzoo.hardware_policy import (
+    apply_hardware_policy,
+    resolve_cuda_fixed_layout_target_cells_limits,
+)
 
 _MISSING_VALUE = "<missing>"
+_DEFAULT_CUDA_FIXED_LAYOUT_TARGET_SOURCE = "hardware.default_cuda_fixed_layout_target_cells"
 
 
 @dataclass(slots=True, frozen=True)
@@ -189,6 +193,31 @@ def _apply_missingness_overrides(
         )
 
 
+def _apply_default_cuda_fixed_layout_target_floor(
+    config: GeneratorConfig,
+    *,
+    hw: HardwareInfo,
+    events: list[ResolutionEvent],
+) -> None:
+    """Raise the fixed-layout target to the default CUDA floor for the detected device."""
+
+    target_floor, _ = resolve_cuda_fixed_layout_target_cells_limits(hw)
+    if target_floor is None:
+        return
+    current_target = config.runtime.fixed_layout_target_cells
+    current_value = 0 if current_target is None else int(current_target)
+    new_value = max(current_value, int(target_floor))
+    if current_target == new_value:
+        return
+    _set_config_path(
+        config,
+        path="runtime.fixed_layout_target_cells",
+        value=int(new_value),
+        source=_DEFAULT_CUDA_FIXED_LAYOUT_TARGET_SOURCE,
+        events=events,
+    )
+
+
 def _apply_rows_override(
     config: GeneratorConfig,
     *,
@@ -286,6 +315,11 @@ def resolve_generate_config(
         source=f"hardware_policy.{str(hardware_policy).strip().lower()}",
         events=trace_events,
     )
+    _apply_default_cuda_fixed_layout_target_floor(
+        resolved,
+        hw=hw,
+        events=trace_events,
+    )
 
     _apply_rows_override(
         resolved,
@@ -352,6 +386,11 @@ def resolve_benchmark_preset_config(
         before_policy,
         after_policy,
         source=f"hardware_policy.{str(hardware_policy).strip().lower()}",
+        events=trace_events,
+    )
+    _apply_default_cuda_fixed_layout_target_floor(
+        resolved,
+        hw=hw,
         events=trace_events,
     )
 

@@ -17,16 +17,19 @@ _FIXED_LAYOUT_TARGET_CELLS_MIN_BY_TIER: dict[str, int] = {
     "cuda_desktop": 32_000_000,
     "cuda_datacenter": 64_000_000,
     "cuda_h100": 96_000_000,
+    "cuda_unknown_fallback": 32_000_000,
 }
 _FIXED_LAYOUT_TARGET_CELLS_MAX_BY_TIER: dict[str, int] = {
     "cuda_desktop": 96_000_000,
     "cuda_datacenter": 192_000_000,
     "cuda_h100": 256_000_000,
+    "cuda_unknown_fallback": 96_000_000,
 }
 _FIXED_LAYOUT_TARGET_CELLS_DEFAULT_BY_TIER: dict[str, int] = {
     "cuda_desktop": 48_000_000,
     "cuda_datacenter": 96_000_000,
     "cuda_h100": 128_000_000,
+    "cuda_unknown_fallback": 48_000_000,
 }
 
 
@@ -47,28 +50,37 @@ def _round_up_to_multiple(value: int, *, multiple: int) -> int:
     return int(((value + multiple - 1) // multiple) * multiple)
 
 
-def _memory_scaled_fixed_layout_target_cells(hw: HardwareInfo) -> int | None:
-    """Return the CUDA auto-batch target floor scaled by detected accelerator memory."""
+def round_fixed_layout_target_cells(value: int) -> int:
+    """Round one fixed-layout target-cells value to the shared quantum."""
+
+    return _round_up_to_multiple(int(value), multiple=_FIXED_LAYOUT_TARGET_CELL_QUANTUM)
+
+
+def resolve_cuda_fixed_layout_target_cells_limits(
+    hw: HardwareInfo,
+) -> tuple[int | None, int | None]:
+    """Return the CUDA fixed-layout target floor and cap for the detected hardware."""
 
     if hw.backend != "cuda":
-        return None
+        return None, None
 
     tier = str(hw.tier).strip().lower()
     default_target = _FIXED_LAYOUT_TARGET_CELLS_DEFAULT_BY_TIER.get(tier)
+    max_target = _FIXED_LAYOUT_TARGET_CELLS_MAX_BY_TIER.get(tier)
     if default_target is None:
-        return None
+        return None, None
+    if max_target is None:
+        return None, None
 
     total_memory_gb = hw.total_memory_gb
     if total_memory_gb is None or total_memory_gb <= 0.0:
-        return int(default_target)
+        return int(default_target), int(max_target)
 
-    scaled_target = _round_up_to_multiple(
+    scaled_target = round_fixed_layout_target_cells(
         int(math.ceil(float(total_memory_gb) * _FIXED_LAYOUT_TARGET_CELLS_PER_GB)),
-        multiple=_FIXED_LAYOUT_TARGET_CELL_QUANTUM,
     )
     min_target = _FIXED_LAYOUT_TARGET_CELLS_MIN_BY_TIER[tier]
-    max_target = _FIXED_LAYOUT_TARGET_CELLS_MAX_BY_TIER[tier]
-    return int(max(min_target, min(max_target, scaled_target)))
+    return int(max(min_target, min(max_target, scaled_target))), int(max_target)
 
 
 def _apply_fixed_layout_target_cells_floor(config: GeneratorConfig, *, target_cells: int) -> None:
@@ -85,7 +97,7 @@ def _policy_cuda_tiered_v1(config: GeneratorConfig, hw: HardwareInfo) -> Generat
     if hw.backend != "cuda":
         return config
 
-    fixed_layout_target_cells = _memory_scaled_fixed_layout_target_cells(hw)
+    fixed_layout_target_cells, _ = resolve_cuda_fixed_layout_target_cells_limits(hw)
 
     if hw.tier == "cuda_h100":
         config.benchmark.preset_name = "cuda_h100_auto"
@@ -195,4 +207,6 @@ __all__ = [
     "apply_hardware_policy",
     "list_hardware_policies",
     "register_hardware_policy",
+    "resolve_cuda_fixed_layout_target_cells_limits",
+    "round_fixed_layout_target_cells",
 ]
