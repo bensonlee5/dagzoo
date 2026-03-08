@@ -71,8 +71,8 @@ flowchart LR
   make runs auditable.
 - Stress-testable: shift, noise, missingness, and deferred filter controls let you probe
   model robustness under controlled distribution changes.
-- Operationally scalable: fixed-layout generation and benchmark guardrails
-  support repeatable high-throughput workflows.
+- Operationally scalable: canonical fixed-layout generation and benchmark
+  guardrails support repeatable high-throughput workflows.
 
 Recommended first reads after this README:
 
@@ -102,8 +102,12 @@ dagzoo generate --config configs/default.yaml --num-datasets 10 --out data/run1
 
 Each generate run writes `effective_config.yaml` and `effective_config_trace.yaml`
 in the resolved output directory.
+`dagzoo generate` now uses the canonical fixed-layout engine internally, so all
+datasets emitted in the same run share one sampled layout/execution plan.
 Generation no longer runs inline filtering; run `dagzoo filter` as a separate
 stage for acceptance decisions.
+Parallel generation has been removed; config files must not include
+`runtime.worker_count` or `runtime.worker_index`.
 
 Run deferred filtering on generated shards:
 
@@ -140,7 +144,7 @@ dagzoo benchmark --help
 
 - Diagnostics: exposes per-dataset artifacts so you can verify coverage, inspect drift, and debug generation outcomes.
 - Missingness (MCAR/MAR/MNAR): injects deterministic null patterns to evaluate models under realistic incomplete-data regimes.
-- Fixed-layout batch generation: reuse one sampled layout across many datasets for easier high-throughput generation and analysis.
+- Canonical fixed-layout generation: one run reuses one sampled layout across emitted datasets for stable schema alignment and replayability.
 - Many-class workflows: stress-tests classification behavior near the current rollout envelope with stable preset and benchmark paths.
 - Shift/drift controls: introduces interpretable graph/mechanism/noise drift for robustness and distribution-shift evaluation.
 - Benchmark guardrails: provides repeatable runtime and metadata checks for local validation and CI-style regression gating.

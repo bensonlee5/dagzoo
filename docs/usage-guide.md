@@ -139,6 +139,11 @@ dataset. Those runs report `generation_mode="fixed_batched"` plus explicit row
 counts in their summary artifacts and use the same canonical generation path as
 `dagzoo generate`.
 
+Custom/standard benchmark presets also support `dataset.rows`. For benchmark
+flows, rows specs stay variable through preset config resolution and then
+realize once per preset run. Smoke suites cap rows before that run
+realization so smoke benchmarks stay within the intended split-size envelope.
+
 Detailed guide: [Many-class](features/many-class.md)
 
 ______________________________________________________________________
