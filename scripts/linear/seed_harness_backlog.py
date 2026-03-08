@@ -21,6 +21,12 @@ from github_to_linear import (
 HARNESS_ARTICLE_URL = "https://openai.com/index/harness-engineering/"
 RECURRING_AUDIT_TITLE = "ops(harness): weekly full-repo harness audit"
 HARNESS_EPIC_TITLE = "epic: harness engineering adoption for autonomous dagzoo development"
+LABEL_COLORS = {
+    "audit": "#7C3AED",
+    "documentation": "#0EA5E9",
+    "epic": "#DC2626",
+    "harness": "#2563EB",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,28 +90,6 @@ def build_ticket_specs() -> list[TicketSpec]:
                         "Public vs internal surfaces are called out where they matter.",
                         "Issue/PR expectations and user-facing break policy are explicit.",
                         "The document is specific to dagzoo rather than generic agent advice.",
-                    ]
-                )
-                + f"\n\n## Reference\n\n- {HARNESS_ARTICLE_URL}\n"
-            ),
-        ),
-        TicketSpec(
-            title="process(harness): codify issue authoring and acceptance-criteria standards for Symphony",
-            state_name="Backlog",
-            labels=("harness",),
-            parent_title=HARNESS_EPIC_TITLE,
-            description=(
-                "## Current Gap\n\n"
-                "The repo has roadmap and backlog guidance, but there is no single repo-owned issue-authoring "
-                "standard optimized for unattended agent execution.\n\n"
-                "## Goal\n\n"
-                "Add a clear authoring standard for Linear issues so tickets are implementation-ready by default.\n\n"
-                "## Acceptance Criteria\n\n"
-                + _markdown_list(
-                    [
-                        "Required ticket sections are documented and used consistently.",
-                        "Oversized work has explicit split rules.",
-                        "Acceptance criteria and validation are mandatory for implementation-ready work.",
                     ]
                 )
                 + f"\n\n## Reference\n\n- {HARNESS_ARTICLE_URL}\n"
@@ -199,21 +183,22 @@ def build_ticket_specs() -> list[TicketSpec]:
             ),
         ),
         TicketSpec(
-            title="docs(harness): add a harness-engineering guide and weekly audit template",
+            title="docs(harness): write a repo-wide harness-engineering guide for dagzoo contributors",
             state_name="Backlog",
             labels=("harness", "documentation"),
             parent_title=HARNESS_EPIC_TITLE,
             description=(
                 "## Current Gap\n\n"
-                "The repo does not yet have a checked-in document that translates Harness Engineering into dagzoo-specific standards.\n\n"
+                "The repo has a weekly audit rubric, but it still lacks one broader dagzoo-specific guide that "
+                "translates Harness Engineering into contributor-facing standards across docs, process, and tooling.\n\n"
                 "## Goal\n\n"
-                "Create the repo-owned guide and weekly audit template used by the recurring audit ticket.\n\n"
+                "Create the repo-owned harness-engineering guide for dagzoo contributors.\n\n"
                 "## Acceptance Criteria\n\n"
                 + _markdown_list(
                     [
                         "The guide references the Harness Engineering article directly.",
-                        "The weekly audit checklist is versioned in-repo.",
-                        "The guidance is dagzoo-specific, not generic.",
+                        "The guide explains dagzoo-specific expectations beyond the weekly audit rubric.",
+                        "The guidance connects the repo contract, workflow, and verification surfaces in one place.",
                     ]
                 )
                 + f"\n\n## Reference\n\n- {HARNESS_ARTICLE_URL}\n"
@@ -285,6 +270,14 @@ def build_ticket_specs() -> list[TicketSpec]:
     ]
 
 
+def required_label_specs() -> dict[str, str]:
+    names = sorted({label for spec in build_ticket_specs() for label in spec.labels})
+    missing = [name for name in names if name not in LABEL_COLORS]
+    if missing:
+        raise MigrationError(f"Missing configured colors for labels: {', '.join(missing)}")
+    return {name: LABEL_COLORS[name] for name in names}
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--linear-api-key-file", required=True, type=Path)
@@ -322,7 +315,7 @@ def ensure_labels(
     existing_labels: dict[str, LinearLabel],
 ) -> dict[str, LinearLabel]:
     labels = dict(existing_labels)
-    for name, color in {"harness": "#2563EB", "audit": "#7C3AED"}.items():
+    for name, color in required_label_specs().items():
         if name in labels:
             continue
         if linear.dry_run:
@@ -364,7 +357,7 @@ def create_or_update_issue(
     label_ids: list[str],
     parent_id: str | None,
 ) -> dict[str, str]:
-    payload: dict[str, Any] = {
+    create_payload: dict[str, Any] = {
         "title": title,
         "description": description,
         "teamId": team_id,
@@ -373,7 +366,7 @@ def create_or_update_issue(
         "labelIds": label_ids,
     }
     if parent_id:
-        payload["parentId"] = parent_id
+        create_payload["parentId"] = parent_id
 
     if existing is None:
         if linear.dry_run:
@@ -393,15 +386,23 @@ def create_or_update_issue(
                   identifier
                   url
                 }
-              }
+                }
             }
             """,
-            {"input": payload},
+            {"input": create_payload},
         )
         response = data["issueCreate"]
         if not response.get("success"):
             raise MigrationError(f"Failed to create issue {title!r}")
         return response["issue"]
+
+    update_payload: dict[str, Any] = {
+        "title": title,
+        "description": description,
+        "projectId": project_id,
+    }
+    if parent_id:
+        update_payload["parentId"] = parent_id
 
     if linear.dry_run:
         print(f"[dry-run] Would update issue {title!r} ({existing['identifier']})")
@@ -416,10 +417,10 @@ def create_or_update_issue(
               identifier
               url
             }
-          }
+            }
         }
         """,
-        {"id": existing["id"], "input": payload},
+        {"id": existing["id"], "input": update_payload},
     )
     response = data["issueUpdate"]
     if not response.get("success"):
@@ -433,6 +434,7 @@ def main(argv: list[str] | None = None) -> int:
     linear = LinearClient(api_key, endpoint=args.endpoint, dry_run=args.dry_run)
     project_id, team_id, _team_key = linear.get_project(args.project_slug)
     states, labels = linear.get_team_metadata(team_id)
+    states = linear.ensure_workflow_states(team_id, states)
     labels = ensure_labels(linear, team_id=team_id, existing_labels=labels)
     existing_issues = find_existing_project_issues(linear, project_id)
 
@@ -447,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
             if not parent:
                 raise MigrationError(f"Parent issue missing: {spec.parent_title}")
             parent_id = parent["id"]
-        label_ids = [labels[name].id for name in spec.labels if name in labels]
+        label_ids = [labels[name].id for name in spec.labels]
         existing = existing_issues.get(spec.title)
         issue = create_or_update_issue(
             linear,

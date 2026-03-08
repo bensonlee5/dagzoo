@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 
 import torch
 
 from dagzoo.core.execution_semantics import sample_node_plan
+from dagzoo.core.fixed_layout_plan_types import (
+    CategoricalConverterGroup,
+    CategoricalConverterPlan,
+    FixedLayoutNodePlan,
+)
 from dagzoo.core.layout_types import ConverterKind, MechanismFamily
 from dagzoo.math_utils import log_uniform as _log_uniform
 from dagzoo.sampling.noise import NoiseSamplingSpec, sample_noise_from_spec
@@ -68,6 +73,32 @@ def _pad_latent_columns(
     return torch.cat([latent, pad], dim=1)
 
 
+def _standalone_safe_node_plan(node_plan: FixedLayoutNodePlan) -> FixedLayoutNodePlan:
+    """Split grouped center-random-fn categorical converters for standalone execution."""
+
+    rewritten_groups = []
+    changed = False
+    for group in node_plan.converter_groups:
+        if not isinstance(group, CategoricalConverterGroup) or len(group.spec_indices) <= 1:
+            rewritten_groups.append(group)
+            continue
+        converter_plan = node_plan.converter_plans[int(group.spec_indices[0])]
+        if (
+            not isinstance(converter_plan, CategoricalConverterPlan)
+            or converter_plan.variant != "center_random_fn"
+        ):
+            rewritten_groups.append(group)
+            continue
+        changed = True
+        rewritten_groups.extend(
+            CategoricalConverterGroup(spec_indices=(int(spec_index),))
+            for spec_index in group.spec_indices
+        )
+    if not changed:
+        return node_plan
+    return replace(node_plan, converter_groups=tuple(rewritten_groups))
+
+
 def apply_node_pipeline(
     parent_data: list[torch.Tensor],
     n_rows: int,
@@ -92,6 +123,7 @@ def apply_node_pipeline(
         mechanism_logit_tilt=mechanism_logit_tilt,
         function_family_mix=function_family_mix,
     )
+    node_plan = _standalone_safe_node_plan(node_plan)
     rng = FixedLayoutBatchRng.from_generator(
         generator,
         batch_size=1,
