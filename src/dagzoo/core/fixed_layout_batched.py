@@ -6,12 +6,14 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import math
-from typing import Any, Literal, cast
+from typing import Any
 
 import torch
 
 from dagzoo.config import GeneratorConfig
-from dagzoo.converters.categorical import _JOINT_VARIANTS
+from dagzoo.core.execution_semantics import (
+    sample_node_plan,
+)
 from dagzoo.core.layout import _build_node_specs
 from dagzoo.core.fixed_layout_plan_types import (
     ActivationMatrixPlan,
@@ -20,20 +22,13 @@ from dagzoo.core.fixed_layout_plan_types import (
     DEFAULT_FIXED_LAYOUT_EXECUTION_CONTRACT,
     DiscretizationFunctionPlan,
     EmFunctionPlan,
-    FixedActivationPlan,
     FixedLayoutActivationPlan,
-    FixedLayoutActivationKind,
-    FixedLayoutConverterPlan,
     FixedLayoutConverterSpec,
-    FixedLayoutConverterMethod,
-    FixedLayoutConverterVariant,
     FixedLayoutExecutionPlan,
     FixedLayoutFunctionPlan,
-    FixedLayoutLatentPlan,
     FixedLayoutMatrixPlan,
     FixedLayoutMatrixBaseKind,
     FixedLayoutNodePlan,
-    FixedLayoutNodeSource,
     FixedLayoutRootBaseKind,
     GaussianMatrixPlan,
     GpFunctionPlan,
@@ -51,55 +46,17 @@ from dagzoo.core.fixed_layout_plan_types import (
     TreeFunctionPlan,
     WeightsMatrixPlan,
     coerce_fixed_layout_execution_plan,
-    fixed_layout_converter_groups,
     fixed_layout_signature_payloads,
 )
-from dagzoo.core.layout_types import AggregationKind, LayoutPlan, MechanismFamily
-from dagzoo.core.node_pipeline import ConverterSpec
+from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.core.trees import (
     compute_odt_leaf_indices_batch,
     sample_odt_splits_batch,
 )
-from dagzoo.functions._rng_helpers import rand_scalar, randint_scalar
-from dagzoo.functions.activations import _fixed_activation, fixed_activation_names
-from dagzoo.functions.random_functions import _sample_function_family
-from dagzoo.math_utils import log_uniform as _log_uniform
+from dagzoo.functions.activations import _fixed_activation
 from dagzoo.rng import SeedManager
 from dagzoo.sampling.noise import NoiseSamplingSpec, sample_noise_from_spec
 
-_MATRIX_KIND_CHOICES: tuple[str, ...] = (
-    "gaussian",
-    "weights",
-    "singular_values",
-    "kernel",
-    "activation",
-)
-_MATRIX_BASE_KIND_CHOICES: tuple[FixedLayoutMatrixBaseKind, ...] = (
-    "gaussian",
-    "weights",
-    "singular_values",
-    "kernel",
-)
-_ROOT_BASE_KIND_CHOICES: tuple[FixedLayoutRootBaseKind, ...] = (
-    "normal",
-    "uniform",
-    "unit_ball",
-    "normal_cov",
-)
-_PARAM_ACTIVATION_CHOICES: tuple[FixedLayoutActivationKind, ...] = (
-    "relu_pow",
-    "signed_pow",
-    "inv_pow",
-    "poly",
-)
-_AGGREGATION_KIND_ORDER: tuple[AggregationKind, ...] = ("sum", "product", "max", "logsumexp")
-_PRODUCT_COMPONENT_FAMILIES: tuple[MechanismFamily, ...] = (
-    "tree",
-    "discretization",
-    "gp",
-    "linear",
-    "quadratic",
-)
 _PAIRWISE_CENTER_BLOCK_SIZE = 32
 
 _FIXED_LAYOUT_EXECUTION_CONTRACT = DEFAULT_FIXED_LAYOUT_EXECUTION_CONTRACT
@@ -121,185 +78,6 @@ def _parent_index_lists(layout: LayoutPlan) -> list[list[int]]:
     ]
 
 
-def _sample_bool(generator: torch.Generator, *, p: float = 0.5) -> bool:
-    return bool(rand_scalar(generator) < p)
-
-
-def _sample_activation_plan(generator: torch.Generator) -> FixedLayoutActivationPlan:
-    if rand_scalar(generator) < (1.0 / 3.0):
-        choice = _PARAM_ACTIVATION_CHOICES[
-            int(randint_scalar(0, len(_PARAM_ACTIVATION_CHOICES), generator))
-        ]
-        if choice == "poly":
-            return ParametricActivationPlan(
-                kind=choice,
-                poly_power=int(randint_scalar(2, 6, generator)),
-            )
-        return ParametricActivationPlan(kind=choice)
-    fixed = fixed_activation_names()
-    name = fixed[int(randint_scalar(0, len(fixed), generator))]
-    return FixedActivationPlan(name=name)
-
-
-def _sample_matrix_plan(generator: torch.Generator) -> FixedLayoutMatrixPlan:
-    kind = _MATRIX_KIND_CHOICES[int(randint_scalar(0, len(_MATRIX_KIND_CHOICES), generator))]
-    if kind == "gaussian":
-        return GaussianMatrixPlan()
-    if kind == "weights":
-        return WeightsMatrixPlan()
-    if kind == "singular_values":
-        return SingularValuesMatrixPlan()
-    if kind == "kernel":
-        return KernelMatrixPlan()
-    base_kind = _MATRIX_BASE_KIND_CHOICES[
-        int(randint_scalar(0, len(_MATRIX_BASE_KIND_CHOICES), generator))
-    ]
-    return ActivationMatrixPlan(
-        base_kind=base_kind,
-        activation=_sample_activation_plan(generator),
-    )
-
-
-def _sample_function_plan_for_family(
-    generator: torch.Generator,
-    *,
-    family: MechanismFamily,
-    out_dim: int,
-    mechanism_logit_tilt: float,
-    function_family_mix: dict[MechanismFamily, float] | None,
-) -> FixedLayoutFunctionPlan:
-    if family == "linear":
-        return LinearFunctionPlan(matrix=_sample_matrix_plan(generator))
-    if family == "quadratic":
-        return QuadraticFunctionPlan(matrix=_sample_matrix_plan(generator))
-    if family == "nn":
-        n_layers = int(randint_scalar(1, 4, generator))
-        hidden_width = int(_log_uniform(generator, 1.0, 127.0, "cpu"))
-        input_activation = _sample_activation_plan(generator) if _sample_bool(generator) else None
-        output_activation = _sample_activation_plan(generator) if _sample_bool(generator) else None
-        layer_count = max(1, n_layers)
-        return NeuralNetFunctionPlan(
-            n_layers=n_layers,
-            hidden_width=max(1, hidden_width),
-            input_activation=input_activation,
-            output_activation=output_activation,
-            layer_matrices=tuple(_sample_matrix_plan(generator) for _ in range(layer_count)),
-            hidden_activations=tuple(
-                _sample_activation_plan(generator) for _ in range(max(0, layer_count - 1))
-            ),
-        )
-    if family == "tree":
-        n_trees = int(_log_uniform(generator, 1.0, 32.0, "cpu"))
-        n_trees = max(1, n_trees)
-        return TreeFunctionPlan(
-            n_trees=n_trees,
-            depths=tuple(int(randint_scalar(1, 8, generator)) for _ in range(n_trees)),
-        )
-    if family == "discretization":
-        n_centers = int(_log_uniform(generator, 2.0, 128.0, "cpu"))
-        return DiscretizationFunctionPlan(
-            n_centers=max(2, n_centers),
-            linear_matrix=_sample_matrix_plan(generator),
-        )
-    if family == "gp":
-        return GpFunctionPlan(branch_kind="ha" if _sample_bool(generator) else "projected")
-    if family == "em":
-        m_val = int(_log_uniform(generator, 2.0, float(max(16, 2 * out_dim)), "cpu"))
-        return EmFunctionPlan(
-            m_val=max(2, m_val),
-            linear_matrix=_sample_matrix_plan(generator),
-        )
-    if family == "product":
-        eligible = list(_PRODUCT_COMPONENT_FAMILIES)
-        if function_family_mix is not None:
-            eligible = [
-                component
-                for component in _PRODUCT_COMPONENT_FAMILIES
-                if float(function_family_mix.get(component, 0.0)) > 0.0
-            ]
-        if not eligible:
-            raise ValueError(
-                "mechanism.function_family_mix enables 'product' but disables all product "
-                "component families for fixed-layout plan sampling."
-            )
-        lhs_family = eligible[int(randint_scalar(0, len(eligible), generator))]
-        rhs_family = eligible[int(randint_scalar(0, len(eligible), generator))]
-        return ProductFunctionPlan(
-            lhs=_sample_function_plan_for_family(
-                generator,
-                family=lhs_family,
-                out_dim=out_dim,
-                mechanism_logit_tilt=mechanism_logit_tilt,
-                function_family_mix=function_family_mix,
-            ),
-            rhs=_sample_function_plan_for_family(
-                generator,
-                family=rhs_family,
-                out_dim=out_dim,
-                mechanism_logit_tilt=mechanism_logit_tilt,
-                function_family_mix=function_family_mix,
-            ),
-        )
-    raise ValueError(f"Unsupported mechanism family in fixed-layout plan sampling: {family!r}")
-
-
-def _sample_function_plan(
-    generator: torch.Generator,
-    *,
-    out_dim: int,
-    mechanism_logit_tilt: float,
-    function_family_mix: dict[MechanismFamily, float] | None,
-) -> FixedLayoutFunctionPlan:
-    family = _sample_function_family(
-        generator,
-        mechanism_logit_tilt=mechanism_logit_tilt,
-        function_family_mix=function_family_mix,
-    )
-    return _sample_function_plan_for_family(
-        generator,
-        family=family,
-        out_dim=out_dim,
-        mechanism_logit_tilt=mechanism_logit_tilt,
-        function_family_mix=function_family_mix,
-    )
-
-
-def _sample_converter_plan(
-    generator: torch.Generator,
-    spec: ConverterSpec,
-    *,
-    mechanism_logit_tilt: float,
-    function_family_mix: dict[MechanismFamily, float] | None,
-) -> FixedLayoutConverterPlan:
-    if spec.kind in {"num", "target_reg"}:
-        return NumericConverterPlan(
-            kind=cast(Literal["num", "target_reg"], spec.kind),
-            warp_enabled=not _sample_bool(generator),
-        )
-
-    idx_joint = randint_scalar(0, len(_JOINT_VARIANTS), generator)
-    selected_method_raw, variant_raw = _JOINT_VARIANTS[int(idx_joint)]
-    selected_method = cast(FixedLayoutConverterMethod, selected_method_raw)
-    variant = cast(FixedLayoutConverterVariant, variant_raw)
-    if variant == "center_random_fn":
-        return CategoricalConverterPlan(
-            kind=cast(Literal["cat", "target_cls"], spec.kind),
-            method=selected_method,
-            variant=variant,
-            function=_sample_function_plan(
-                generator,
-                out_dim=max(1, int(spec.dim)),
-                mechanism_logit_tilt=mechanism_logit_tilt,
-                function_family_mix=function_family_mix,
-            ),
-        )
-    return CategoricalConverterPlan(
-        kind=cast(Literal["cat", "target_cls"], spec.kind),
-        method=selected_method,
-        variant=variant,
-    )
-
-
 def build_fixed_layout_execution_plan(
     config: GeneratorConfig,
     layout: LayoutPlan,
@@ -316,89 +94,15 @@ def build_fixed_layout_execution_plan(
         spec_gen = _cpu_generator(manager.child("node_spec", node_index))
         plan_gen = _cpu_generator(manager.child("node_plan", node_index))
         converter_specs = _build_node_specs(node_index, layout, task, spec_gen)
-        required_dim = int(sum(max(1, int(spec.dim)) for spec in converter_specs))
-        latent_extra = max(1, int(_log_uniform(plan_gen, 1.0, 32.0, "cpu")))
-        total_dim = int(required_dim + latent_extra)
-        typed_converter_specs: list[FixedLayoutConverterSpec] = []
-        column_cursor = 0
-        for spec in converter_specs:
-            spec_dim = max(1, int(spec.dim))
-            typed_converter_specs.append(
-                FixedLayoutConverterSpec(
-                    key=str(spec.key),
-                    kind=spec.kind,
-                    dim=int(spec.dim),
-                    cardinality=None if spec.cardinality is None else int(spec.cardinality),
-                    column_start=int(column_cursor),
-                    column_end=int(column_cursor + spec_dim),
-                )
-            )
-            column_cursor += spec_dim
-        typed_converter_specs_tuple = tuple(typed_converter_specs)
-        typed_converter_plans = tuple(
-            _sample_converter_plan(
-                plan_gen,
-                spec,
+        node_plans.append(
+            sample_node_plan(
+                node_index=int(node_index),
+                parent_indices=parent_indices,
+                converter_specs=converter_specs,
+                generator=plan_gen,
+                device="cpu",
                 mechanism_logit_tilt=mechanism_logit_tilt,
                 function_family_mix=config.mechanism.function_family_mix,
-            )
-            for spec in converter_specs
-        )
-        source: FixedLayoutNodeSource
-        if parent_indices:
-            combine_kind = "concat" if _sample_bool(plan_gen) else "stack"
-            if combine_kind == "concat":
-                source = ConcatNodeSource(
-                    function=_sample_function_plan(
-                        plan_gen,
-                        out_dim=total_dim,
-                        mechanism_logit_tilt=mechanism_logit_tilt,
-                        function_family_mix=config.mechanism.function_family_mix,
-                    )
-                )
-            else:
-                source = StackedNodeSource(
-                    aggregation_kind=_AGGREGATION_KIND_ORDER[
-                        int(randint_scalar(0, len(_AGGREGATION_KIND_ORDER), plan_gen))
-                    ],
-                    parent_functions=tuple(
-                        _sample_function_plan(
-                            plan_gen,
-                            out_dim=total_dim,
-                            mechanism_logit_tilt=mechanism_logit_tilt,
-                            function_family_mix=config.mechanism.function_family_mix,
-                        )
-                        for _ in parent_indices
-                    ),
-                )
-        else:
-            source = RandomPointsNodeSource(
-                base_kind=_ROOT_BASE_KIND_CHOICES[
-                    int(randint_scalar(0, len(_ROOT_BASE_KIND_CHOICES), plan_gen))
-                ],
-                function=_sample_function_plan(
-                    plan_gen,
-                    out_dim=total_dim,
-                    mechanism_logit_tilt=mechanism_logit_tilt,
-                    function_family_mix=config.mechanism.function_family_mix,
-                ),
-            )
-        node_plans.append(
-            FixedLayoutNodePlan(
-                node_index=int(node_index),
-                parent_indices=tuple(int(parent_index) for parent_index in parent_indices),
-                converter_specs=typed_converter_specs_tuple,
-                converter_plans=typed_converter_plans,
-                converter_groups=fixed_layout_converter_groups(
-                    typed_converter_specs_tuple,
-                    typed_converter_plans,
-                ),
-                latent=FixedLayoutLatentPlan(
-                    required_dim=required_dim,
-                    extra_dim=latent_extra,
-                    total_dim=total_dim,
-                ),
-                source=source,
             )
         )
     return FixedLayoutExecutionPlan(
@@ -499,14 +203,39 @@ def _lp_distances_to_centers(
 class FixedLayoutBatchRng:
     """Chunk-scoped RNG for fixed-layout batched generation."""
 
-    seed: int
+    seed: int | None
     batch_size: int
     device: str
-    generator: torch.Generator = field(init=False, repr=False)
+    generator: torch.Generator | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        self.generator = torch.Generator(device=self.device)
-        self.generator.manual_seed(int(self.seed))
+        if self.generator is None:
+            if self.seed is None:
+                raise ValueError("FixedLayoutBatchRng requires either seed or generator.")
+            generator = torch.Generator(device=self.device)
+            generator.manual_seed(int(self.seed))
+            self.generator = generator
+
+    @classmethod
+    def from_generator(
+        cls,
+        generator: torch.Generator,
+        *,
+        batch_size: int,
+        device: str,
+    ) -> FixedLayoutBatchRng:
+        return cls(
+            seed=None,
+            batch_size=int(batch_size),
+            device=device,
+            generator=generator,
+        )
+
+    @property
+    def torch_generator(self) -> torch.Generator:
+        if self.generator is None:
+            raise RuntimeError("FixedLayoutBatchRng generator was not initialized.")
+        return self.generator
 
     def normal(self, shape: tuple[int, ...]) -> torch.Tensor:
         return torch.randn(shape, generator=self.generator, device=self.device)
@@ -595,7 +324,7 @@ def _sample_random_weights_batch(
         sigma = rng.log_uniform(q_shape, low=1e-4, high=10.0)
     base_noise = sample_noise_from_spec(
         leading,
-        generator=rng.generator,
+        generator=rng.torch_generator,
         device=rng.device,
         noise_spec=noise_spec,
         scale_multiplier=float(sigma_multiplier),
@@ -694,14 +423,14 @@ def _sample_random_matrix_from_plan_batch(
     if isinstance(plan, GaussianMatrixPlan):
         matrix = sample_noise_from_spec(
             shape,
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=rng.device,
             noise_spec=noise_spec,
         )
     elif isinstance(plan, WeightsMatrixPlan):
         g = sample_noise_from_spec(
             shape,
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=rng.device,
             noise_spec=noise_spec,
         )
@@ -725,13 +454,13 @@ def _sample_random_matrix_from_plan_batch(
         v_shape = (rng.batch_size, *leading_shape, d, int(in_dim))
         u = sample_noise_from_spec(
             u_shape,
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=rng.device,
             noise_spec=noise_spec,
         )
         v = sample_noise_from_spec(
             v_shape,
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=rng.device,
             noise_spec=noise_spec,
         )
@@ -746,7 +475,7 @@ def _sample_random_matrix_from_plan_batch(
     elif isinstance(plan, KernelMatrixPlan):
         pts = sample_noise_from_spec(
             (rng.batch_size, *leading_shape, int(out_dim) + int(in_dim), 3),
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=rng.device,
             noise_spec=noise_spec,
         )
@@ -779,7 +508,7 @@ def _sample_random_matrix_from_plan_batch(
         )
         matrix = matrix + 1e-3 * sample_noise_from_spec(
             matrix.shape,
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=rng.device,
             noise_spec=noise_spec,
         )
@@ -788,7 +517,7 @@ def _sample_random_matrix_from_plan_batch(
 
     matrix = matrix + 1e-6 * sample_noise_from_spec(
         matrix.shape,
-        generator=rng.generator,
+        generator=rng.torch_generator,
         device=rng.device,
         noise_spec=noise_spec,
     )
@@ -875,7 +604,7 @@ def _sample_random_points_batch(
     if base_kind == "normal":
         return sample_noise_from_spec(
             (rng.batch_size, n_rows, dim),
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=rng.device,
             noise_spec=noise_spec,
         )
@@ -886,7 +615,7 @@ def _sample_random_points_batch(
 
     points = sample_noise_from_spec(
         (rng.batch_size, n_rows, dim),
-        generator=rng.generator,
+        generator=rng.torch_generator,
         device=rng.device,
         noise_spec=noise_spec,
     )
@@ -898,7 +627,7 @@ def _sample_random_points_batch(
     )
     matrices = sample_noise_from_spec(
         (rng.batch_size, dim, dim),
-        generator=rng.generator,
+        generator=rng.torch_generator,
         device=rng.device,
         noise_spec=noise_spec,
     )
@@ -972,14 +701,14 @@ def _apply_tree_batch(
         split_dims, thresholds = sample_odt_splits_batch(
             x,
             int(depth),
-            rng.generator,
+            rng.torch_generator,
             feature_probs=probs,
         )
         leaf_idx = compute_odt_leaf_indices_batch(x, split_dims, thresholds)
         n_leaves = 2 ** int(depth)
         leaf_vals = sample_noise_from_spec(
             (batch_size, n_leaves, out_dim),
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=str(x.device),
             noise_spec=noise_spec,
         )
@@ -1059,7 +788,7 @@ def _apply_gp_batch(
     else:
         z = sample_noise_from_spec(
             (batch_size, p, din),
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=rng.device,
             noise_spec=noise_spec,
         )
@@ -1075,7 +804,7 @@ def _apply_gp_batch(
         alpha = rng.log_uniform((batch_size,), low=0.5, high=10.0)
         a_mat = sample_noise_from_spec(
             (batch_size, din, din),
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=rng.device,
             noise_spec=noise_spec,
         )
@@ -1086,7 +815,7 @@ def _apply_gp_batch(
     phi = torch.cos(torch.einsum("bnd,bpd->bnp", x_proj, omega) + b.unsqueeze(1))
     z_out = sample_noise_from_spec(
         (batch_size, out_dim, p),
-        generator=rng.generator,
+        generator=rng.torch_generator,
         device=rng.device,
         noise_spec=noise_spec,
     )
@@ -1111,14 +840,14 @@ def _apply_em_batch(
     )
     centers = centers + sample_noise_from_spec(
         (rng.batch_size, m_val, x.shape[2]),
-        generator=rng.generator,
+        generator=rng.torch_generator,
         device=rng.device,
         noise_spec=noise_spec,
     )
     sigma = torch.exp(
         sample_noise_from_spec(
             (rng.batch_size, m_val),
-            generator=rng.generator,
+            generator=rng.torch_generator,
             device=rng.device,
             noise_spec=noise_spec,
             scale_multiplier=0.1,
@@ -1155,10 +884,13 @@ def apply_function_plan_batch(
     out_dim: int,
     noise_sigma_multiplier: float,
     noise_spec: NoiseSamplingSpec | None,
+    standardize_input: bool = True,
 ) -> torch.Tensor:
     """Apply one frozen function-family plan across a batch of datasets."""
 
-    y = _batch_standardize(x.to(torch.float32))
+    y = x.to(torch.float32)
+    if standardize_input:
+        y = _batch_standardize(y)
     if isinstance(plan, LinearFunctionPlan):
         return _apply_linear_batch(
             y,
@@ -1223,6 +955,7 @@ def apply_function_plan_batch(
             out_dim=out_dim,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
+            standardize_input=True,
         )
         rhs = apply_function_plan_batch(
             y,
@@ -1231,9 +964,34 @@ def apply_function_plan_batch(
             out_dim=out_dim,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
+            standardize_input=True,
         )
         return lhs * rhs
     raise ValueError(f"Unsupported fixed-layout function plan: {plan!r}")
+
+
+def apply_numeric_converter_plan_batch(
+    x: torch.Tensor,
+    rng: FixedLayoutBatchRng,
+    plan: NumericConverterPlan,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply one vector-valued numeric converter plan across a batch of datasets."""
+
+    y = x.to(torch.float32)
+    values = y[:, :, 0].clone()
+    if not plan.warp_enabled:
+        return y, values
+
+    a = rng.log_uniform((y.shape[0],), low=0.2, high=5.0)
+    b = rng.log_uniform((y.shape[0],), low=0.2, high=5.0)
+    lo = torch.min(y, dim=1, keepdim=True).values
+    hi = torch.max(y, dim=1, keepdim=True).values
+    scaled = (y - lo) / torch.clamp(hi - lo, min=1e-6)
+    warped = 1.0 - torch.pow(
+        1.0 - torch.pow(torch.clamp(scaled, 0.0, 1.0), a.view(y.shape[0], 1, 1)),
+        b.view(y.shape[0], 1, 1),
+    )
+    return warped, values
 
 
 def _apply_numeric_converter_group_batch(
@@ -1377,7 +1135,7 @@ def _apply_categorical_group_batch(
 
 
 def _apply_node_plan_batch(
-    config: GeneratorConfig,
+    config: GeneratorConfig | None,
     node_plan: FixedLayoutNodePlan,
     parent_data: list[torch.Tensor],
     *,
@@ -1599,7 +1357,7 @@ def _generate_fixed_layout_raw_batch(
                 else:
                     feature_tensor = sample_noise_from_spec(
                         (batch_size, n_rows),
-                        generator=rng.generator,
+                        generator=rng.torch_generator,
                         device=device,
                         noise_spec=noise_spec,
                     )
@@ -1611,7 +1369,7 @@ def _generate_fixed_layout_raw_batch(
         else:
             y = sample_noise_from_spec(
                 (batch_size, n_rows),
-                generator=rng.generator,
+                generator=rng.torch_generator,
                 device=device,
                 noise_spec=noise_spec,
             ).to(dtype)

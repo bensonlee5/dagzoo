@@ -1155,7 +1155,7 @@ def test_sample_fixed_layout_propagates_mechanism_drift_tilt(
         return "linear"
 
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout_batched._sample_function_family",
+        "dagzoo.core.execution_semantics.sample_function_family",
         _stub_sample_function_family,
     )
 

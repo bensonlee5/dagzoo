@@ -1,9 +1,12 @@
 """Tests for converters/numeric.py numeric path."""
 
+import pytest
 import torch
 
 from dagzoo.converters.numeric import apply_numeric_converter
+from dagzoo.core.fixed_layout_plan_types import NumericConverterPlan
 from conftest import make_generator as _make_generator
+import dagzoo.converters.numeric as numeric_mod
 
 
 def test_output_shapes() -> None:
@@ -36,3 +39,17 @@ def test_1d_input() -> None:
     x_prime, v = apply_numeric_converter(x, g)
     assert x_prime.dim() == 2
     assert x_prime.shape[0] == 64
+
+
+def test_multi_column_inputs_share_one_warp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    x = torch.linspace(-1.0, 1.0, steps=32).unsqueeze(1).repeat(1, 3)
+    plan = NumericConverterPlan(kind="num", warp_enabled=True)
+    monkeypatch.setattr(numeric_mod, "sample_converter_plan", lambda *_args, **_kwargs: plan)
+
+    x_prime, v = apply_numeric_converter(x, _make_generator(2))
+
+    torch.testing.assert_close(x_prime[:, 0], x_prime[:, 1])
+    torch.testing.assert_close(x_prime[:, 1], x_prime[:, 2])
+    torch.testing.assert_close(v, x[:, 0])

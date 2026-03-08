@@ -18,8 +18,8 @@ import torch
 from sklearn.metrics import adjusted_rand_score
 
 from dagzoo.config import GeneratorConfig
-from dagzoo.converters import categorical as categorical_converter_module
 from dagzoo.core.dataset import generate_batch_iter
+from dagzoo.core import execution_semantics as execution_semantics_module
 from dagzoo.core.layout_types import AggregationKind, MechanismFamily
 from dagzoo.core.shift import MECHANISM_FAMILY_ORDER
 from dagzoo.diagnostics.coverage import CoverageAggregationConfig, CoverageAggregator
@@ -30,7 +30,6 @@ from dagzoo.functions import random_functions as random_functions_module
 from dagzoo.functions.multi import _aggregate_parent_outputs
 from dagzoo.functions.random_functions import apply_random_function
 from dagzoo.math_utils import log_uniform, sanitize_json, standardize
-from dagzoo.sampling import random_points as random_points_module
 from dagzoo.types import DatasetBundle
 
 _MECHANISM_FAMILIES: tuple[MechanismFamily, ...] = MECHANISM_FAMILY_ORDER
@@ -1360,12 +1359,13 @@ def _runtime_override_context(arm: AblationArm) -> Iterator[None]:
         _patch_attr(
             random_functions_module, "_sample_function_family", _mapped_sample_function_family
         )
+        _patch_attr(
+            execution_semantics_module,
+            "sample_function_family",
+            _mapped_sample_function_family,
+        )
         _patch_attr(random_functions_module, "apply_random_function", _mapped_apply_random_function)
         _patch_attr(multi_module, "apply_random_function", _mapped_apply_random_function)
-        _patch_attr(
-            categorical_converter_module, "apply_random_function", _mapped_apply_random_function
-        )
-        _patch_attr(random_points_module, "apply_random_function", _mapped_apply_random_function)
 
     if arm.aggregation_map:
         original_aggregate = multi_module._aggregate_parent_outputs

@@ -3,6 +3,11 @@
 import pytest
 import torch
 
+from dagzoo.core.fixed_layout_plan_types import (
+    GaussianMatrixPlan,
+    LinearFunctionPlan,
+    RandomPointsNodeSource,
+)
 from dagzoo.sampling.noise import NoiseSamplingSpec
 from dagzoo.sampling.random_points import sample_random_points
 from conftest import make_generator as _make_generator
@@ -36,14 +41,17 @@ def test_invalid_dims_raises() -> None:
 
 
 def test_unit_ball_sampling_is_invariant_to_noise_family(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _force_unit_ball(*_args, **_kwargs) -> torch.Tensor:
-        return torch.tensor([2], dtype=torch.int64)
-
-    def _identity(x: torch.Tensor, *_args, **_kwargs) -> torch.Tensor:
-        return x
-
-    monkeypatch.setattr(random_points_mod.torch, "randint", _force_unit_ball)
-    monkeypatch.setattr(random_points_mod, "apply_random_function", _identity)
+    monkeypatch.setattr(
+        random_points_mod,
+        "sample_root_source_plan",
+        lambda *_args, **_kwargs: RandomPointsNodeSource(
+            base_kind="unit_ball",
+            function=LinearFunctionPlan(matrix=GaussianMatrixPlan()),
+        ),
+    )
+    monkeypatch.setattr(
+        random_points_mod, "apply_function_plan_batch", lambda x, *_args, **_kwargs: x
+    )
 
     baseline = sample_random_points(128, 4, _make_generator(42), "cpu")
     laplace = sample_random_points(

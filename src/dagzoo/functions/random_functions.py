@@ -6,18 +6,22 @@ import math
 
 import torch
 
+from dagzoo.core.execution_semantics import (
+    sample_function_family,
+    sample_function_plan,
+    sample_function_plan_for_family,
+)
+from dagzoo.core.fixed_layout_batched import FixedLayoutBatchRng, apply_function_plan_batch
 from dagzoo.core.layout_types import MechanismFamily
-from dagzoo.core.shift import MECHANISM_FAMILY_ORDER, mechanism_family_probabilities
 from dagzoo.core.trees import compute_odt_leaf_indices, sample_odt_splits
 from dagzoo.functions._rng_helpers import rand_scalar, randint_scalar
 from dagzoo.functions.activations import apply_random_activation
 from dagzoo.linalg.random_matrices import sample_random_matrix
-from dagzoo.math_utils import (
-    log_uniform as _log_uniform,
-    standardize as _standardize_base,
-)
+from dagzoo.math_utils import log_uniform as _log_uniform, standardize as _standardize_base
 from dagzoo.sampling.noise import NoiseSamplingSpec, sample_noise_from_spec
 from dagzoo.sampling.random_weights import sample_random_weights
+
+_sample_function_family = sample_function_family
 
 
 def _standardize(x: torch.Tensor) -> torch.Tensor:
@@ -359,37 +363,6 @@ def _apply_product(
     return fx * gx
 
 
-def _sample_function_family(
-    generator: torch.Generator,
-    *,
-    mechanism_logit_tilt: float,
-    function_family_mix: dict[MechanismFamily, float] | None = None,
-) -> MechanismFamily:
-    """Sample one function family with optional logit tilt."""
-
-    if mechanism_logit_tilt <= 0.0 and function_family_mix is None:
-        idx = randint_scalar(0, len(MECHANISM_FAMILY_ORDER), generator)
-        return MECHANISM_FAMILY_ORDER[int(idx)]
-
-    probs_by_family = mechanism_family_probabilities(
-        mechanism_logit_tilt=mechanism_logit_tilt,
-        families=MECHANISM_FAMILY_ORDER,
-        family_weights=function_family_mix,
-    )
-    positive_families = [
-        family for family in MECHANISM_FAMILY_ORDER if float(probs_by_family.get(family, 0.0)) > 0.0
-    ]
-    if not positive_families:
-        raise ValueError("No eligible mechanism families are available for sampling.")
-    draw = float(rand_scalar(generator))
-    cumulative = 0.0
-    for family in positive_families:
-        cumulative += float(probs_by_family[family])
-        if draw <= cumulative:
-            return family
-    return positive_families[-1]
-
-
 def apply_random_function(
     x: torch.Tensor,
     generator: torch.Generator,
@@ -401,7 +374,7 @@ def apply_random_function(
     noise_sigma_multiplier: float = 1.0,
     noise_spec: NoiseSamplingSpec | None = None,
 ) -> torch.Tensor:
-    """Apply one sampled random function family to `x` in torch."""
+    """Apply one sampled typed function plan to `x` in torch."""
     y = x.to(torch.float32)
     if y.dim() == 1:
         y = y.unsqueeze(1)
@@ -410,75 +383,42 @@ def apply_random_function(
     dout = out_dim if out_dim is not None else y.shape[1]
 
     if function_type is None:
-        function_type = _sample_function_family(
+        plan = sample_function_plan(
             generator,
+            out_dim=int(dout),
             mechanism_logit_tilt=mechanism_logit_tilt,
             function_family_mix=function_family_mix,
         )
-    elif function_family_mix is not None and function_type not in function_family_mix:
-        raise ValueError(
-            f"Mechanism family '{function_type}' is not enabled by mechanism.function_family_mix."
-        )
+    else:
+        if function_family_mix is not None and function_type not in function_family_mix:
+            raise ValueError(
+                f"Mechanism family '{function_type}' is not enabled by mechanism.function_family_mix."
+            )
+        try:
+            plan = sample_function_plan_for_family(
+                generator,
+                family=function_type,
+                out_dim=int(dout),
+                mechanism_logit_tilt=mechanism_logit_tilt,
+                function_family_mix=function_family_mix,
+            )
+        except ValueError as exc:
+            if "Unsupported mechanism family" in str(exc):
+                raise ValueError(f"Unknown random function family: {function_type}") from exc
+            raise
 
-    if function_type == "nn":
-        return _apply_nn(
-            y,
-            dout,
-            generator,
-            noise_sigma_multiplier=noise_sigma_multiplier,
-            noise_spec=noise_spec,
-        )
-    if function_type == "tree":
-        return _apply_tree(y, dout, generator, noise_spec=noise_spec)
-    if function_type == "discretization":
-        return _apply_discretization(
-            y,
-            dout,
-            generator,
-            noise_sigma_multiplier=noise_sigma_multiplier,
-            noise_spec=noise_spec,
-        )
-    if function_type == "gp":
-        return _apply_gp(
-            y,
-            dout,
-            generator,
-            noise_sigma_multiplier=noise_sigma_multiplier,
-            noise_spec=noise_spec,
-        )
-    if function_type == "linear":
-        return _apply_linear(
-            y,
-            dout,
-            generator,
-            noise_sigma_multiplier=noise_sigma_multiplier,
-            noise_spec=noise_spec,
-        )
-    if function_type == "quadratic":
-        return _apply_quadratic(
-            y,
-            dout,
-            generator,
-            noise_sigma_multiplier=noise_sigma_multiplier,
-            noise_spec=noise_spec,
-        )
-    if function_type == "em":
-        return _apply_em(
-            y,
-            dout,
-            generator,
-            noise_sigma_multiplier=noise_sigma_multiplier,
-            noise_spec=noise_spec,
-        )
-    if function_type == "product":
-        return _apply_product(
-            y,
-            dout,
-            generator,
-            mechanism_logit_tilt=mechanism_logit_tilt,
-            function_family_mix=function_family_mix,
-            noise_sigma_multiplier=noise_sigma_multiplier,
-            noise_spec=noise_spec,
-        )
-
-    raise ValueError(f"Unknown random function family: {function_type}")
+    rng = FixedLayoutBatchRng.from_generator(
+        generator,
+        batch_size=1,
+        device=str(y.device),
+    )
+    out = apply_function_plan_batch(
+        y.unsqueeze(0),
+        rng,
+        plan,
+        out_dim=int(dout),
+        noise_sigma_multiplier=noise_sigma_multiplier,
+        noise_spec=noise_spec,
+        standardize_input=False,
+    )
+    return out.squeeze(0)

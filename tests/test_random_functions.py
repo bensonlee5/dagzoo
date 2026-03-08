@@ -67,6 +67,28 @@ def test_deterministic_with_shift_tilt_and_noise_multiplier() -> None:
 
 @pytest.mark.parametrize(
     "family",
+    ["linear", "quadratic", "discretization", "gp", "em", "product"],
+)
+def test_non_finite_inputs_are_sanitized(family: MechanismFamily) -> None:
+    x = torch.tensor(
+        [
+            [0.0, float("nan"), 1.0],
+            [float("inf"), -1.0, 2.0],
+            [-float("inf"), 0.5, 3.0],
+            [1.5, -2.0, 4.0],
+            [2.0, 3.0, -5.0],
+            [-3.0, 1.0, 6.0],
+        ],
+        dtype=torch.float32,
+    )
+
+    y = apply_random_function(x, _make_generator(9), out_dim=2, function_type=family)
+    assert y.shape == (6, 2)
+    assert torch.all(torch.isfinite(y))
+
+
+@pytest.mark.parametrize(
+    "family",
     ["nn", "tree", "discretization", "gp", "linear", "quadratic", "em", "product"],
 )
 def test_each_family(family: MechanismFamily) -> None:

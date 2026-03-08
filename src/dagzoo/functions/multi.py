@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import torch
 
+from dagzoo.core.execution_semantics import (
+    _AGGREGATION_KIND_ORDER,
+    sample_multi_source_plan,
+)
+from dagzoo.core.fixed_layout_batched import FixedLayoutBatchRng, apply_function_plan_batch
+from dagzoo.core.fixed_layout_plan_types import ConcatNodeSource, StackedNodeSource
 from dagzoo.core.layout_types import AggregationKind, MechanismFamily
-from dagzoo.functions._rng_helpers import rand_scalar, randint_scalar
+from dagzoo.functions._rng_helpers import randint_scalar
 from dagzoo.functions.random_functions import apply_random_function
 from dagzoo.sampling.noise import NoiseSamplingSpec
-
-_AGGREGATION_KIND_ORDER: tuple[AggregationKind, ...] = ("sum", "product", "max", "logsumexp")
 
 
 def _aggregate_parent_outputs(
@@ -91,74 +95,45 @@ def apply_multi_function(
             noise_spec=noise_spec,
         )
 
-    if rand_scalar(generator) < 0.5:
+    source = sample_multi_source_plan(
+        generator,
+        parent_count=len(inputs),
+        out_dim=out_dim,
+        mechanism_logit_tilt=mechanism_logit_tilt,
+        function_family_mix=function_family_mix,
+        aggregation_kind=aggregation_kind,
+    )
+    rng = FixedLayoutBatchRng.from_generator(
+        generator,
+        batch_size=1,
+        device=str(inputs[0].device),
+    )
+
+    if isinstance(source, ConcatNodeSource):
         concat = torch.cat(inputs, dim=1)
-        return apply_random_function(
-            concat,
-            generator,
+        out = apply_function_plan_batch(
+            concat.unsqueeze(0),
+            rng,
+            source.function,
             out_dim=out_dim,
-            mechanism_logit_tilt=mechanism_logit_tilt,
-            function_family_mix=function_family_mix,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )
+        return out.squeeze(0)
 
-    if aggregation_kind is None:
-        transformed_outputs = [
-            apply_random_function(
-                inp,
-                generator,
-                out_dim=out_dim,
-                mechanism_logit_tilt=mechanism_logit_tilt,
-                function_family_mix=function_family_mix,
-                noise_sigma_multiplier=noise_sigma_multiplier,
-                noise_spec=noise_spec,
-            )
-            for inp in inputs
-        ]
-        resolved_aggregation_kind = _resolved_aggregation_kind(
-            aggregation_kind,
-            generator=generator,
-        )
-        stacked = torch.stack(transformed_outputs, dim=1)  # (N, parents, out_dim)
-        return _aggregate_parent_outputs(stacked, aggregation_kind=resolved_aggregation_kind)
+    if not isinstance(source, StackedNodeSource):
+        raise RuntimeError("Expected a stacked multi-source plan.")
 
-    if aggregation_kind == "logsumexp":
-        transformed_outputs = [
-            apply_random_function(
-                inp,
-                generator,
-                out_dim=out_dim,
-                mechanism_logit_tilt=mechanism_logit_tilt,
-                function_family_mix=function_family_mix,
-                noise_sigma_multiplier=noise_sigma_multiplier,
-                noise_spec=noise_spec,
-            )
-            for inp in inputs
-        ]
-        stacked = torch.stack(transformed_outputs, dim=1)  # (N, parents, out_dim)
-        return _aggregate_parent_outputs(stacked, aggregation_kind=aggregation_kind)
-
-    aggregate: torch.Tensor | None = None
-    for inp in inputs:
-        transformed_output = apply_random_function(
-            inp,
-            generator,
+    transformed_outputs = [
+        apply_function_plan_batch(
+            inp.unsqueeze(0),
+            rng,
+            source.parent_functions[plan_index],
             out_dim=out_dim,
-            mechanism_logit_tilt=mechanism_logit_tilt,
-            function_family_mix=function_family_mix,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
-        )
-        if aggregate is None:
-            aggregate = transformed_output
-            continue
-        aggregate = _aggregate_incrementally(
-            aggregate,
-            transformed_output,
-            aggregation_kind=aggregation_kind,
-        )
-
-    if aggregate is None:
-        raise RuntimeError("Expected at least one transformed parent output.")
-    return aggregate
+        ).squeeze(0)
+        for plan_index, inp in enumerate(inputs)
+    ]
+    stacked = torch.stack(transformed_outputs, dim=1)  # (N, parents, out_dim)
+    return _aggregate_parent_outputs(stacked, aggregation_kind=source.aggregation_kind)
