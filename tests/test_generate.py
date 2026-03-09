@@ -43,7 +43,7 @@ from dagzoo.core.fixed_layout_plan_types import FixedLayoutExecutionPlan
 from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.core.noise_runtime import NoiseRuntimeSelection
 from dagzoo.core.shift import mechanism_nonlinear_mass, resolve_shift_runtime_params
-from dagzoo.core.validation import _stratified_split_indices
+from dagzoo.core.validation import InfeasibleStratifiedSplitError, _stratified_split_indices
 from dagzoo.io.lineage_schema import (
     LINEAGE_SCHEMA_NAME,
     LINEAGE_SCHEMA_VERSION,
@@ -1715,7 +1715,7 @@ def test_generate_retries_when_stratified_split_is_infeasible(
     def _raise_infeasible_split(
         *_args: object, **_kwargs: object
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        raise ValueError("infeasible_stratified_split: forced for test")
+        raise InfeasibleStratifiedSplitError("infeasible_stratified_split: forced for test")
 
     monkeypatch.setattr(
         "dagzoo.core.generation_runtime._stratified_split_indices",

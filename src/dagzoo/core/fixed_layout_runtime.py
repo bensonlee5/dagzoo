@@ -51,7 +51,12 @@ from dagzoo.core.noise_runtime import (
     _resolve_noise_runtime_selection,
 )
 from dagzoo.core.shift import resolve_shift_runtime_params
-from dagzoo.core.validation import _classification_split_valid, _stratified_split_indices
+from dagzoo.core.validation import (
+    InvalidClassSplitError,
+    InfeasibleStratifiedSplitError,
+    _classification_split_valid,
+    _stratified_split_indices,
+)
 from dagzoo.rng import SeedManager, offset_seed32
 from dagzoo.types import DatasetBundle
 
@@ -402,10 +407,8 @@ def _raw_classification_labels_support_split(
             split_generator,
             "cpu",
         )
-    except ValueError as exc:
-        if str(exc).startswith("infeasible_stratified_split"):
-            return False
-        raise
+    except InfeasibleStratifiedSplitError:
+        return False
     return _classification_split_valid(labels[train_idx_cpu], labels[test_idx_cpu])
 
 
@@ -675,11 +678,9 @@ def _generate_fixed_layout_bundle_with_retries(
                 dtype=dtype,
                 preserve_feature_schema=preserve_feature_schema,
             )
-        except ValueError as exc:
-            if str(exc) == "invalid_class_split":
-                last_error = "invalid_class_split"
-                continue
-            raise
+        except InvalidClassSplitError:
+            last_error = "invalid_class_split"
+            continue
 
     raise ValueError(
         "Failed to generate a valid fixed-layout dataset after "

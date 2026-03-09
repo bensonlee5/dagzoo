@@ -7,6 +7,14 @@ import math
 import torch
 
 
+class InfeasibleStratifiedSplitError(ValueError):
+    """Raised when a classification split cannot satisfy stratification constraints."""
+
+
+class InvalidClassSplitError(ValueError):
+    """Raised when a classification split violates emitted bundle invariants."""
+
+
 def _stratified_split_indices(
     y: torch.Tensor,
     n_train: int,
@@ -17,13 +25,13 @@ def _stratified_split_indices(
 
     For classification tasks this keeps class balance close to proportional and
     ensures classes with at least two members appear in both splits. For
-    infeasible combinations, this raises ``ValueError`` with an
-    ``infeasible_stratified_split`` prefix.
+    infeasible combinations, this raises ``InfeasibleStratifiedSplitError``
+    with an ``infeasible_stratified_split`` prefix.
     """
     n_total = int(y.shape[0])
     n_test = n_total - n_train
     if n_total <= 0 or n_train <= 0 or n_test <= 0:
-        raise ValueError(
+        raise InfeasibleStratifiedSplitError(
             f"infeasible_stratified_split: expected 0 < n_train < n_total, got n_train={n_train}, n_total={n_total}."
         )
 
@@ -77,7 +85,7 @@ def _stratified_split_indices(
             if not progressed:
                 break
         if deficit > 0:
-            raise ValueError(
+            raise InfeasibleStratifiedSplitError(
                 "infeasible_stratified_split: unable to allocate requested train rows while "
                 f"preserving class constraints (remaining={deficit})."
             )
@@ -98,13 +106,13 @@ def _stratified_split_indices(
             if not progressed:
                 break
         if surplus > 0:
-            raise ValueError(
+            raise InfeasibleStratifiedSplitError(
                 "infeasible_stratified_split: unable to allocate requested test rows while "
                 f"preserving class constraints (remaining={surplus})."
             )
 
     if sum(cls_train_counts) != n_train:
-        raise ValueError(
+        raise InfeasibleStratifiedSplitError(
             "infeasible_stratified_split: train allocation mismatch after rebalance "
             f"(expected={n_train}, actual={sum(cls_train_counts)})."
         )
@@ -118,7 +126,7 @@ def _stratified_split_indices(
     train_idx = torch.cat(train_parts)
     test_idx = torch.cat(test_parts)
     if int(train_idx.shape[0]) != n_train or int(test_idx.shape[0]) != n_test:
-        raise ValueError(
+        raise InfeasibleStratifiedSplitError(
             "infeasible_stratified_split: index cardinality mismatch "
             f"(expected_train={n_train}, actual_train={int(train_idx.shape[0])}, "
             f"expected_test={n_test}, actual_test={int(test_idx.shape[0])})."

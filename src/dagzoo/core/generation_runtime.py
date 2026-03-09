@@ -17,7 +17,12 @@ from dagzoo.core.noise_runtime import (
     _build_noise_distribution_metadata,
 )
 from dagzoo.core.shift import ShiftRuntimeParams
-from dagzoo.core.validation import _classification_split_valid, _stratified_split_indices
+from dagzoo.core.validation import (
+    InvalidClassSplitError,
+    InfeasibleStratifiedSplitError,
+    _classification_split_valid,
+    _stratified_split_indices,
+)
 from dagzoo.postprocess.postprocess import (
     inject_missingness,
     postprocess_dataset,
@@ -275,7 +280,7 @@ def _finalize_processed_bundle(
     )
 
     if config.dataset.task == "classification" and not _classification_split_valid(y_train, y_test):
-        raise ValueError("invalid_class_split")
+        raise InvalidClassSplitError("invalid_class_split")
 
     x_train = x_train.to(device=device, dtype=dtype)
     x_test = x_test.to(device=device, dtype=dtype)
@@ -359,10 +364,8 @@ def _finalize_generated_chunk_preserve_schema(
                 n_train=n_train,
                 generator=split_postprocess_generator,
             )
-        except ValueError as exc:
-            if str(exc).startswith("infeasible_stratified_split"):
-                continue
-            raise
+        except InfeasibleStratifiedSplitError:
+            continue
 
         valid_positions.append(int(batch_index))
         train_idx_cpu_list.append(train_idx_cpu)
@@ -424,10 +427,8 @@ def _finalize_generated_chunk_preserve_schema(
                 noise_runtime_selection=noise_runtime_selection,
                 dtype=dtype,
             )
-        except ValueError as exc:
-            if str(exc) == "invalid_class_split":
-                continue
-            raise
+        except InvalidClassSplitError:
+            continue
 
     return results
 
@@ -463,10 +464,8 @@ def _finalize_generated_tensors(
             n_train=n_train,
             generator=split_postprocess_generator,
         )
-    except ValueError as exc:
-        if str(exc).startswith("infeasible_stratified_split"):
-            raise ValueError("invalid_class_split") from exc
-        raise
+    except InfeasibleStratifiedSplitError as exc:
+        raise InvalidClassSplitError("invalid_class_split") from exc
 
     x_train_t, y_train_t, x_test_t, y_test_t = _split_raw_tensors(
         x,
