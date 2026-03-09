@@ -4,6 +4,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "linear" / "github_to_linear.py"
@@ -168,60 +169,71 @@ def test_mapping_file_load_accepts_legacy_missing_metadata(tmp_path: Path) -> No
     assert mapping.project_slug == "proj"
 
 
-class _FakeGH:
-    def __init__(self, issues: list[object], *, dry_run: bool = False) -> None:
-        self._issues = issues
-        self.dry_run = dry_run
+def _make_fake_gh(issues: list[object], *, dry_run: bool = False) -> SimpleNamespace:
+    issue_list = list(issues)
 
-    def list_issues(self, issue_numbers: set[int] | None = None) -> list[object]:
+    def list_issues(issue_numbers: set[int] | None = None) -> list[object]:
         if issue_numbers is None:
-            return list(self._issues)
-        return [issue for issue in self._issues if issue.number in issue_numbers]
+            return list(issue_list)
+        return [issue for issue in issue_list if issue.number in issue_numbers]
 
-    def create_migration_comment(self, issue_number: int, linear_ref: object) -> None:
-        _ = issue_number
-        _ = linear_ref
+    def create_migration_comment(_issue_number: int, _linear_ref: object) -> None:
+        return None
 
-    def close_issue(self, issue_number: int) -> None:
-        _ = issue_number
+    def close_issue(_issue_number: int) -> None:
+        return None
+
+    return SimpleNamespace(
+        dry_run=dry_run,
+        list_issues=list_issues,
+        create_migration_comment=create_migration_comment,
+        close_issue=close_issue,
+    )
 
 
-class _CheckpointingGH(_FakeGH):
-    def __init__(
-        self,
-        issues: list[object],
-        *,
-        fail_on_comment_issue: int | None = None,
-        fail_on_close_issue: int | None = None,
-        dry_run: bool = False,
-    ) -> None:
-        super().__init__(issues, dry_run=dry_run)
-        self.fail_on_comment_issue = fail_on_comment_issue
-        self.fail_on_close_issue = fail_on_close_issue
-        self.comments: list[int] = []
-        self.closed: list[int] = []
+def _make_checkpointing_gh(
+    issues: list[object],
+    *,
+    fail_on_comment_issue: int | None = None,
+    fail_on_close_issue: int | None = None,
+    dry_run: bool = False,
+) -> SimpleNamespace:
+    issue_list = list(issues)
+    comments: list[int] = []
+    closed: list[int] = []
 
-    def create_migration_comment(self, issue_number: int, linear_ref: object) -> None:
-        _ = linear_ref
-        self.comments.append(issue_number)
-        if self.fail_on_comment_issue == issue_number:
+    def list_issues(issue_numbers: set[int] | None = None) -> list[object]:
+        if issue_numbers is None:
+            return list(issue_list)
+        return [issue for issue in issue_list if issue.number in issue_numbers]
+
+    def create_migration_comment(issue_number: int, _linear_ref: object) -> None:
+        comments.append(issue_number)
+        if fail_on_comment_issue == issue_number:
             raise MODULE.MigrationError(f"comment failed for #{issue_number}")
 
-    def close_issue(self, issue_number: int) -> None:
-        self.closed.append(issue_number)
-        if self.fail_on_close_issue == issue_number:
+    def close_issue(issue_number: int) -> None:
+        closed.append(issue_number)
+        if fail_on_close_issue == issue_number:
             raise MODULE.MigrationError(f"close failed for #{issue_number}")
 
+    return SimpleNamespace(
+        dry_run=dry_run,
+        comments=comments,
+        closed=closed,
+        list_issues=list_issues,
+        create_migration_comment=create_migration_comment,
+        close_issue=close_issue,
+    )
 
-class _FakeLinear:
-    def __init__(self, *, dry_run: bool = False) -> None:
-        self.dry_run = dry_run
-        self.update_calls: list[tuple[str, dict[str, object]]] = []
 
-    def get_project(self, project_slug: str) -> tuple[str, str, str]:
+def _make_fake_linear(*, dry_run: bool = False) -> SimpleNamespace:
+    update_calls: list[tuple[str, dict[str, object]]] = []
+
+    def get_project(_project_slug: str) -> tuple[str, str, str]:
         return ("project-1", "team-1", "DAG")
 
-    def get_team_metadata(self, team_id: str) -> tuple[dict[str, object], dict[str, object]]:
+    def get_team_metadata(_team_id: str) -> tuple[dict[str, object], dict[str, object]]:
         return (
             {
                 "Backlog": MODULE.LinearState(id="state-backlog", name="Backlog", type="backlog"),
@@ -235,21 +247,23 @@ class _FakeLinear:
             {},
         )
 
-    def ensure_workflow_states(self, team_id: str, states: dict[str, object]) -> dict[str, object]:
+    def ensure_workflow_states(
+        _team_id: str,
+        states: dict[str, object],
+    ) -> dict[str, object]:
         return dict(states)
 
     def ensure_labels(
-        self,
-        team_id: str,
+        _team_id: str,
         labels: dict[str, object],
-        label_specs: dict[str, dict[str, str | None]],
+        _label_specs: dict[str, dict[str, str | None]],
     ) -> dict[str, object]:
         return dict(labels)
 
-    def existing_project_issue_map(self, project_id: str) -> dict[int, object]:
+    def existing_project_issue_map(_project_id: str) -> dict[int, object]:
         return {}
 
-    def create_issue(self, input_payload: dict[str, object]) -> object:
+    def create_issue(input_payload: dict[str, object]) -> object:
         issue_suffix = str(input_payload["title"]).split()[-1]
         return MODULE.LinearIssueRef(
             id=f"linear-{issue_suffix}",
@@ -257,13 +271,25 @@ class _FakeLinear:
             url=f"https://linear.app/dagzoo/issue/DAG-{issue_suffix}",
         )
 
-    def update_issue(self, issue_id: str, input_payload: dict[str, object]) -> object:
-        self.update_calls.append((issue_id, dict(input_payload)))
+    def update_issue(issue_id: str, input_payload: dict[str, object]) -> object:
+        update_calls.append((issue_id, dict(input_payload)))
         return MODULE.LinearIssueRef(
             id=issue_id,
             identifier=f"{issue_id}-IDENT",
             url=f"https://linear.app/dagzoo/issue/{issue_id}",
         )
+
+    return SimpleNamespace(
+        dry_run=dry_run,
+        update_calls=update_calls,
+        get_project=get_project,
+        get_team_metadata=get_team_metadata,
+        ensure_workflow_states=ensure_workflow_states,
+        ensure_labels=ensure_labels,
+        existing_project_issue_map=existing_project_issue_map,
+        create_issue=create_issue,
+        update_issue=update_issue,
+    )
 
 
 def test_migrate_issues_dry_run_does_not_persist_mapping(tmp_path: Path) -> None:
@@ -290,8 +316,8 @@ def test_migrate_issues_dry_run_does_not_persist_mapping(tmp_path: Path) -> None
     mapping_path.write_text(json.dumps(original_mapping, indent=2) + "\n")
 
     mapping = MODULE.migrate_issues(
-        gh=_FakeGH([_issue(10)], dry_run=True),
-        linear=_FakeLinear(dry_run=True),
+        gh=_make_fake_gh([_issue(10)], dry_run=True),
+        linear=_make_fake_linear(dry_run=True),
         repo="bensonlee5/dagzoo",
         project_slug="proj",
         mapping_path=mapping_path,
@@ -366,10 +392,10 @@ def test_migrate_issues_preserves_linear_state_after_cutover(tmp_path: Path) -> 
         },
     )
     mapping_path.write_text(mapping.to_json())
-    linear = _FakeLinear()
+    linear = _make_fake_linear()
 
     migrated = MODULE.migrate_issues(
-        gh=_FakeGH([_issue(12, state="CLOSED")]),
+        gh=_make_fake_gh([_issue(12, state="CLOSED")]),
         linear=linear,
         repo="bensonlee5/dagzoo",
         project_slug="proj",
@@ -405,10 +431,10 @@ def test_migrate_issues_updates_state_before_cutover(tmp_path: Path) -> None:
         },
     )
     mapping_path.write_text(mapping.to_json())
-    linear = _FakeLinear()
+    linear = _make_fake_linear()
 
     migrated = MODULE.migrate_issues(
-        gh=_FakeGH([_issue(14, state="CLOSED")]),
+        gh=_make_fake_gh([_issue(14, state="CLOSED")]),
         linear=linear,
         repo="bensonlee5/dagzoo",
         project_slug="proj",
@@ -427,9 +453,9 @@ def test_migrate_issues_backfills_epic_parent_on_subset_rerun(tmp_path: Path) ->
         _issue(145),
     ]
 
-    first_linear = _FakeLinear()
+    first_linear = _make_fake_linear()
     first_migrated = MODULE.migrate_issues(
-        gh=_FakeGH(issues),
+        gh=_make_fake_gh(issues),
         linear=first_linear,
         repo="bensonlee5/dagzoo",
         project_slug="proj",
@@ -440,9 +466,9 @@ def test_migrate_issues_backfills_epic_parent_on_subset_rerun(tmp_path: Path) ->
     assert first_migrated.entry_for(145).parent_github_number == 148
     assert first_linear.update_calls == []
 
-    second_linear = _FakeLinear()
+    second_linear = _make_fake_linear()
     second_migrated = MODULE.migrate_issues(
-        gh=_FakeGH(issues),
+        gh=_make_fake_gh(issues),
         linear=second_linear,
         repo="bensonlee5/dagzoo",
         project_slug="proj",
@@ -486,10 +512,10 @@ def test_migrate_issues_subset_run_does_not_repair_unrelated_parent_links(
         },
     )
     mapping_path.write_text(mapping.to_json())
-    linear = _FakeLinear()
+    linear = _make_fake_linear()
 
     MODULE.migrate_issues(
-        gh=_FakeGH(
+        gh=_make_fake_gh(
             [
                 _issue(148, body="Tracks #145", labels=["epic"]),
                 _issue(145),
@@ -534,7 +560,7 @@ def test_apply_cutover_checkpoints_each_successful_issue(tmp_path: Path) -> None
         },
     )
     mapping_path.write_text(mapping.to_json())
-    gh = _CheckpointingGH(
+    gh = _make_checkpointing_gh(
         [_issue(10), _issue(11)],
         fail_on_comment_issue=11,
     )
@@ -585,7 +611,7 @@ def test_apply_cutover_dry_run_does_not_checkpoint_mapping(tmp_path: Path) -> No
     mapping_path.write_text(mapping.to_json())
 
     MODULE.apply_cutover(
-        gh=_CheckpointingGH([_issue(10)], dry_run=True),
+        gh=_make_checkpointing_gh([_issue(10)], dry_run=True),
         mapping=mapping,
         issue_numbers=None,
         mapping_path=mapping_path,
@@ -617,7 +643,7 @@ def test_apply_cutover_retry_skips_duplicate_comment_after_close_failure(
     )
     mapping_path.write_text(mapping.to_json())
 
-    first_gh = _CheckpointingGH([_issue(10)], fail_on_close_issue=10)
+    first_gh = _make_checkpointing_gh([_issue(10)], fail_on_close_issue=10)
     try:
         MODULE.apply_cutover(
             gh=first_gh,
@@ -642,7 +668,7 @@ def test_apply_cutover_retry_skips_duplicate_comment_after_close_failure(
     assert checkpointed.entry_for(10).cutover_applied_at is not None
     assert checkpointed.entry_for(10).github_state == "OPEN"
 
-    second_gh = _CheckpointingGH([_issue(10)])
+    second_gh = _make_checkpointing_gh([_issue(10)])
     MODULE.apply_cutover(
         gh=second_gh,
         mapping=checkpointed,

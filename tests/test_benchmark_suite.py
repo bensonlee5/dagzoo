@@ -13,21 +13,31 @@ from dagzoo.config import GeneratorConfig
 from dagzoo.types import DatasetBundle
 
 
+def _set_attrs(target: object, **attrs: object) -> None:
+    for name, value in attrs.items():
+        setattr(target, name, value)
+
+
 def _tiny_cpu_config() -> GeneratorConfig:
     cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.dataset.task = "regression"
-    cfg.runtime.device = "cpu"
-    cfg.dataset.n_train = 32
-    cfg.dataset.n_test = 8
-    cfg.dataset.n_features_min = 8
-    cfg.dataset.n_features_max = 8
-    cfg.graph.n_nodes_min = 2
-    cfg.graph.n_nodes_max = 6
-    cfg.benchmark.num_datasets = 2
-    cfg.benchmark.warmup_datasets = 0
-    cfg.benchmark.latency_num_samples = 2
-    cfg.benchmark.reproducibility_num_datasets = 1
-    cfg.benchmark.preset_name = "cpu_test"
+    _set_attrs(
+        cfg.dataset,
+        task="regression",
+        n_train=32,
+        n_test=8,
+        n_features_min=8,
+        n_features_max=8,
+    )
+    _set_attrs(cfg.runtime, device="cpu")
+    _set_attrs(cfg.graph, n_nodes_min=2, n_nodes_max=6)
+    _set_attrs(
+        cfg.benchmark,
+        num_datasets=2,
+        warmup_datasets=0,
+        latency_num_samples=2,
+        reproducibility_num_datasets=1,
+        preset_name="cpu_test",
+    )
     cfg.benchmark.presets["cpu_test"] = {
         "device": "cpu",
         "num_datasets": 2,
@@ -38,26 +48,30 @@ def _tiny_cpu_config() -> GeneratorConfig:
 
 def _tiny_missingness_cpu_config() -> GeneratorConfig:
     cfg = _tiny_cpu_config()
-    cfg.dataset.missing_rate = 0.25
-    cfg.dataset.missing_mechanism = "mcar"  # type: ignore[assignment]
+    _set_attrs(
+        cfg.dataset,
+        missing_rate=0.25,
+        missing_mechanism="mcar",
+    )
     return cfg
 
 
 def _tiny_shift_cpu_config() -> GeneratorConfig:
     cfg = _tiny_cpu_config()
-    cfg.shift.enabled = True
-    cfg.shift.mode = "mixed"
-    cfg.graph.n_nodes_min = 8
-    cfg.graph.n_nodes_max = 12
+    _set_attrs(cfg.shift, enabled=True, mode="mixed")
+    _set_attrs(cfg.graph, n_nodes_min=8, n_nodes_max=12)
     return cfg
 
 
 def _tiny_noise_cpu_config() -> GeneratorConfig:
     cfg = _tiny_cpu_config()
-    cfg.noise.family = "laplace"
-    cfg.noise.base_scale = 1.0
-    cfg.noise.student_t_df = 6.0
-    cfg.noise.mixture_weights = None
+    _set_attrs(
+        cfg.noise,
+        family="laplace",
+        base_scale=1.0,
+        student_t_df=6.0,
+        mixture_weights=None,
+    )
     return cfg
 
 
@@ -117,7 +131,7 @@ def test_run_benchmark_suite_builtin_cpu_uses_canonical_generation_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_cpu_config()
-    cfg.benchmark.preset_name = "cpu"
+    _set_attrs(cfg.benchmark, preset_name="cpu")
     cfg.benchmark.presets["cpu"] = {
         "device": "cpu",
         "num_datasets": 2,
@@ -200,7 +214,7 @@ def test_run_benchmark_suite_emits_stage_and_filter_pressure_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_cpu_config()
-    cfg.filter.enabled = True
+    _set_attrs(cfg.filter, enabled=True)
     spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     def _stub_throughput(
@@ -209,8 +223,8 @@ def test_run_benchmark_suite_emits_stage_and_filter_pressure_metrics(
         num_datasets: int,
         warmup_datasets: int = 10,
         device: str | None = None,
-        fixed_layout_plan=None,
-        fixed_layout_batch_size: int | None = None,
+        _fixed_layout_plan=None,
+        _fixed_layout_batch_size: int | None = None,
         on_bundle=None,
     ):
         _ = warmup_datasets
@@ -319,12 +333,14 @@ def test_run_benchmark_suite_filter_enabled_uses_filter_disabled_generation_conf
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_cpu_config()
-    cfg.filter.enabled = True
-    cfg.dataset.missing_rate = 0.25
-    cfg.dataset.missing_mechanism = "mcar"  # type: ignore[assignment]
-    cfg.shift.enabled = True
-    cfg.shift.mode = "mixed"
-    cfg.noise.family = "laplace"
+    _set_attrs(cfg.filter, enabled=True)
+    _set_attrs(
+        cfg.dataset,
+        missing_rate=0.25,
+        missing_mechanism="mcar",
+    )
+    _set_attrs(cfg.shift, enabled=True, mode="mixed")
+    _set_attrs(cfg.noise, family="laplace")
     spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     throughput_filter_flags: list[bool] = []
@@ -339,8 +355,8 @@ def test_run_benchmark_suite_filter_enabled_uses_filter_disabled_generation_conf
         num_datasets: int,
         warmup_datasets: int = 10,
         device: str | None = None,
-        fixed_layout_plan=None,
-        fixed_layout_batch_size: int | None = None,
+        _fixed_layout_plan=None,
+        _fixed_layout_batch_size: int | None = None,
         on_bundle=None,
     ):
         _ = warmup_datasets
@@ -493,8 +509,8 @@ def test_run_benchmark_suite_filter_retry_rate_uses_stage_sample_denominator_whe
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_cpu_config()
-    cfg.filter.enabled = True
-    cfg.benchmark.latency_num_samples = 2
+    _set_attrs(cfg.filter, enabled=True)
+    _set_attrs(cfg.benchmark, latency_num_samples=2)
     spec = PresetRunSpec(key="cpu_test", config=cfg, device="cpu")
 
     def _stub_throughput(
@@ -503,8 +519,8 @@ def test_run_benchmark_suite_filter_retry_rate_uses_stage_sample_denominator_whe
         num_datasets: int,
         warmup_datasets: int = 10,
         device: str | None = None,
-        fixed_layout_plan=None,
-        fixed_layout_batch_size: int | None = None,
+        _fixed_layout_plan=None,
+        _fixed_layout_batch_size: int | None = None,
         on_bundle=None,
     ):
         _ = warmup_datasets
@@ -637,8 +653,8 @@ def test_missingness_control_run_uses_equivalent_callback_instrumentation(
         num_datasets: int,
         warmup_datasets: int = 10,
         device: str | None = None,
-        fixed_layout_plan=None,
-        fixed_layout_batch_size: int | None = None,
+        _fixed_layout_plan=None,
+        _fixed_layout_batch_size: int | None = None,
         on_bundle=None,
     ):
         _ = warmup_datasets
@@ -743,8 +759,8 @@ def test_run_benchmark_suite_releases_stage_samples_before_latency(
         num_datasets: int,
         warmup_datasets: int = 10,
         device: str | None = None,
-        fixed_layout_plan=None,
-        fixed_layout_batch_size: int | None = None,
+        _fixed_layout_plan=None,
+        _fixed_layout_batch_size: int | None = None,
         on_bundle=None,
     ):
         _ = warmup_datasets
@@ -860,8 +876,8 @@ def test_run_benchmark_suite_missingness_runtime_guardrail_updates_regression_st
         num_datasets: int,
         warmup_datasets: int = 10,
         device: str | None = None,
-        fixed_layout_plan=None,
-        fixed_layout_batch_size: int | None = None,
+        _fixed_layout_plan=None,
+        _fixed_layout_batch_size: int | None = None,
         on_bundle=None,
     ):
         _ = warmup_datasets
@@ -991,8 +1007,8 @@ def test_run_benchmark_suite_shift_runtime_guardrail_updates_regression_status(
         num_datasets: int,
         warmup_datasets: int = 10,
         device: str | None = None,
-        fixed_layout_plan=None,
-        fixed_layout_batch_size: int | None = None,
+        _fixed_layout_plan=None,
+        _fixed_layout_batch_size: int | None = None,
         on_bundle=None,
     ):
         _ = warmup_datasets
@@ -1104,8 +1120,8 @@ def test_run_benchmark_suite_shift_directional_guardrail_failure_updates_status(
         num_datasets: int,
         warmup_datasets: int = 10,
         device: str | None = None,
-        fixed_layout_plan=None,
-        fixed_layout_batch_size: int | None = None,
+        _fixed_layout_plan=None,
+        _fixed_layout_batch_size: int | None = None,
         on_bundle=None,
     ):
         _ = warmup_datasets
@@ -1239,8 +1255,8 @@ def test_run_benchmark_suite_noise_runtime_guardrail_updates_regression_status(
         num_datasets: int,
         warmup_datasets: int = 10,
         device: str | None = None,
-        fixed_layout_plan=None,
-        fixed_layout_batch_size: int | None = None,
+        _fixed_layout_plan=None,
+        _fixed_layout_batch_size: int | None = None,
         on_bundle=None,
     ):
         _ = warmup_datasets
@@ -1343,8 +1359,8 @@ def test_run_benchmark_suite_noise_metadata_coverage_failure_updates_status(
         num_datasets: int,
         warmup_datasets: int = 10,
         device: str | None = None,
-        fixed_layout_plan=None,
-        fixed_layout_batch_size: int | None = None,
+        _fixed_layout_plan=None,
+        _fixed_layout_batch_size: int | None = None,
         on_bundle=None,
     ):
         _ = warmup_datasets
@@ -1614,7 +1630,7 @@ def test_collect_lineage_guardrails_smoke_suppresses_runtime_issue_at_sample_cap
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_cpu_config()
-    cfg.benchmark.latency_num_samples = 6
+    _set_attrs(cfg.benchmark, latency_num_samples=6)
 
     def _stub_generate_batch_iter(
         _config,
@@ -1684,7 +1700,7 @@ def test_collect_lineage_guardrails_emits_runtime_issue_for_standard_suite(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_cpu_config()
-    cfg.benchmark.latency_num_samples = 6
+    _set_attrs(cfg.benchmark, latency_num_samples=6)
 
     def _stub_generate_batch_iter(
         _config,

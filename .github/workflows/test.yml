@@ -28,7 +28,6 @@ jobs:
       - name: Dead code
         run: >
           uv run vulture src/dagzoo tests
-          --exclude tests/test_benchmark_suite.py,tests/test_github_to_linear.py,tests/test_seed_harness_backlog.py
           --ignore-names __getattr__
       - name: Test with coverage
         run: >
