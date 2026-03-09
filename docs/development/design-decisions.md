@@ -108,7 +108,9 @@ Child seeds are derived via BLAKE2s hashing: encode the base seed and path
 components as UTF-8, hash them, and extract a 32-bit integer from the digest.
 
 This is the current seeded reproducibility baseline and can be revisited only
-with an explicit migration plan for compatibility.
+with an explicit migration plan for compatibility. The active migration design
+for semantic keyed substreams is tracked in
+[`keyed-rng.md`](keyed-rng.md).
 
 ### Rationale
 

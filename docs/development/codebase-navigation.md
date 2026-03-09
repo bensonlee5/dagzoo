@@ -32,6 +32,7 @@ Follow this sequence to understand how a latent causal structure becomes a reali
 Infrastructure that ensures reproducibility, deterministic behavior, and data quality.
 
 - [`src/dagzoo/rng.py`](../../src/dagzoo/rng.py): The `SeedManager` ensures strictly isolated, deterministic child seeds for every component.
+- [`docs/development/keyed-rng.md`](keyed-rng.md): Design note for the keyed RNG migration and semantic reproducibility contract.
 - [`src/dagzoo/filtering/`](../../src/dagzoo/filtering/): Implements deferred CPU ExtraTrees filtering (`dagzoo filter`) and filter replay utilities.
 - [`src/dagzoo/core/metrics_torch.py`](../../src/dagzoo/core/metrics_torch.py): Unified torch-native metric extraction used by diagnostics and generation telemetry.
 - [`src/dagzoo/postprocess/`](../../src/dagzoo/postprocess/): Handles final-stage transformations; deterministic missingness (MCAR/MAR/MNAR) logic lives in [`sampling/missingness.py`](../../src/dagzoo/sampling/missingness.py).
@@ -43,6 +44,7 @@ Infrastructure that ensures reproducibility, deterministic behavior, and data qu
 - [`src/dagzoo/config.py`](../../src/dagzoo/config.py): The source of truth for all generator settings, implemented as strongly-typed dataclasses.
 - [`src/dagzoo/hardware.py`](../../src/dagzoo/hardware.py) + [`hardware_policy.py`](../../src/dagzoo/hardware_policy.py): Tier detection and extensible policy registry.
 - [`docs/development/design-decisions.md`](design-decisions.md): Rationale behind the architectural choices and reproducibility guarantees.
+- [`docs/development/keyed-rng.md`](keyed-rng.md): Active migration plan for keyed RNG namespaces and semantic reproducibility.
 
 ## 5. Output & Benchmarking
 

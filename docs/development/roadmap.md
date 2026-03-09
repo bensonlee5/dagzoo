@@ -429,6 +429,22 @@ metadata JSON contract, and DAG lineage schema.
   - Instrumentation overhead is bounded, documented, and does not invalidate existing benchmark guardrails.
   - User-facing docs describe how to enable and interpret bottleneck outputs.
 
+### RD-015: Keyed RNG Semantic Reproducibility
+
+- Status: `planned`
+- Milestone: `Now`
+- Mission alignment: foundation model pretraining, robustness testing
+- Pillar alignment: causal structural integrity, hardware-native performance
+- Goal: replace order-coupled ambient RNG usage with keyed semantic namespaces so regrouping, retries, and scalar-vs-batched path changes preserve the intended reproducibility contract.
+- Linear tracking: epic `BL-90`; dependency chain `BL-133 -> BL-134 -> BL-135 -> BL-136 -> BL-137`
+- Repo touchpoints: `src/dagzoo/rng.py`, `src/dagzoo/core/`, `src/dagzoo/postprocess/`, `src/dagzoo/sampling/`, `src/dagzoo/bench/`, `docs/`
+- Exit criteria:
+  - Core generation/runtime randomness is keyed by semantic namespace rather than draw order or offset-only coupling.
+  - Retrying one stage does not perturb sibling-stage randomness.
+  - Scalar and batched typed-plan execution preserve semantic equivalence under the keyed contract.
+  - Reproducibility docs describe the new contract and its intended non-goals.
+  - Benchmark and replay checks cover the new semantic reproducibility invariants.
+
 ## Milestone Board
 
 ### Implemented
@@ -442,7 +458,7 @@ metadata JSON contract, and DAG lineage schema.
 
 ### Now
 
-- No active `Now` lane items; implemented items are tracked above for traceability.
+- RD-015 keyed RNG semantic reproducibility
 
 ### Next
 
@@ -468,6 +484,8 @@ metadata JSON contract, and DAG lineage schema.
 - RD-014 should precede or run in parallel with RD-010 so adaptive tuning decisions are guided by stage-level bottleneck evidence.
 - RD-014 should inform RD-009 worker/sharding design by identifying true single-process bottlenecks first.
 - RD-014 remains observability-only and must not change default runtime behavior when disabled.
+- RD-015 should land before further executor/runtime regrouping work so semantic reproducibility is explicit before more batching and retry changes accumulate.
+- RD-015 provides the RNG contract that RD-009 and future runtime restructuring should reuse instead of adding new offset-based seed helpers.
 - RD-005 now primarily depends on RD-004 for shift/drift controls, and can build on existing RD-003 missingness infrastructure.
 - RD-005 can consume implemented RD-012 noise-family controls while RD-011 mechanism-family controls remain in flight.
 - RD-004/RD-005/RD-009/RD-002 now have explicit epic trackers and PR-scoped delivery chains.
