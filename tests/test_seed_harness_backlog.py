@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,13 +22,11 @@ _load_module("github_to_linear", "scripts/linear/github_to_linear.py")
 MODULE = _load_module("seed_harness_backlog", "scripts/linear/seed_harness_backlog.py")
 
 
-class _RecordingLinear:
-    def __init__(self, *, dry_run: bool = False) -> None:
-        self.dry_run = dry_run
-        self.calls: list[tuple[str, dict[str, object]]] = []
+def _make_recording_linear(*, dry_run: bool = False) -> SimpleNamespace:
+    calls: list[tuple[str, dict[str, object]]] = []
 
-    def graphql(self, query: str, variables: dict[str, object]) -> dict[str, object]:
-        self.calls.append((query, dict(variables)))
+    def graphql(query: str, variables: dict[str, object]) -> dict[str, object]:
+        calls.append((query, dict(variables)))
         if "issueLabelCreate" in query:
             input_payload = variables["input"]
             assert isinstance(input_payload, dict)
@@ -66,36 +65,41 @@ class _RecordingLinear:
             }
         raise AssertionError(f"Unexpected GraphQL query: {query}")
 
+    return SimpleNamespace(dry_run=dry_run, calls=calls, graphql=graphql)
 
-class _BootstrapLinear:
-    def __init__(self) -> None:
-        self.dry_run = True
-        self.ensure_states_calls: list[tuple[str, dict[str, object]]] = []
 
-    def get_project(self, project_slug: str) -> tuple[str, str, str]:
-        _ = project_slug
+def _make_bootstrap_linear() -> SimpleNamespace:
+    ensure_states_calls: list[tuple[str, dict[str, object]]] = []
+
+    def get_project(_project_slug: str) -> tuple[str, str, str]:
         return ("project-1", "team-1", "DAG")
 
-    def get_team_metadata(self, team_id: str) -> tuple[dict[str, object], dict[str, object]]:
-        _ = team_id
+    def get_team_metadata(_team_id: str) -> tuple[dict[str, object], dict[str, object]]:
         return ({}, {})
 
     def ensure_workflow_states(
-        self,
         team_id: str,
         states: dict[str, object],
     ) -> dict[str, object]:
-        self.ensure_states_calls.append((team_id, dict(states)))
+        ensure_states_calls.append((team_id, dict(states)))
         return {
             "Backlog": MODULE.LinearState(id="state-backlog", name="Backlog", type="backlog"),
             "Todo": MODULE.LinearState(id="state-todo", name="Todo", type="unstarted"),
         }
 
-    def graphql(self, query: str, variables: dict[str, object]) -> dict[str, object]:
-        _ = variables
+    def graphql(query: str, _variables: dict[str, object]) -> dict[str, object]:
         if "query ProjectIssues" in query:
             return {"issues": {"nodes": []}}
         raise AssertionError(f"Unexpected GraphQL query: {query}")
+
+    return SimpleNamespace(
+        dry_run=True,
+        ensure_states_calls=ensure_states_calls,
+        get_project=get_project,
+        get_team_metadata=get_team_metadata,
+        ensure_workflow_states=ensure_workflow_states,
+        graphql=graphql,
+    )
 
 
 def test_build_ticket_specs_contains_epic_and_audit_ticket() -> None:
@@ -150,7 +154,7 @@ def test_required_label_specs_cover_every_ticket_label() -> None:
 
 
 def test_ensure_labels_provisions_every_required_spec_label_in_dry_run() -> None:
-    linear = _RecordingLinear(dry_run=True)
+    linear = _make_recording_linear(dry_run=True)
 
     labels = MODULE.ensure_labels(
         linear,
@@ -164,7 +168,7 @@ def test_ensure_labels_provisions_every_required_spec_label_in_dry_run() -> None
 
 
 def test_create_or_update_issue_create_keeps_state_and_labels() -> None:
-    linear = _RecordingLinear()
+    linear = _make_recording_linear()
 
     MODULE.create_or_update_issue(
         linear,
@@ -189,7 +193,7 @@ def test_create_or_update_issue_create_keeps_state_and_labels() -> None:
 
 
 def test_create_or_update_issue_rerun_preserves_existing_state_and_labels() -> None:
-    linear = _RecordingLinear()
+    linear = _make_recording_linear()
 
     MODULE.create_or_update_issue(
         linear,
@@ -225,9 +229,9 @@ def test_main_bootstraps_workflow_states_before_seeding(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    linear = _BootstrapLinear()
+    linear = _make_bootstrap_linear()
     monkeypatch.setattr(MODULE, "load_linear_api_key", lambda _path: "test-key")
-    monkeypatch.setattr(MODULE, "LinearClient", lambda *args, **kwargs: linear)
+    monkeypatch.setattr(MODULE, "LinearClient", lambda *_args, **_kwargs: linear)
 
     exit_code = MODULE.main(
         [
