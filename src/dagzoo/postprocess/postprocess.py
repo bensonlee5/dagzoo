@@ -54,18 +54,6 @@ def _clip_and_standardize_rows(x: torch.Tensor, feature_types: list[str]) -> tor
     return out
 
 
-def _clip_and_standardize(x: torch.Tensor, feature_types: list[str]) -> torch.Tensor:
-    """Clip numeric outliers and standardize numeric columns."""
-
-    return _clip_and_standardize_rows(x, feature_types)
-
-
-def _clip_and_standardize_batch(x: torch.Tensor, feature_types: list[str]) -> torch.Tensor:
-    """Clip numeric outliers and standardize numeric columns for one dataset batch."""
-
-    return _clip_and_standardize_rows(x, feature_types)
-
-
 def _postprocess_feature_splits(
     x_train: torch.Tensor,
     x_test: torch.Tensor,

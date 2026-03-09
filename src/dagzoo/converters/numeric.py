@@ -7,18 +7,8 @@ from types import SimpleNamespace
 import torch
 
 from dagzoo.core.execution_semantics import sample_converter_plan
-from dagzoo.core.fixed_layout_batched import (
-    FixedLayoutBatchRng,
-    apply_numeric_converter_plan_batch,
-)
+from dagzoo.core.fixed_layout_batched import FixedLayoutBatchRng, apply_numeric_converter_plan_batch
 from dagzoo.core.fixed_layout_plan_types import NumericConverterPlan
-
-
-def _minmax(x: torch.Tensor) -> torch.Tensor:
-    """Min-max scale columns in torch."""
-    lo = torch.min(x, dim=0, keepdim=True).values
-    hi = torch.max(x, dim=0, keepdim=True).values
-    return (x - lo) / torch.clamp(hi - lo, min=1e-6)
 
 
 def apply_numeric_converter(

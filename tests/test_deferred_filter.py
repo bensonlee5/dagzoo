@@ -59,6 +59,35 @@ def _load_ndjson(path) -> list[dict[str, object]]:
     return payload
 
 
+def _write_ndjson_records(path, records: list[dict[str, object]]) -> None:
+    path.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+
+def _write_split_table(
+    path,
+    *,
+    dataset_indices: list[int],
+    row_indices: list[int],
+    x_rows: list[list[float]],
+    y_rows: list[int],
+) -> None:
+    pyarrow = pytest.importorskip("pyarrow")
+    pyarrow_parquet = pytest.importorskip("pyarrow.parquet")
+
+    table = pyarrow.table(
+        {
+            "dataset_index": pyarrow.array(dataset_indices, type=pyarrow.int64()),
+            "row_index": pyarrow.array(row_indices, type=pyarrow.int64()),
+            "x": pyarrow.array(x_rows, type=pyarrow.list_(pyarrow.float32())),
+            "y": pyarrow.array(y_rows, type=pyarrow.int64()),
+        }
+    )
+    pyarrow_parquet.write_table(table, path, compression="zstd")
+
+
 def test_run_deferred_filter_writes_manifest_and_summary(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -160,7 +189,7 @@ def test_run_deferred_filter_requires_fallback_config_when_metadata_lacks_filter
     cfg.dataset.task = "classification"
     cfg.filter.enabled = True
 
-    result = run_deferred_filter(in_dir=in_dir, out_dir=out_dir, config=cfg)
+    result = run_deferred_filter(in_dir=in_dir, out_dir=tmp_path / "filter_out_retry", config=cfg)
     assert result.total_datasets == 1
     assert result.accepted_datasets == 1
 
@@ -192,3 +221,155 @@ def test_run_deferred_filter_prefers_dataset_seed_when_present(
     assert result.total_datasets == 2
     assert result.accepted_datasets == 2
     assert replay_seeds == [501, 502]
+
+
+def test_run_deferred_filter_rejects_stale_filter_output_dir(
+    tmp_path,
+) -> None:
+    pytest.importorskip("pyarrow.parquet")
+
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "filter_out"
+    _ = write_packed_parquet_shards_stream(
+        [_bundle_with_embedded_config(301)],
+        in_dir,
+        shard_size=1,
+        compression="zstd",
+    )
+
+    out_dir.mkdir()
+    (out_dir / "filter_manifest.ndjson").write_text("", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="already contains prior artifacts"):
+        _ = run_deferred_filter(in_dir=in_dir, out_dir=out_dir)
+
+
+def test_run_deferred_filter_rejects_extra_split_rows_beyond_metadata(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("pyarrow.parquet")
+
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "filter_out"
+    _ = write_packed_parquet_shards_stream(
+        [_bundle_with_embedded_config(401), _bundle_with_embedded_config(402)],
+        in_dir,
+        shard_size=2,
+        compression="zstd",
+    )
+
+    metadata_path = in_dir / "shard_00000" / "metadata.ndjson"
+    records = _load_ndjson(metadata_path)
+    _write_ndjson_records(metadata_path, [records[0]])
+
+    monkeypatch.setattr(
+        "dagzoo.filtering.deferred_filter.apply_extra_trees_filter",
+        lambda *_args, **_kwargs: (True, {"wins_ratio": 1.0, "n_valid_oob": 128}),
+    )
+
+    with pytest.raises(ValueError, match="extra dataset rows beyond metadata coverage"):
+        _ = run_deferred_filter(in_dir=in_dir, out_dir=out_dir)
+
+
+def test_run_deferred_filter_rejects_non_monotonic_split_rows(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("pyarrow.parquet")
+
+    shard_dir = tmp_path / "input" / "shard_00000"
+    shard_dir.mkdir(parents=True)
+    metadata_path = shard_dir / "metadata.ndjson"
+    train_path = shard_dir / "train.parquet"
+    test_path = shard_dir / "test.parquet"
+
+    metadata_records = [
+        {
+            "dataset_index": 0,
+            "n_train": 2,
+            "n_test": 1,
+            "n_features": 2,
+            "feature_types": ["num", "num"],
+            "metadata": {
+                "seed": 11,
+                "filter": {"mode": "deferred", "status": "not_run"},
+                "config": {
+                    "dataset": {"task": "classification"},
+                    "filter": {"enabled": True},
+                },
+            },
+        },
+        {
+            "dataset_index": 1,
+            "n_train": 1,
+            "n_test": 1,
+            "n_features": 2,
+            "feature_types": ["num", "num"],
+            "metadata": {
+                "seed": 12,
+                "filter": {"mode": "deferred", "status": "not_run"},
+                "config": {
+                    "dataset": {"task": "classification"},
+                    "filter": {"enabled": True},
+                },
+            },
+        },
+    ]
+    _write_ndjson_records(metadata_path, metadata_records)
+    _write_split_table(
+        train_path,
+        dataset_indices=[0, 1, 0],
+        row_indices=[0, 0, 1],
+        x_rows=[[0.0, 0.0], [1.0, 1.0], [0.5, 0.5]],
+        y_rows=[0, 1, 0],
+    )
+    _write_split_table(
+        test_path,
+        dataset_indices=[0, 1],
+        row_indices=[0, 0],
+        x_rows=[[0.25, 0.25], [1.25, 1.25]],
+        y_rows=[0, 1],
+    )
+
+    monkeypatch.setattr(
+        "dagzoo.filtering.deferred_filter.apply_extra_trees_filter",
+        lambda *_args, **_kwargs: (True, {"wins_ratio": 1.0, "n_valid_oob": 128}),
+    )
+
+    with pytest.raises(ValueError, match="monotonically increasing dataset_index"):
+        _ = run_deferred_filter(in_dir=shard_dir, out_dir=tmp_path / "filter_out")
+
+
+def test_run_deferred_filter_rejects_lineage_symlinks_during_curated_copy(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("pyarrow.parquet")
+
+    in_dir = tmp_path / "input"
+    out_dir = tmp_path / "filter_out"
+    curated_out = tmp_path / "curated_out"
+    _ = write_packed_parquet_shards_stream(
+        [_bundle_with_embedded_config(501)],
+        in_dir,
+        shard_size=1,
+        compression="zstd",
+    )
+
+    lineage_dir = in_dir / "shard_00000" / "lineage"
+    lineage_dir.mkdir()
+    outside_path = tmp_path / "outside.txt"
+    outside_path.write_text("sentinel\n", encoding="utf-8")
+    try:
+        (lineage_dir / "escape.txt").symlink_to(outside_path)
+    except OSError:
+        pytest.skip("symlinks unavailable in this environment")
+
+    monkeypatch.setattr(
+        "dagzoo.filtering.deferred_filter.apply_extra_trees_filter",
+        lambda *_args, **_kwargs: (True, {"wins_ratio": 1.0, "n_valid_oob": 128}),
+    )
+
+    with pytest.raises(RuntimeError, match="must not be a symlink"):
+        _ = run_deferred_filter(in_dir=in_dir, out_dir=out_dir, curated_out_dir=curated_out)

@@ -10,6 +10,30 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.6.3] - 2026-03-09
+
+### Changed
+
+- Deferred filter replay now streams packed shard inputs dataset-by-dataset
+  instead of materializing whole shard tables in Python memory, writes curated
+  accepted-only shards incrementally, and validates packed split ordering and
+  coverage during replay.
+- Deferred filter now refuses stale `--out` manifest/summary directories from a
+  prior run and rejects symlinked lineage entries when copying curated shard
+  lineage artifacts.
+- Canonical fixed-layout classification preparation now caches the first valid
+  retry attempt per dataset for the requested run so singleton retry fallback
+  can skip already-proven invalid attempts without changing emitted metadata or
+  dataset artifact layout.
+- Removed several runtime-unused private helper paths and duplicate scalar
+  implementations across random functions, postprocess aliases, node pipeline,
+  converters, and sampling helpers to keep the active execution surface smaller
+  and easier to interpret.
+- Test execution now relies on the installed package layout instead of
+  force-inserting `src/` onto `sys.path`, and CI now runs a Python `3.13` /
+  `3.14` matrix with a `vulture` dead-code check plus manual `workflow_dispatch`
+  support.
+
 ## [0.6.2] - 2026-03-08
 
 ### Changed

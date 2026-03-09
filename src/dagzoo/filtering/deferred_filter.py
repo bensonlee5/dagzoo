@@ -2,28 +2,27 @@
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping
+from collections import Counter
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
 import shutil
 import time
-from typing import Any
+from typing import Any, TextIO
 
 from dagzoo.config import FilterConfig, GeneratorConfig
 from dagzoo.filtering.extra_trees_filter import apply_extra_trees_filter
+from dagzoo.io.parquet_writer import _build_split_table
 from dagzoo.math_utils import sanitize_json as _sanitize_json
 from dagzoo.rng import SEED32_MAX, SEED32_MIN
 
 try:
     import pyarrow as pa
-    import pyarrow.compute as pc
     import pyarrow.parquet as pq
 except Exception:  # pragma: no cover - optional dependency
     pa = None
-    pc = None
     pq = None
 
 import numpy as np
@@ -50,19 +49,29 @@ class DeferredFilterRunResult:
 
 
 @dataclass(slots=True)
-class _ShardState:
-    """Loaded shard artifacts required for deferred filter replay."""
+class _PackedSplitDataset:
+    """One dataset worth of packed parquet rows for a single split."""
+
+    dataset_index: int
+    x: np.ndarray
+    y: np.ndarray
+
+
+@dataclass(slots=True)
+class _CuratedShardWriter:
+    """Incremental writer state for one curated accepted-only shard."""
 
     shard_dir: Path
-    metadata_records: list[dict[str, Any]]
-    train_table: Any
-    test_table: Any
-    train_rows_by_dataset: dict[int, tuple[np.ndarray, np.ndarray]]
-    test_rows_by_dataset: dict[int, tuple[np.ndarray, np.ndarray]]
+    train_path: Path
+    test_path: Path
+    metadata_path: Path
+    train_writer: Any | None = None
+    test_writer: Any | None = None
+    metadata_file: TextIO | None = None
 
 
 def _require_pyarrow() -> None:
-    if pa is None or pc is None or pq is None:
+    if pa is None or pq is None:
         raise RuntimeError(
             "pyarrow is required for deferred filtering. Install project dependencies with uv."
         )
@@ -85,85 +94,134 @@ def _discover_shard_dirs(input_path: Path) -> list[Path]:
     )
 
 
-def _load_metadata_records(path: Path) -> list[dict[str, Any]]:
-    """Read metadata.ndjson records for one shard."""
+def _ensure_filter_output_dir_safe(out_dir: Path) -> None:
+    """Fail fast when deferred-filter output already contains prior artifacts."""
 
-    records: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        payload = json.loads(line)
-        if not isinstance(payload, dict):
-            raise ValueError(
-                f"Invalid metadata record in {path}: expected object, got {type(payload)}"
-            )
-        records.append(payload)
-    return records
+    if not out_dir.exists():
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return
 
+    stale_paths = [out_dir / MANIFEST_FILENAME, out_dir / SUMMARY_FILENAME]
+    stale = next((path for path in stale_paths if path.exists()), None)
+    if stale is not None:
+        raise RuntimeError(
+            f"Deferred filter output directory already contains prior artifacts: {out_dir}. "
+            f"Remove {stale.name} or choose a new --out directory."
+        )
 
-def _rows_by_dataset(table: Any, *, split_path: Path) -> dict[int, tuple[np.ndarray, np.ndarray]]:
-    """Reconstruct per-dataset split arrays from packed parquet rows."""
-
-    dataset_indices = table.column("dataset_index").to_pylist()
-    row_indices = table.column("row_index").to_pylist()
-    x_rows = table.column("x").to_pylist()
-    y_rows = table.column("y").to_pylist()
-
-    grouped: dict[int, list[tuple[int, Any, Any]]] = defaultdict(list)
-    for dataset_index, row_index, x_row, y_row in zip(
-        dataset_indices,
-        row_indices,
-        x_rows,
-        y_rows,
-        strict=True,
-    ):
-        grouped[int(dataset_index)].append((int(row_index), x_row, y_row))
-
-    result: dict[int, tuple[np.ndarray, np.ndarray]] = {}
-    for dataset_index, rows in grouped.items():
-        rows.sort(key=lambda item: item[0])
-        x_np = np.asarray([item[1] for item in rows], dtype=np.float32)
-        y_np = np.asarray([item[2] for item in rows])
-        if x_np.ndim != 2:
-            raise ValueError(
-                "Invalid packed feature shape while replaying deferred filter: "
-                f"split={split_path} dataset_index={dataset_index} shape={x_np.shape}"
-            )
-        if y_np.ndim != 1:
-            y_np = np.asarray(y_np).reshape(-1)
-        result[dataset_index] = (x_np, y_np)
-
-    return result
+    out_dir.mkdir(parents=True, exist_ok=True)
 
 
-def _load_shard_state(shard_dir: Path) -> _ShardState:
-    """Load one shard's parquet + metadata artifacts for deferred replay."""
+def _iter_metadata_records(path: Path) -> Iterator[dict[str, Any]]:
+    """Yield metadata.ndjson records for one shard."""
+
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                raise ValueError(
+                    "Invalid metadata record in "
+                    f"{path}:{line_number}: expected object, got {type(payload)}"
+                )
+            yield payload
+
+
+def _build_packed_split_dataset(
+    *,
+    dataset_index: int,
+    x_rows: list[Any],
+    y_rows: list[Any],
+    split_path: Path,
+) -> _PackedSplitDataset:
+    """Convert one accumulated packed split group into NumPy arrays."""
+
+    x_np = np.asarray(x_rows, dtype=np.float32)
+    y_np = np.asarray(y_rows)
+    if x_np.ndim != 2:
+        raise ValueError(
+            "Invalid packed feature shape while replaying deferred filter: "
+            f"split={split_path} dataset_index={dataset_index} shape={x_np.shape}"
+        )
+    if y_np.ndim != 1:
+        y_np = np.asarray(y_np).reshape(-1)
+    return _PackedSplitDataset(dataset_index=dataset_index, x=x_np, y=y_np)
+
+
+def _iter_packed_split_datasets(split_path: Path) -> Iterator[_PackedSplitDataset]:
+    """Yield packed split rows one dataset at a time, validating shard ordering."""
 
     _require_pyarrow()
 
-    metadata_path = shard_dir / "metadata.ndjson"
-    train_path = shard_dir / "train.parquet"
-    test_path = shard_dir / "test.parquet"
-
-    if not metadata_path.exists() or not train_path.exists() or not test_path.exists():
-        raise FileNotFoundError(
-            "Shard directory is missing required artifacts "
-            "(metadata.ndjson/train.parquet/test.parquet): "
-            f"{shard_dir}"
+    parquet_file = pq.ParquetFile(split_path)
+    required_columns = {"dataset_index", "row_index", "x", "y"}
+    missing_columns = sorted(required_columns.difference(parquet_file.schema_arrow.names))
+    if missing_columns:
+        raise ValueError(
+            f"Packed split is missing required columns in {split_path}: {missing_columns}"
         )
 
-    metadata_records = _load_metadata_records(metadata_path)
-    train_table = pq.read_table(train_path, columns=["dataset_index", "row_index", "x", "y"])
-    test_table = pq.read_table(test_path, columns=["dataset_index", "row_index", "x", "y"])
+    current_dataset_index: int | None = None
+    expected_row_index = 0
+    x_rows: list[Any] = []
+    y_rows: list[Any] = []
 
-    return _ShardState(
-        shard_dir=shard_dir,
-        metadata_records=metadata_records,
-        train_table=train_table,
-        test_table=test_table,
-        train_rows_by_dataset=_rows_by_dataset(train_table, split_path=train_path),
-        test_rows_by_dataset=_rows_by_dataset(test_table, split_path=test_path),
-    )
+    for batch in parquet_file.iter_batches(columns=["dataset_index", "row_index", "x", "y"]):
+        dataset_indices = batch.column(0).to_pylist()
+        row_indices = batch.column(1).to_pylist()
+        batch_x_rows = batch.column(2).to_pylist()
+        batch_y_rows = batch.column(3).to_pylist()
+
+        for dataset_index_raw, row_index_raw, x_row, y_row in zip(
+            dataset_indices,
+            row_indices,
+            batch_x_rows,
+            batch_y_rows,
+            strict=True,
+        ):
+            dataset_index = int(dataset_index_raw)
+            row_index = int(row_index_raw)
+
+            if current_dataset_index is None:
+                current_dataset_index = dataset_index
+                expected_row_index = 0
+            elif dataset_index < current_dataset_index:
+                raise ValueError(
+                    "Packed split rows must be grouped by monotonically increasing dataset_index: "
+                    f"split={split_path} saw dataset_index={dataset_index} after "
+                    f"{current_dataset_index}"
+                )
+            elif dataset_index != current_dataset_index:
+                yield _build_packed_split_dataset(
+                    dataset_index=current_dataset_index,
+                    x_rows=x_rows,
+                    y_rows=y_rows,
+                    split_path=split_path,
+                )
+                current_dataset_index = dataset_index
+                expected_row_index = 0
+                x_rows = []
+                y_rows = []
+
+            if row_index != expected_row_index:
+                raise ValueError(
+                    "Packed split rows must have contiguous row_index values starting at 0: "
+                    f"split={split_path} dataset_index={dataset_index} "
+                    f"expected_row_index={expected_row_index} got={row_index}"
+                )
+
+            x_rows.append(x_row)
+            y_rows.append(y_row)
+            expected_row_index += 1
+
+    if current_dataset_index is not None:
+        yield _build_packed_split_dataset(
+            dataset_index=current_dataset_index,
+            x_rows=x_rows,
+            y_rows=y_rows,
+            split_path=split_path,
+        )
 
 
 def _coerce_seed(raw_seed: object, *, dataset_index: int) -> int:
@@ -316,60 +374,215 @@ def _ensure_curated_output_dir_safe(out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
 
-def _write_metadata_ndjson(path: Path, records: Iterable[dict[str, Any]]) -> None:
-    """Write metadata records to NDJSON with JSON-safe sanitization."""
+def _write_ndjson_record(handle: TextIO, record: Mapping[str, Any]) -> None:
+    """Append one JSON-safe NDJSON record to an already-open handle."""
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(
-                json.dumps(
-                    _sanitize_json(record),
-                    sort_keys=True,
-                    allow_nan=False,
-                )
-            )
-            handle.write("\n")
+    handle.write(
+        json.dumps(
+            _sanitize_json(dict(record)),
+            sort_keys=True,
+            allow_nan=False,
+        )
+    )
+    handle.write("\n")
 
 
-def _filter_table_by_dataset_index(table: Any, dataset_indices: set[int]) -> Any:
-    """Return table rows whose dataset_index is in ``dataset_indices``."""
+def _create_curated_shard_writer(*, curated_out_dir: Path, shard_name: str) -> _CuratedShardWriter:
+    """Initialize incremental writer state for one curated shard."""
 
-    if not dataset_indices:
-        return table.slice(0, 0)
+    shard_dir = curated_out_dir / shard_name
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    return _CuratedShardWriter(
+        shard_dir=shard_dir,
+        train_path=shard_dir / "train.parquet",
+        test_path=shard_dir / "test.parquet",
+        metadata_path=shard_dir / "metadata.ndjson",
+    )
 
-    value_set = pa.array(sorted(dataset_indices), type=pa.int64())
-    mask = pc.is_in(table.column("dataset_index"), value_set=value_set)
-    return table.filter(mask)
+
+def _ensure_curated_metadata_file_open(state: _CuratedShardWriter) -> TextIO:
+    """Return an append-ready metadata handle for a curated shard."""
+
+    metadata_file = state.metadata_file
+    if metadata_file is not None and not metadata_file.closed:
+        return metadata_file
+    opened = state.metadata_path.open("a", encoding="utf-8")
+    state.metadata_file = opened
+    return opened
 
 
-def _write_curated_shard(
+def _ensure_curated_split_writer(
     *,
-    shard_state: _ShardState,
-    curated_out_dir: Path,
-    accepted_dataset_indices: set[int],
-    accepted_records: list[dict[str, Any]],
-) -> int:
-    """Write accepted-only shard artifacts for one source shard."""
+    state: _CuratedShardWriter,
+    split: str,
+    schema: Any,
+    compression: str,
+) -> Any:
+    """Return an append-ready parquet writer for one curated split."""
 
-    if not accepted_dataset_indices:
-        return 0
+    if pq is None:
+        raise RuntimeError(
+            "pyarrow is required for deferred filtering. Install project dependencies with uv."
+        )
 
-    shard_out_dir = curated_out_dir / shard_state.shard_dir.name
-    shard_out_dir.mkdir(parents=True, exist_ok=True)
+    if split == "train":
+        writer = state.train_writer
+        path = state.train_path
+    else:
+        writer = state.test_writer
+        path = state.test_path
 
-    train_table = _filter_table_by_dataset_index(shard_state.train_table, accepted_dataset_indices)
-    test_table = _filter_table_by_dataset_index(shard_state.test_table, accepted_dataset_indices)
+    if writer is None:
+        writer = pq.ParquetWriter(path, schema=schema, compression=compression)
+        if split == "train":
+            state.train_writer = writer
+        else:
+            state.test_writer = writer
+    return writer
 
-    pq.write_table(train_table, shard_out_dir / "train.parquet", compression="zstd")
-    pq.write_table(test_table, shard_out_dir / "test.parquet", compression="zstd")
-    _write_metadata_ndjson(shard_out_dir / "metadata.ndjson", accepted_records)
 
-    source_lineage_dir = shard_state.shard_dir / "lineage"
-    if source_lineage_dir.exists():
-        shutil.copytree(source_lineage_dir, shard_out_dir / "lineage", dirs_exist_ok=True)
+def _write_curated_split(
+    *,
+    state: _CuratedShardWriter,
+    split: str,
+    dataset_index: int,
+    x: np.ndarray,
+    y: np.ndarray,
+    compression: str,
+) -> None:
+    """Append one accepted dataset split into a curated shard parquet file."""
 
-    return len(accepted_records)
+    table = _build_split_table(dataset_index=dataset_index, x=x, y=y)
+    writer = _ensure_curated_split_writer(
+        state=state,
+        split=split,
+        schema=table.schema,
+        compression=compression,
+    )
+    if not table.schema.equals(writer.schema, check_metadata=False):
+        split_path = state.train_path if split == "train" else state.test_path
+        raise ValueError(
+            "Incompatible curated "
+            f"{split} schema in shard output '{split_path}': "
+            f"expected {writer.schema}, got {table.schema} "
+            f"(dataset_index={dataset_index})."
+        )
+    writer.write_table(table)
+
+
+def _write_curated_dataset(
+    *,
+    state: _CuratedShardWriter,
+    dataset_index: int,
+    train_split: _PackedSplitDataset,
+    test_split: _PackedSplitDataset,
+    record: Mapping[str, Any],
+) -> None:
+    """Append one accepted dataset to curated shard outputs."""
+
+    _write_curated_split(
+        state=state,
+        split="train",
+        dataset_index=dataset_index,
+        x=train_split.x,
+        y=train_split.y,
+        compression="zstd",
+    )
+    _write_curated_split(
+        state=state,
+        split="test",
+        dataset_index=dataset_index,
+        x=test_split.x,
+        y=test_split.y,
+        compression="zstd",
+    )
+    metadata_file = _ensure_curated_metadata_file_open(state)
+    _write_ndjson_record(metadata_file, record)
+
+
+def _close_curated_shard_writer(state: _CuratedShardWriter | None) -> None:
+    """Close open parquet and metadata handles for one curated shard."""
+
+    if state is None:
+        return
+
+    train_writer = state.train_writer
+    if train_writer is not None:
+        train_writer.close()
+        state.train_writer = None
+
+    test_writer = state.test_writer
+    if test_writer is not None:
+        test_writer.close()
+        state.test_writer = None
+
+    metadata_file = state.metadata_file
+    if metadata_file is not None:
+        metadata_file.close()
+        state.metadata_file = None
+
+
+def _copy_lineage_tree_safe(*, source_dir: Path, dest_dir: Path) -> None:
+    """Copy lineage artifacts without following symlinks."""
+
+    if source_dir.is_symlink():
+        raise RuntimeError(f"Lineage directory must not be a symlink: {source_dir}")
+
+    for source_path in sorted(source_dir.rglob("*")):
+        rel_path = source_path.relative_to(source_dir)
+        dest_path = dest_dir / rel_path
+        if source_path.is_symlink():
+            raise RuntimeError(f"Lineage artifact must not be a symlink: {source_path}")
+        if source_path.is_dir():
+            dest_path.mkdir(parents=True, exist_ok=True)
+            continue
+        if source_path.is_file():
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, dest_path)
+            continue
+        raise RuntimeError(f"Unsupported lineage artifact entry: {source_path}")
+
+
+def _consume_expected_split(
+    split_iter: Iterator[_PackedSplitDataset],
+    *,
+    expected_dataset_index: int,
+    split_path: Path,
+) -> _PackedSplitDataset:
+    """Consume the next packed split group and validate dataset alignment."""
+
+    try:
+        split_dataset = next(split_iter)
+    except StopIteration as exc:
+        raise ValueError(
+            "Missing packed split rows for deferred filtering: "
+            f"split={split_path} dataset_index={expected_dataset_index}"
+        ) from exc
+
+    if split_dataset.dataset_index != expected_dataset_index:
+        raise ValueError(
+            "Packed split coverage mismatch for deferred filtering: "
+            f"split={split_path} expected dataset_index={expected_dataset_index} "
+            f"got={split_dataset.dataset_index}"
+        )
+    return split_dataset
+
+
+def _ensure_split_iter_exhausted(
+    split_iter: Iterator[_PackedSplitDataset],
+    *,
+    split_path: Path,
+) -> None:
+    """Ensure a packed split iterator has no extra dataset groups beyond metadata."""
+
+    try:
+        extra_split = next(split_iter)
+    except StopIteration:
+        return
+    raise ValueError(
+        "Packed split contains extra dataset rows beyond metadata coverage: "
+        f"split={split_path} dataset_index={extra_split.dataset_index}"
+    )
 
 
 def run_deferred_filter(
@@ -386,7 +599,7 @@ def run_deferred_filter(
 
     input_path = Path(in_dir)
     output_path = Path(out_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
+    _ensure_filter_output_dir_safe(output_path)
 
     curated_path: Path | None = None
     if curated_out_dir is not None:
@@ -395,7 +608,6 @@ def run_deferred_filter(
 
     shard_dirs = _discover_shard_dirs(input_path)
 
-    manifest_records: list[dict[str, Any]] = []
     rejected_reason_counts: Counter[str] = Counter()
 
     accepted_total = 0
@@ -403,101 +615,150 @@ def run_deferred_filter(
     total_elapsed_seconds = 0.0
     curated_accepted_total = 0
 
-    for shard_dir in shard_dirs:
-        shard_state = _load_shard_state(shard_dir)
+    manifest_path = output_path / MANIFEST_FILENAME
+    summary_path = output_path / SUMMARY_FILENAME
 
-        accepted_dataset_indices: set[int] = set()
-        accepted_records: list[dict[str, Any]] = []
-
-        for record in shard_state.metadata_records:
-            dataset_index_raw = record.get("dataset_index")
-            if dataset_index_raw is None or isinstance(dataset_index_raw, bool):
-                raise ValueError(
-                    "Invalid dataset_index in metadata record: "
-                    f"shard={shard_dir} dataset_index={dataset_index_raw!r}"
+    with manifest_path.open("w", encoding="utf-8") as manifest_file:
+        for shard_dir in shard_dirs:
+            metadata_path = shard_dir / "metadata.ndjson"
+            train_path = shard_dir / "train.parquet"
+            test_path = shard_dir / "test.parquet"
+            if not metadata_path.exists() or not train_path.exists() or not test_path.exists():
+                raise FileNotFoundError(
+                    "Shard directory is missing required artifacts "
+                    "(metadata.ndjson/train.parquet/test.parquet): "
+                    f"{shard_dir}"
                 )
+
+            train_iter = _iter_packed_split_datasets(train_path)
+            test_iter = _iter_packed_split_datasets(test_path)
+            last_dataset_index = -1
+            curated_writer: _CuratedShardWriter | None = None
+            curated_written = 0
+
             try:
-                dataset_index = int(dataset_index_raw)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    "Invalid dataset_index in metadata record: "
-                    f"shard={shard_dir} dataset_index={dataset_index_raw!r}"
-                ) from exc
+                for record in _iter_metadata_records(metadata_path):
+                    dataset_index_raw = record.get("dataset_index")
+                    if dataset_index_raw is None or isinstance(dataset_index_raw, bool):
+                        raise ValueError(
+                            "Invalid dataset_index in metadata record: "
+                            f"shard={shard_dir} dataset_index={dataset_index_raw!r}"
+                        )
+                    try:
+                        dataset_index = int(dataset_index_raw)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            "Invalid dataset_index in metadata record: "
+                            f"shard={shard_dir} dataset_index={dataset_index_raw!r}"
+                        ) from exc
 
-            metadata_payload = record.get("metadata")
-            if not isinstance(metadata_payload, Mapping):
-                raise ValueError(
-                    "Invalid metadata payload for deferred filtering: "
-                    f"shard={shard_dir} dataset_index={dataset_index}"
-                )
+                    if dataset_index <= last_dataset_index:
+                        raise ValueError(
+                            "Metadata records must use strictly increasing dataset_index values: "
+                            f"shard={shard_dir} dataset_index={dataset_index}"
+                        )
+                    last_dataset_index = dataset_index
 
-            train_split = shard_state.train_rows_by_dataset.get(dataset_index)
-            test_split = shard_state.test_rows_by_dataset.get(dataset_index)
-            if train_split is None or test_split is None:
-                raise ValueError(
-                    "Missing packed split rows for deferred filtering: "
-                    f"shard={shard_dir} dataset_index={dataset_index}"
-                )
+                    metadata_payload = record.get("metadata")
+                    if not isinstance(metadata_payload, Mapping):
+                        raise ValueError(
+                            "Invalid metadata payload for deferred filtering: "
+                            f"shard={shard_dir} dataset_index={dataset_index}"
+                        )
 
-            task, filter_cfg = _resolve_task_and_filter_config(
-                metadata_payload=metadata_payload,
-                fallback_config=config,
-                n_jobs_override=n_jobs_override,
-            )
-            seed = _resolve_filter_seed(metadata_payload, dataset_index=dataset_index)
+                    train_split = _consume_expected_split(
+                        train_iter,
+                        expected_dataset_index=dataset_index,
+                        split_path=train_path,
+                    )
+                    test_split = _consume_expected_split(
+                        test_iter,
+                        expected_dataset_index=dataset_index,
+                        split_path=test_path,
+                    )
 
-            accepted, filter_details, elapsed_seconds = _filter_dataset(
-                x_train=train_split[0],
-                y_train=train_split[1],
-                x_test=test_split[0],
-                y_test=test_split[1],
-                task=task,
-                seed=seed,
-                filter_cfg=filter_cfg,
-            )
-            total_elapsed_seconds += elapsed_seconds
+                    task, filter_cfg = _resolve_task_and_filter_config(
+                        metadata_payload=metadata_payload,
+                        fallback_config=config,
+                        n_jobs_override=n_jobs_override,
+                    )
+                    seed = _resolve_filter_seed(metadata_payload, dataset_index=dataset_index)
 
-            filter_metadata = _build_filter_metadata(
-                existing_filter=metadata_payload.get("filter"),
-                accepted=accepted,
-                filter_details=filter_details,
-            )
+                    accepted, filter_details, elapsed_seconds = _filter_dataset(
+                        x_train=train_split.x,
+                        y_train=train_split.y,
+                        x_test=test_split.x,
+                        y_test=test_split.y,
+                        task=task,
+                        seed=seed,
+                        filter_cfg=filter_cfg,
+                    )
+                    total_elapsed_seconds += elapsed_seconds
 
-            normalized_record = dict(record)
-            normalized_metadata = dict(metadata_payload)
-            normalized_metadata["filter"] = filter_metadata
-            normalized_record["metadata"] = normalized_metadata
+                    filter_metadata = _build_filter_metadata(
+                        existing_filter=metadata_payload.get("filter"),
+                        accepted=accepted,
+                        filter_details=filter_details,
+                    )
 
-            reason_value = filter_details.get("reason")
-            reason = str(reason_value) if isinstance(reason_value, str) and reason_value else None
-            if not accepted:
-                rejected_total += 1
-                rejected_reason_counts[reason or "below_threshold"] += 1
-            else:
-                accepted_total += 1
-                accepted_dataset_indices.add(dataset_index)
-                accepted_records.append(normalized_record)
+                    normalized_record = dict(record)
+                    normalized_metadata = dict(metadata_payload)
+                    normalized_metadata["filter"] = filter_metadata
+                    normalized_record["metadata"] = normalized_metadata
 
-            manifest_records.append(
-                {
-                    "dataset_index": dataset_index,
-                    "seed": seed,
-                    "source_shard": shard_dir.name,
-                    "accepted": bool(accepted),
-                    "status": "accepted" if accepted else "rejected",
-                    "reason": reason,
-                    "elapsed_seconds": float(elapsed_seconds),
-                    "filter": filter_metadata,
-                }
-            )
+                    reason_value = filter_details.get("reason")
+                    reason = (
+                        str(reason_value)
+                        if isinstance(reason_value, str) and reason_value
+                        else None
+                    )
+                    if not accepted:
+                        rejected_total += 1
+                        rejected_reason_counts[reason or "below_threshold"] += 1
+                    else:
+                        accepted_total += 1
+                        if curated_path is not None:
+                            if curated_writer is None:
+                                curated_writer = _create_curated_shard_writer(
+                                    curated_out_dir=curated_path,
+                                    shard_name=shard_dir.name,
+                                )
+                            _write_curated_dataset(
+                                state=curated_writer,
+                                dataset_index=dataset_index,
+                                train_split=train_split,
+                                test_split=test_split,
+                                record=normalized_record,
+                            )
+                            curated_written += 1
 
-        if curated_path is not None:
-            curated_accepted_total += _write_curated_shard(
-                shard_state=shard_state,
-                curated_out_dir=curated_path,
-                accepted_dataset_indices=accepted_dataset_indices,
-                accepted_records=accepted_records,
-            )
+                    _write_ndjson_record(
+                        manifest_file,
+                        {
+                            "dataset_index": dataset_index,
+                            "seed": seed,
+                            "source_shard": shard_dir.name,
+                            "accepted": bool(accepted),
+                            "status": "accepted" if accepted else "rejected",
+                            "reason": reason,
+                            "elapsed_seconds": float(elapsed_seconds),
+                            "filter": filter_metadata,
+                        },
+                    )
+
+                _ensure_split_iter_exhausted(train_iter, split_path=train_path)
+                _ensure_split_iter_exhausted(test_iter, split_path=test_path)
+            finally:
+                _close_curated_shard_writer(curated_writer)
+
+            if curated_writer is not None and curated_written > 0:
+                source_lineage_dir = shard_dir / "lineage"
+                if source_lineage_dir.exists():
+                    _copy_lineage_tree_safe(
+                        source_dir=source_lineage_dir,
+                        dest_dir=curated_writer.shard_dir / "lineage",
+                    )
+                curated_accepted_total += curated_written
 
     total_datasets = accepted_total + rejected_total
     datasets_per_minute = (
@@ -505,11 +766,6 @@ def run_deferred_filter(
         if total_elapsed_seconds > 0.0
         else 0.0
     )
-
-    manifest_path = output_path / MANIFEST_FILENAME
-    summary_path = output_path / SUMMARY_FILENAME
-
-    _write_metadata_ndjson(manifest_path, manifest_records)
 
     summary_payload: dict[str, Any] = {
         "input_dir": str(input_path.resolve()),

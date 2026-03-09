@@ -18,7 +18,6 @@ from dagzoo.core.fixed_layout_plan_types import (
 from dagzoo.core.node_pipeline import (
     ConverterSpec,
     apply_node_pipeline,
-    parse_feature_key,
 )
 import dagzoo.core.node_pipeline as node_pipeline_mod
 from conftest import make_generator as _make_generator
@@ -110,17 +109,6 @@ def test_node_pipeline_sanitizes_non_finite_parent_values(
 
     assert torch.all(torch.isfinite(x))
     assert torch.all(torch.isfinite(ext["v"]))
-
-
-def test_parse_feature_key_accepts_expected_pattern() -> None:
-    assert parse_feature_key("feature_0") == 0
-    assert parse_feature_key("feature_42") == 42
-
-
-def test_parse_feature_key_rejects_unexpected_pattern() -> None:
-    assert parse_feature_key("feature_") is None
-    assert parse_feature_key("feature_name") is None
-    assert parse_feature_key("target") is None
 
 
 def test_node_pipeline_splits_grouped_center_random_fn_converters(

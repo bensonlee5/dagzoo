@@ -10,7 +10,6 @@ from dagzoo.config import (
     validate_class_split_feasibility,
 )
 from dagzoo.core.constants import (
-    NODE_SPEC_SEED_OFFSET,
     SPLIT_PERMUTATION_SEED_OFFSET,
 )
 from dagzoo.core.layout_types import LayoutPlan
@@ -50,12 +49,6 @@ def _attempt_seed(run_seed: int, attempt_index: int) -> int:
     """Derive deterministic per-attempt seed from one run seed."""
 
     return offset_seed32(run_seed, attempt_index)
-
-
-def _node_spec_seed(run_seed: int, node_index: int) -> int:
-    """Derive deterministic per-node spec seed from one run seed."""
-
-    return offset_seed32(run_seed, NODE_SPEC_SEED_OFFSET + node_index)
 
 
 def _split_permutation_seed(run_seed: int, attempt_index: int) -> int:

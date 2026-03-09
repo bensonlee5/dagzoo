@@ -5,8 +5,7 @@ import torch
 
 from dagzoo.config import DatasetConfig
 from dagzoo.postprocess.postprocess import (
-    _clip_and_standardize,
-    _clip_and_standardize_batch,
+    _clip_and_standardize_rows,
     inject_missingness,
     postprocess_dataset,
     postprocess_fixed_schema_batch,
@@ -78,7 +77,7 @@ def test_clip_and_standardize_all_categorical_is_noop() -> None:
     x = torch.randn(48, 6, generator=g)
     feature_types = ["cat"] * x.shape[1]
 
-    out = _clip_and_standardize(x, feature_types)
+    out = _clip_and_standardize_rows(x, feature_types)
 
     torch.testing.assert_close(out, x)
 
@@ -88,7 +87,7 @@ def test_clip_and_standardize_preserves_categorical_columns() -> None:
     x = torch.randn(64, 5, generator=g)
     feature_types = ["cat", "num", "cat", "num", "num"]
 
-    out = _clip_and_standardize(x, feature_types)
+    out = _clip_and_standardize_rows(x, feature_types)
 
     torch.testing.assert_close(out[:, 0], x[:, 0])
     torch.testing.assert_close(out[:, 2], x[:, 2])
@@ -99,7 +98,7 @@ def test_clip_and_standardize_matches_loop_reference_for_mixed_types() -> None:
     x = torch.randn(192, 7, generator=g)
     feature_types = ["num", "cat", "num", "num", "cat", "num", "cat"]
 
-    out = _clip_and_standardize(x, feature_types)
+    out = _clip_and_standardize_rows(x, feature_types)
     ref = _clip_and_standardize_reference_loop(x, feature_types)
 
     torch.testing.assert_close(out, ref)
@@ -110,8 +109,8 @@ def test_clip_and_standardize_batch_matches_scalar_helper() -> None:
     x = torch.randn(3, 96, 6, generator=g)
     feature_types = ["num", "cat", "num", "num", "cat", "num"]
 
-    out = _clip_and_standardize_batch(x, feature_types)
-    ref = torch.stack([_clip_and_standardize(batch, feature_types) for batch in x], dim=0)
+    out = _clip_and_standardize_rows(x, feature_types)
+    ref = torch.stack([_clip_and_standardize_rows(batch, feature_types) for batch in x], dim=0)
 
     torch.testing.assert_close(out, ref)
 

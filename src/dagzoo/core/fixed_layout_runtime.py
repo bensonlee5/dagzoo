@@ -68,6 +68,7 @@ class CanonicalFixedLayoutRun:
     requested_device: str
     resolved_device: str
     batch_size: int
+    classification_attempt_plan: tuple[int, ...] | None = None
 
 
 @dataclass(slots=True)
@@ -75,8 +76,9 @@ class _NoiseRuntimeGroup:
     """One chunk subgroup that shares the same raw noise sampling contract."""
 
     chunk_offsets: list[int]
-    data_seeds: list[int]
+    generation_seeds: list[int]
     selection: NoiseRuntimeSelection
+    attempt: int
 
 
 @dataclass(slots=True)
@@ -85,6 +87,7 @@ class _GroupedRawBatch:
 
     chunk_offsets: list[int]
     selection: NoiseRuntimeSelection
+    attempt: int
     x_batch: torch.Tensor
     y_batch: torch.Tensor
     aux_meta_batch: list[dict[str, Any]]
@@ -123,23 +126,37 @@ def _group_noise_runtime_chunk(
     config: GeneratorConfig,
     *,
     dataset_seeds: list[int],
+    attempts: list[int] | None = None,
 ) -> list[_NoiseRuntimeGroup]:
-    grouped: dict[tuple[str, float, float], _NoiseRuntimeGroup] = {}
-    ordered_keys: list[tuple[str, float, float]] = []
-    for chunk_offset, dataset_seed in enumerate(dataset_seeds):
+    effective_attempts = attempts or [0] * len(dataset_seeds)
+    if len(effective_attempts) != len(dataset_seeds):
+        raise ValueError(
+            "Fixed-layout attempt plan length must match chunk dataset count: "
+            f"dataset_seeds={len(dataset_seeds)} attempts={len(effective_attempts)}"
+        )
+
+    grouped: dict[tuple[str, float, float, int], _NoiseRuntimeGroup] = {}
+    ordered_keys: list[tuple[str, float, float, int]] = []
+    for chunk_offset, (dataset_seed, attempt) in enumerate(
+        zip(dataset_seeds, effective_attempts, strict=True)
+    ):
+        if attempt < 0:
+            raise ValueError(f"Fixed-layout attempt plan entries must be >= 0, got {attempt}.")
         data_seed = SeedManager(dataset_seed).child("data")
         selection = _resolve_noise_runtime_selection(config, run_seed=data_seed)
-        key = _noise_runtime_selection_key(selection)
+        generation_seed = _attempt_seed(data_seed, int(attempt))
+        key = _noise_runtime_selection_key(selection) + (int(attempt),)
         if key not in grouped:
             grouped[key] = _NoiseRuntimeGroup(
                 chunk_offsets=[],
-                data_seeds=[],
+                generation_seeds=[],
                 selection=selection,
+                attempt=int(attempt),
             )
             ordered_keys.append(key)
         group = grouped[key]
         group.chunk_offsets.append(int(chunk_offset))
-        group.data_seeds.append(int(data_seed))
+        group.generation_seeds.append(int(generation_seed))
     return [grouped[key] for key in ordered_keys]
 
 
@@ -166,7 +183,7 @@ def _generate_grouped_raw_batches(
             config,
             layout,
             execution_plan=execution_plan,
-            dataset_seeds=group.data_seeds,
+            dataset_seeds=group.generation_seeds,
             requested_device=requested_device,
             resolved_device=resolved_device,
             noise_sigma_multiplier=noise_sigma_multiplier,
@@ -176,6 +193,7 @@ def _generate_grouped_raw_batches(
             _GroupedRawBatch(
                 chunk_offsets=list(group.chunk_offsets),
                 selection=group.selection,
+                attempt=int(group.attempt),
                 x_batch=x_batch,
                 y_batch=y_batch,
                 aux_meta_batch=aux_meta_batch,
@@ -271,6 +289,7 @@ def prepare_canonical_fixed_layout_run(
     base_plan_seed = offset_seed32(run_seed, FIXED_LAYOUT_PLAN_SEED_OFFSET)
     attempts = max(1, int(realized_config.filter.max_attempts))
     last_error = "unknown"
+    classification_attempt_plan: tuple[int, ...] | None = None
     for attempt in range(attempts):
         candidate_seed = _attempt_seed(base_plan_seed, attempt)
         plan = (
@@ -295,7 +314,7 @@ def prepare_canonical_fixed_layout_run(
         )
         if str(realized_config.dataset.task) != "classification":
             break
-        if _fixed_layout_plan_supports_classification_run(
+        attempt_plan = _fixed_layout_plan_classification_attempt_plan(
             realized_config,
             plan=plan,
             requested_device=requested_device,
@@ -303,7 +322,9 @@ def prepare_canonical_fixed_layout_run(
             run_seed=run_seed,
             num_datasets=max(1, int(num_datasets)),
             batch_size=effective_batch_size,
-        ):
+        )
+        if attempt_plan is not None:
+            classification_attempt_plan = attempt_plan
             break
         last_error = "invalid_class_split"
         if attempt == attempts - 1:
@@ -323,6 +344,7 @@ def prepare_canonical_fixed_layout_run(
         requested_device=str(requested_device),
         resolved_device=str(resolved_device),
         batch_size=int(effective_batch_size),
+        classification_attempt_plan=classification_attempt_plan,
     )
 
 
@@ -387,15 +409,16 @@ def _raw_classification_labels_support_split(
     return _classification_split_valid(labels[train_idx_cpu], labels[test_idx_cpu])
 
 
-def _fixed_layout_dataset_supports_classification_replay(
+def _first_valid_classification_attempt_for_dataset(
     config: GeneratorConfig,
     *,
     plan: _FixedLayoutPlan,
     dataset_seed: int,
     requested_device: str,
     resolved_device: str,
-) -> bool:
-    """Return whether one dataset seed can replay under one fixed-layout plan."""
+    start_attempt: int = 0,
+) -> int | None:
+    """Return the first valid replay attempt for one dataset seed, if any."""
 
     data_seed = SeedManager(dataset_seed).child("data")
     shift_params = resolve_shift_runtime_params(config)
@@ -403,7 +426,7 @@ def _fixed_layout_dataset_supports_classification_replay(
     noise_spec = _noise_sampling_spec(noise_runtime_selection)
     attempts = max(1, int(config.filter.max_attempts))
 
-    for attempt in range(attempts):
+    for attempt in range(max(0, int(start_attempt)), attempts):
         y_batch, _aux_meta_batch, _effective_resolved_device, _device_fallback_reason = (
             _generate_fixed_layout_label_batch_with_fallback(
                 config,
@@ -422,11 +445,11 @@ def _fixed_layout_dataset_supports_classification_replay(
             attempt=attempt,
             n_train=int(plan.n_train),
         ):
-            return True
-    return False
+            return int(attempt)
+    return None
 
 
-def _fixed_layout_plan_supports_classification_run(
+def _fixed_layout_plan_classification_attempt_plan(
     config: GeneratorConfig,
     *,
     plan: _FixedLayoutPlan,
@@ -435,13 +458,14 @@ def _fixed_layout_plan_supports_classification_run(
     run_seed: int,
     num_datasets: int = 1,
     batch_size: int = 1,
-) -> bool:
-    """Return whether a classification plan can replay for the full requested run."""
+) -> tuple[int, ...] | None:
+    """Return the first-valid attempt per dataset for a replayable classification run."""
 
     manager = SeedManager(run_seed)
     shift_params = resolve_shift_runtime_params(config)
     effective_batch_size = max(1, int(batch_size))
     dataset_index = 0
+    attempt_plan: list[int] = []
     while dataset_index < num_datasets:
         chunk_size = min(effective_batch_size, num_datasets - dataset_index)
         dataset_seeds = [
@@ -459,7 +483,7 @@ def _fixed_layout_plan_supports_classification_run(
                     config,
                     plan.layout,
                     execution_plan=plan.execution_plan,
-                    dataset_seeds=group.data_seeds,
+                    dataset_seeds=group.generation_seeds,
                     requested_device=requested_device,
                     resolved_device=resolved_device,
                     noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
@@ -479,17 +503,47 @@ def _fixed_layout_plan_supports_classification_run(
                 attempt=0,
                 n_train=int(plan.n_train),
             ):
+                attempt_plan.append(0)
                 continue
-            if not _fixed_layout_dataset_supports_classification_replay(
+            replay_attempt = _first_valid_classification_attempt_for_dataset(
                 config,
                 plan=plan,
                 dataset_seed=dataset_seed,
                 requested_device=requested_device,
                 resolved_device=resolved_device,
-            ):
-                return False
+                start_attempt=1,
+            )
+            if replay_attempt is None:
+                return None
+            attempt_plan.append(int(replay_attempt))
         dataset_index += chunk_size
-    return True
+    return tuple(attempt_plan)
+
+
+def _fixed_layout_plan_supports_classification_run(
+    config: GeneratorConfig,
+    *,
+    plan: _FixedLayoutPlan,
+    requested_device: str,
+    resolved_device: str,
+    run_seed: int,
+    num_datasets: int = 1,
+    batch_size: int = 1,
+) -> bool:
+    """Return whether a classification plan can replay for the full requested run."""
+
+    return (
+        _fixed_layout_plan_classification_attempt_plan(
+            config,
+            plan=plan,
+            requested_device=requested_device,
+            resolved_device=resolved_device,
+            run_seed=run_seed,
+            num_datasets=num_datasets,
+            batch_size=batch_size,
+        )
+        is not None
+    )
 
 
 def _fixed_layout_plan_supports_classification_replay(
@@ -567,6 +621,7 @@ def _generate_fixed_layout_bundle_with_retries(
     requested_device: str,
     resolved_device: str,
     preserve_feature_schema: bool,
+    start_attempt: int = 0,
 ) -> DatasetBundle:
     data_seed = SeedManager(dataset_seed).child("data")
     shift_params = resolve_shift_runtime_params(config)
@@ -574,9 +629,15 @@ def _generate_fixed_layout_bundle_with_retries(
     noise_spec = _noise_sampling_spec(noise_runtime_selection)
     dtype = _torch_dtype(config)
     attempts = max(1, int(config.filter.max_attempts))
+    initial_attempt = max(0, int(start_attempt))
+    if initial_attempt >= attempts:
+        raise ValueError(
+            "Fixed-layout retry start attempt exceeds configured retry budget: "
+            f"start_attempt={initial_attempt} max_attempts={attempts}."
+        )
     last_error: str = "unknown"
 
-    for attempt in range(attempts):
+    for attempt in range(initial_attempt, attempts):
         (
             x_batch,
             y_batch,
@@ -633,6 +694,7 @@ def _generate_batch_with_plan_iter(
     num_datasets: int,
     seed: int | None = None,
     batch_size: int | None = None,
+    classification_attempt_plan: tuple[int, ...] | None = None,
 ) -> Iterator[DatasetBundle]:
     """Yield datasets for one in-process fixed-layout plan."""
 
@@ -640,6 +702,11 @@ def _generate_batch_with_plan_iter(
         raise ValueError(f"num_datasets must be >= 0, got {num_datasets}")
     if num_datasets == 0:
         return
+    if classification_attempt_plan is not None and len(classification_attempt_plan) != num_datasets:
+        raise ValueError(
+            "Fixed-layout classification attempt plan length must match num_datasets: "
+            f"attempt_plan={len(classification_attempt_plan)} num_datasets={num_datasets}"
+        )
 
     requested_device = str(plan.requested_device)
     validated_resolved_device = str(plan.resolved_device)
@@ -668,6 +735,11 @@ def _generate_batch_with_plan_iter(
         dataset_seeds = [
             manager.child("dataset", dataset_index + offset) for offset in range(chunk_size)
         ]
+        chunk_attempts = (
+            list(classification_attempt_plan[dataset_index : dataset_index + chunk_size])
+            if classification_attempt_plan is not None
+            else [0] * chunk_size
+        )
         grouped_noise_runtime = _group_noise_runtime_chunk(
             config,
             dataset_seeds=dataset_seeds,
@@ -727,6 +799,7 @@ def _generate_batch_with_plan_iter(
                     requested_device=requested_device,
                     resolved_device=validated_resolved_device,
                     preserve_feature_schema=True,
+                    start_attempt=chunk_attempts[offset],
                 )
             _annotate_fixed_layout_metadata(bundle, plan=plan)
             schema = _extract_emitted_schema_signature(bundle)

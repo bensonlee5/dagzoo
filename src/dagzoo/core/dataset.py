@@ -111,6 +111,7 @@ def generate_batch_iter(
             num_datasets=num_datasets,
             seed=prepared.run_seed,
             batch_size=prepared.batch_size,
+            classification_attempt_plan=prepared.classification_attempt_plan,
         )
     ):
         yield _annotate_canonical_batch_metadata(

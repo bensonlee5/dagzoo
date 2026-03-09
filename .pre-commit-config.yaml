@@ -4,13 +4,13 @@ repos:
   hooks:
   - id: ruff-check
     name: ruff check
-    entry: uv run ruff check
+    entry: ./.venv/bin/ruff check
     language: system
     types_or: [python, pyi]
     pass_filenames: true
   - id: ruff-format
     name: ruff format
-    entry: uv run ruff format
+    entry: ./.venv/bin/ruff format
     language: system
     types_or: [python, pyi]
     pass_filenames: true
@@ -22,7 +22,7 @@ repos:
     pass_filenames: false
   - id: mdformat
     name: mdformat
-    entry: uv run mdformat
+    entry: ./.venv/bin/mdformat
     language: system
     types: [markdown]
     exclude: ^(WORKFLOW\.md|docs/transforms.md|site/)

@@ -4,14 +4,10 @@ from __future__ import annotations
 
 import torch
 
-from dagzoo.core.execution_semantics import (
-    _AGGREGATION_KIND_ORDER,
-    sample_multi_source_plan,
-)
+from dagzoo.core.execution_semantics import sample_multi_source_plan
 from dagzoo.core.fixed_layout_batched import FixedLayoutBatchRng, apply_function_plan_batch
 from dagzoo.core.fixed_layout_plan_types import ConcatNodeSource, StackedNodeSource
 from dagzoo.core.layout_types import AggregationKind, MechanismFamily
-from dagzoo.functions._rng_helpers import randint_scalar
 from dagzoo.functions.random_functions import apply_random_function
 from dagzoo.math_utils import sanitize_and_standardize
 from dagzoo.sampling.noise import NoiseSamplingSpec
@@ -33,19 +29,6 @@ def _aggregate_parent_outputs(
     if aggregation_kind == "logsumexp":
         return torch.logsumexp(stacked, dim=1)
     raise ValueError(f"Unknown aggregation kind: {aggregation_kind!r}")
-
-
-def _resolved_aggregation_kind(
-    aggregation_kind: AggregationKind | None,
-    *,
-    generator: torch.Generator,
-) -> AggregationKind:
-    """Resolve the aggregation kind, sampling one when not explicitly provided."""
-
-    if aggregation_kind is not None:
-        return aggregation_kind
-    idx = randint_scalar(0, len(_AGGREGATION_KIND_ORDER), generator)
-    return _AGGREGATION_KIND_ORDER[int(idx)]
 
 
 def _aggregate_incrementally(

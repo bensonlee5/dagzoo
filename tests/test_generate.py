@@ -15,7 +15,6 @@ from dagzoo.config import (
 )
 from dagzoo.core.constants import (
     FIXED_LAYOUT_PLAN_SEED_OFFSET,
-    NODE_SPEC_SEED_OFFSET,
     SPLIT_PERMUTATION_SEED_OFFSET,
 )
 from dagzoo.core.dataset import (
@@ -33,7 +32,7 @@ from dagzoo.core.fixed_layout_runtime import (
     _sample_fixed_layout,
     prepare_canonical_fixed_layout_run,
 )
-from dagzoo.core.generation_context import _attempt_seed, _node_spec_seed, _split_permutation_seed
+from dagzoo.core.generation_context import _attempt_seed, _split_permutation_seed
 from dagzoo.core.generation_runtime import (
     _build_fixed_schema_finalization_context,
     _finalize_generated_chunk_preserve_schema,
@@ -135,11 +134,7 @@ def test_parent_node_indices_reads_parents_from_adjacency_columns() -> None:
 def test_dataset_seed_helpers_match_offset_seed32_formulas() -> None:
     run_seed = 1337
     attempt = 5
-    node_index = 7
     assert _attempt_seed(run_seed, attempt) == offset_seed32(run_seed, attempt)
-    assert _node_spec_seed(run_seed, node_index) == offset_seed32(
-        run_seed, NODE_SPEC_SEED_OFFSET + node_index
-    )
     assert _split_permutation_seed(run_seed, attempt) == offset_seed32(
         run_seed, SPLIT_PERMUTATION_SEED_OFFSET + attempt
     )
@@ -1406,7 +1401,7 @@ def test_fixed_layout_plan_supports_classification_run_groups_mixed_noise_runtim
         lambda *args, **kwargs: True,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout_runtime._fixed_layout_dataset_supports_classification_replay",
+        "dagzoo.core.fixed_layout_runtime._first_valid_classification_attempt_for_dataset",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("per-dataset replay fallback should not run when raw splits validate")
         ),
@@ -1755,7 +1750,7 @@ def test_prepare_canonical_fixed_layout_run_validates_full_classification_run(
         sample_calls.append(int(seed))
         return first_plan if len(sample_calls) == 1 else second_plan
 
-    def _stub_supports_classification_run(
+    def _stub_classification_attempt_plan(
         _config: GeneratorConfig,
         *,
         plan: _FixedLayoutPlan,
@@ -1764,21 +1759,23 @@ def test_prepare_canonical_fixed_layout_run_validates_full_classification_run(
         run_seed: int,
         num_datasets: int = 1,
         batch_size: int = 1,
-    ) -> bool:
+    ) -> tuple[int, ...] | None:
         assert requested_device == "cpu"
         assert resolved_device == "cpu"
         validation_calls.append(
             (int(plan.plan_seed), int(run_seed), int(num_datasets), int(batch_size))
         )
-        return int(plan.plan_seed) == int(second_plan.plan_seed)
+        if int(plan.plan_seed) != int(second_plan.plan_seed):
+            return None
+        return tuple(0 for _ in range(num_datasets))
 
     monkeypatch.setattr(
         "dagzoo.core.fixed_layout_runtime._sample_fixed_layout_candidate",
         _stub_sample_fixed_layout_candidate,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout_runtime._fixed_layout_plan_supports_classification_run",
-        _stub_supports_classification_run,
+        "dagzoo.core.fixed_layout_runtime._fixed_layout_plan_classification_attempt_plan",
+        _stub_classification_attempt_plan,
     )
 
     prepared = prepare_canonical_fixed_layout_run(cfg, num_datasets=10, seed=16, device="cpu")
@@ -1805,6 +1802,7 @@ def test_prepare_canonical_fixed_layout_run_validates_full_classification_run(
         num_datasets=10,
         batch_size=None,
     )
+    assert prepared.classification_attempt_plan == tuple(0 for _ in range(10))
 
 
 def test_prepare_canonical_fixed_layout_run_uses_lightweight_classification_validation(
@@ -1904,6 +1902,201 @@ def test_generate_batch_iter_classification_avoids_midstream_invalid_class_split
         str(batch[0].metadata["layout_plan_signature"])
     }
     assert all(str(bundle.metadata["layout_mode"]) == "fixed" for bundle in batch)
+
+
+def test_generate_batch_with_plan_iter_uses_cached_classification_attempt_plan_for_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "classification"
+    cfg.filter.max_attempts = 3
+    cfg.dataset.n_train = 4
+    cfg.dataset.n_test = 2
+    plan = _FixedLayoutPlan(
+        layout=_layout_stub(
+            feature_types=["num", "num"],
+            graph_nodes=2,
+            adjacency=torch.zeros((2, 2), dtype=torch.bool),
+            feature_node_assignment=[0, 1],
+            target_node_assignment=1,
+        ),
+        requested_device="cpu",
+        resolved_device="cpu",
+        plan_seed=901,
+        n_train=cfg.dataset.n_train,
+        n_test=cfg.dataset.n_test,
+        layout_signature="layout_sig",
+        execution_plan=FixedLayoutExecutionPlan(),
+        plan_signature="plan_sig",
+    )
+    attempt_plan = (2, 0, 1)
+    grouped_attempts_seen: list[list[int]] = []
+    retry_starts: list[int] = []
+
+    def _make_bundle(seed: int) -> DatasetBundle:
+        return DatasetBundle(
+            X_train=torch.zeros((cfg.dataset.n_train, 2), dtype=torch.float32),
+            y_train=torch.zeros(cfg.dataset.n_train, dtype=torch.int64),
+            X_test=torch.zeros((cfg.dataset.n_test, 2), dtype=torch.float32),
+            y_test=torch.zeros(cfg.dataset.n_test, dtype=torch.int64),
+            feature_types=["num", "num"],
+            metadata={
+                "seed": int(seed),
+                "n_features": 2,
+                "lineage": {
+                    "assignments": {
+                        "feature_to_node": [0, 1],
+                        "target_to_node": 1,
+                    }
+                },
+                "filter": {"mode": "deferred", "status": "not_run"},
+                "generation_attempts": {
+                    "total_attempts": 1,
+                    "retry_count": 0,
+                    "filter_attempts": 0,
+                    "filter_rejections": 0,
+                    "filter_rejection_rate": None,
+                },
+            },
+        )
+
+    def _stub_group_noise_runtime_chunk(
+        _config: GeneratorConfig,
+        *,
+        dataset_seeds: list[int],
+        attempts: list[int] | None = None,
+    ):
+        grouped_attempts_seen.append(list(attempts or [0] * len(dataset_seeds)))
+        return [
+            SimpleNamespace(
+                chunk_offsets=list(range(len(dataset_seeds))),
+                generation_seeds=[SeedManager(seed).child("data") for seed in dataset_seeds],
+                selection=NoiseRuntimeSelection(
+                    family_requested="gaussian",
+                    family_sampled="gaussian",
+                    sampling_strategy="dataset_level",
+                    base_scale=1.0,
+                    student_t_df=5.0,
+                    mixture_weights=None,
+                ),
+                attempt=0,
+            )
+        ]
+
+    def _stub_generate_grouped_raw_batches(
+        _config: GeneratorConfig,
+        _layout,
+        *,
+        execution_plan: FixedLayoutExecutionPlan,
+        grouped_noise_runtime,
+        requested_device: str,
+        resolved_device: str,
+        noise_sigma_multiplier: float,
+    ) -> list[SimpleNamespace]:
+        _ = execution_plan
+        _ = requested_device
+        _ = resolved_device
+        _ = noise_sigma_multiplier
+        assert [group.attempt for group in grouped_noise_runtime] == [0]
+        batch_size = len(grouped_noise_runtime[0].chunk_offsets)
+        n_rows = cfg.dataset.n_train + cfg.dataset.n_test
+        return [
+            SimpleNamespace(
+                chunk_offsets=list(grouped_noise_runtime[0].chunk_offsets),
+                selection=grouped_noise_runtime[0].selection,
+                attempt=0,
+                x_batch=torch.zeros((batch_size, n_rows, 2), dtype=torch.float32),
+                y_batch=torch.zeros((batch_size, n_rows), dtype=torch.int64),
+                aux_meta_batch=[{"filter": {"mode": "deferred", "status": "not_run"}}] * batch_size,
+                effective_resolved_device="cpu",
+                device_fallback_reason=None,
+            )
+        ]
+
+    def _stub_finalize_generated_chunk_preserve_schema(
+        _config: GeneratorConfig,
+        _layout,
+        *,
+        context,
+        seeds: list[int],
+        attempt: int,
+        attempts_used: int,
+        device: str,
+        n_train: int,
+        n_test: int,
+        requested_device: str,
+        resolved_device: str,
+        device_fallback_reason: str | None,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        aux_meta_batch: list[dict[str, object]],
+        noise_runtime_selection: NoiseRuntimeSelection,
+        dtype: torch.dtype,
+    ) -> list[DatasetBundle | None]:
+        _ = context
+        _ = device
+        _ = n_train
+        _ = n_test
+        _ = requested_device
+        _ = resolved_device
+        _ = device_fallback_reason
+        _ = x
+        _ = y
+        _ = aux_meta_batch
+        _ = noise_runtime_selection
+        _ = dtype
+        assert attempt == 0
+        assert attempts_used == 1
+        return [None, _make_bundle(seeds[1]), None]
+
+    def _stub_generate_fixed_layout_bundle_with_retries(
+        _config: GeneratorConfig,
+        *,
+        plan: _FixedLayoutPlan,
+        dataset_seed: int,
+        requested_device: str,
+        resolved_device: str,
+        preserve_feature_schema: bool,
+        start_attempt: int = 0,
+    ) -> DatasetBundle:
+        _ = plan
+        _ = requested_device
+        _ = resolved_device
+        _ = preserve_feature_schema
+        retry_starts.append(int(start_attempt))
+        return _make_bundle(dataset_seed)
+
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._group_noise_runtime_chunk",
+        _stub_group_noise_runtime_chunk,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._generate_grouped_raw_batches",
+        _stub_generate_grouped_raw_batches,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._finalize_generated_chunk_preserve_schema",
+        _stub_finalize_generated_chunk_preserve_schema,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._generate_fixed_layout_bundle_with_retries",
+        _stub_generate_fixed_layout_bundle_with_retries,
+    )
+
+    bundles = list(
+        _generate_batch_with_plan_iter(
+            cfg,
+            plan=plan,
+            num_datasets=3,
+            seed=33,
+            batch_size=3,
+            classification_attempt_plan=attempt_plan,
+        )
+    )
+
+    assert len(bundles) == 3
+    assert grouped_attempts_seen == [[0, 0, 0]]
+    assert retry_starts == [2, 1]
 
 
 def test_generate_one_replays_from_emitted_metadata_seed() -> None:
