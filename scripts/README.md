@@ -10,11 +10,11 @@ directly.
   - Verifies local toolchain prerequisites for repo work.
 - `./scripts/dev deps [--scope package|hybrid|full] [--format text|json] [--write-docs] [--check]`
   - Builds the repo dependency graph and can refresh the checked-in docs snapshot.
-- `./scripts/dev impact [--source working-tree|--base <git-ref>] [--files ...] [--format text|json]`
+- `./scripts/dev impact [--source working-tree|staged|base] [--base <git-ref>] [--files ...] [--format text|json]`
   - Classifies changed files and shows dependency-aware downstream impact.
-- `./scripts/dev contract [--source working-tree|--base <git-ref>] [--files ...] [--strict]`
+- `./scripts/dev contract [--source working-tree|staged|base] [--base <git-ref>] [--files ...] [--strict]`
   - Enforces version/changelog expectations for likely user-facing changes.
-- `./scripts/dev verify quick|code|docs|bench|full [--dry-run] [--incremental] [--parallel]`
+- `./scripts/dev verify quick|code|docs|bench|full [--source working-tree|staged|base] [--base <git-ref>] [--files ...] [--dry-run] [--incremental] [--parallel]`
   - Canonical local verification entrypoint for normal code, docs, and benchmark work.
 
 ## Scripts
@@ -57,8 +57,10 @@ directly.
 ```bash
 ./scripts/dev doctor all
 ./scripts/dev impact
+./scripts/dev impact --source staged
 ./scripts/dev impact --files src/dagzoo/core/execution_semantics.py
 ./scripts/dev deps --write-docs
+./scripts/dev contract --source staged
 ./scripts/dev verify quick
 ./scripts/dev verify code --incremental
 ./scripts/dev verify docs

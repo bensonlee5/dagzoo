@@ -62,7 +62,10 @@ not mutate the preset effective config payload.
 per-preset config/device settings for multi-preset runs instead of a shared CLI
 override.
 
-`dagzoo benchmark` currently rejects configs that set `dataset.rows`; benchmark paths still require explicit split sizing (`dataset.n_train`/`dataset.n_test`).
+`dagzoo benchmark` supports `dataset.rows` in preset configs. Standard/full
+suite resolution preserves the rows spec until benchmark orchestration
+realizes one run shape. Smoke suites cap the rows spec before that one-time run
+realization so smoke benchmarks stay within the intended split-size envelope.
 
 ______________________________________________________________________
 
@@ -103,6 +106,11 @@ When benchmark artifact output is enabled (`--out-dir` or default timestamped pa
 - `<artifact_dir>/effective_configs/<preset>_trace.yaml`
 
 If the same preset key appears multiple times in one run, files are suffixed with `_runN`.
+
+Benchmark effective-config artifacts capture the realized per-run config. When
+benchmark resolution starts from `dataset.rows`, the stored effective config
+records the realized `dataset.n_train` / `dataset.n_test` for that run and
+clears `dataset.rows`.
 
 ______________________________________________________________________
 

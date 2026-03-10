@@ -61,7 +61,7 @@ Lower rank means higher priority. Rank `0` is reserved for completed items retai
 | 0    | RD-012     | Noise family diversification for synthetic generation        | implemented | Now       | `#24 -> #25 -> #26 -> #27` (completed)                                                 |
 | 3    | RD-011     | Mechanism family mix expansion (BNN/GP kernels/interactions) | planned     | Next      | `BL-26 -> BL-27 -> BL-28 -> BL-51 -> BL-52 -> BL-29 -> BL-30`                          |
 | 5    | RD-013     | Time-series generation tracks for PFN pretraining            | research    | Next      | `BL-73 -> BL-74 -> BL-75 -> BL-76 -> BL-77`                                            |
-| 6    | RD-014     | Run-time bottleneck observability and telemetry              | research    | Next      | `epic TBD; dependency chain TBD`                                                       |
+| 6    | RD-014     | Run-time bottleneck observability and telemetry              | research    | Next      | `Linear epic not assigned yet; dependency chain not split yet`                         |
 | 7    | RD-007     | Many-class and high-cardinality expansion                    | research    | Next      | `BL-17 -> BL-31 -> (BL-18 -> BL-19 -> BL-20 -> BL-21)`                                 |
 | 8    | RD-005     | Robustness stress profiles (hard-task/adversarial regimes)   | research    | Next      | `BL-48 -> BL-59 -> BL-62 -> BL-61 -> BL-60`                                            |
 | 9    | RD-009     | Parallel/distributed generation and writing                  | research    | Next      | `BL-49 -> BL-63 -> BL-64 -> BL-65 -> BL-66`                                            |
@@ -100,6 +100,7 @@ walkthroughs, see `docs/how-it-works.md`.
 
 - `generate_one(config: GeneratorConfig, *, seed: int | None = None, device: str | None = None) -> DatasetBundle`
 - `generate_batch(config: GeneratorConfig, *, num_datasets: int, seed: int | None = None, device: str | None = None) -> list[DatasetBundle]`
+- `generate_batch_iter(config: GeneratorConfig, *, num_datasets: int, seed: int | None = None, device: str | None = None) -> Iterator[DatasetBundle]`
 - `write_packed_parquet_shards_stream(bundles, out_dir, shard_size, compression="zstd")`
 - `DatasetConfig` missingness controls:
   - `missing_rate`
@@ -112,6 +113,7 @@ walkthroughs, see `docs/how-it-works.md`.
 
 - `dagzoo generate --config ... --num-datasets ... --device cuda --seed ...`
 - `dagzoo generate --missing-rate ... --missing-mechanism ... --missing-mar-observed-fraction ... --missing-mar-logit-scale ... --missing-mnar-logit-scale ...`
+- `dagzoo filter --in <shard_dir> --out <filter_dir> [--curated-out <accepted_shards_dir>]`
 - `dagzoo benchmark --suite standard --preset all --baseline ... --fail-on-regression`
 
 #### Output Contract
@@ -132,7 +134,8 @@ metadata JSON contract, and DAG lineage schema.
 - `configs/preset_lineage_benchmark_smoke.yaml`: CPU smoke benchmark preset for
   lineage export guardrail checks.
 - Runtime currently applies coarse profile-tier overrides from GPU FLOPS lookup
-  and fallback behavior; adaptive autotuning is tracked in RD-010.
+  plus explicit hardware-policy transforms; adaptive autotuning is tracked in
+  RD-010.
 
 ### Module Mapping (Appendix E)
 
@@ -141,7 +144,8 @@ metadata JSON contract, and DAG lineage schema.
 - `core/layout.py`: dataset layout, graph sampling, and node assignments
   (`E.3`, `E.4`)
 - `graph/dag_sampler.py`: latent variable DAG sampling (`E.4`)
-- `core/node_pipeline.py`: per-node flow (`E.5`)
+- `core/fixed_layout_batched.py`: typed plan sampling and batched node execution
+- `core/node_pipeline.py`: isolated node-plan helper used by tests and microbenchmarks
 - `converters/numeric.py`, `converters/categorical.py`: converters (`E.6`)
 - `functions/multi.py`: concatenation vs per-parent aggregation (`E.7`)
 - `functions/random_functions.py`: NN/tree/discretization/GP/linear/quadratic/EM/product (`E.8`)
@@ -420,7 +424,7 @@ metadata JSON contract, and DAG lineage schema.
 - Mission alignment: foundation model pretraining, robustness testing
 - Pillar alignment: hardware-native performance
 - Goal: define and validate an opt-in observability path that attributes wall-time/memory bottlenecks to generation and benchmark stages across CPU/CUDA/MPS runs.
-- GitHub tracking: epic TBD; dependency chain TBD
+- Linear tracking: epic not assigned yet; dependency chain not split yet
 - Repo touchpoints: `src/dagzoo/bench/`, `src/dagzoo/core/dataset.py`, `src/dagzoo/cli.py`, `src/dagzoo/hardware.py`, `docs/`
 - Exit criteria:
   - Bottleneck observability mode is opt-in and backward-compatible (`off` by default).

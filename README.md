@@ -74,11 +74,6 @@ flowchart LR
 - Operationally scalable: canonical fixed-layout generation and benchmark
   guardrails support repeatable high-throughput workflows.
 
-Recommended first reads after this README:
-
-- [How It Works](https://bensonlee5.github.io/dagzoo/docs/how-it-works/): End-to-end runtime model and terminology.
-- [Transforms (Math Reference)](https://bensonlee5.github.io/dagzoo/docs/transforms/): Generation logic - formal transform math, notation, and operator definitions.
-
 ## Quick Start
 
 Examples in this README assume a repo checkout (so `configs/*.yaml` is available):
@@ -159,29 +154,19 @@ Local repo workflow before review:
 - Shift/drift controls: introduces interpretable graph/mechanism/noise drift for robustness and distribution-shift evaluation.
 - Benchmark guardrails: provides repeatable runtime and metadata checks for local validation and CI-style regression gating.
 
-## Documentation (End Users)
+## Documentation
 
 Primary docs site:
 
 - [https://bensonlee5.github.io/dagzoo/docs/](https://bensonlee5.github.io/dagzoo/docs/)
 
-Next reads for end users:
+Start here for end-user workflows and contracts:
 
 - [How It Works](https://bensonlee5.github.io/dagzoo/docs/how-it-works/): System flow and terminology.
 - [Transforms (Math Reference)](https://bensonlee5.github.io/dagzoo/docs/transforms/): Formal transform math, notation, and operator definitions.
-
-Then explore features and workflows in the usage guide and feature docs:
-
 - [Usage Guide](https://bensonlee5.github.io/dagzoo/docs/usage-guide/): Primary workflow hub.
-- [Config Resolution](https://github.com/bensonlee5/dagzoo/blob/main/docs/development/config-resolution.md): Effective config precedence and trace artifacts.
 - [Output Format](https://bensonlee5.github.io/dagzoo/docs/output-format/): Output schema and artifacts.
-- Feature guides:
-  [diagnostics](https://bensonlee5.github.io/dagzoo/docs/features/diagnostics/),
-  [missingness](https://bensonlee5.github.io/dagzoo/docs/features/missingness/),
-  [many-class](https://bensonlee5.github.io/dagzoo/docs/features/many-class/),
-  [shift](https://bensonlee5.github.io/dagzoo/docs/features/shift/),
-  [noise](https://bensonlee5.github.io/dagzoo/docs/features/noise/),
-  [benchmark guardrails](https://bensonlee5.github.io/dagzoo/docs/features/benchmark-guardrails/)
+- [Feature Guides](https://bensonlee5.github.io/dagzoo/docs/features/): Diagnostics, missingness, many-class, shift, noise, and benchmark guardrails.
 
 ## Codebase Navigation
 

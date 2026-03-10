@@ -120,8 +120,8 @@ Data-quality acceptance is a separate stage:
 
 - Run `dagzoo filter --in <shard_dir> --out <out_dir>`.
 - Backend: CPU ExtraTrees-based wins-ratio filter.
-- Replay config is taken from embedded shard metadata; metadata-missing legacy
-  artifacts are rejected.
+- Replay config is taken from embedded shard metadata; artifacts without the
+  required embedded metadata are rejected.
 - Deferred runs emit acceptance/rejection artifacts and optional curated
   shards.
 
@@ -269,7 +269,9 @@ This section maps the runtime to module boundaries and data flow.
   - `generation_context.py`: seed/split/device/dtype helpers
   - `generation_runtime.py`: shared finalization, stratified split, and postprocess helpers
   - `noise_runtime.py`: per-dataset noise runtime selection
-  - `fixed_layout.py`: internal canonical run preparation, classification replay validation, and batched execution
+  - `fixed_layout_runtime.py`: internal canonical run preparation,
+    classification replay validation, and batched execution orchestration
+  - `fixed_layout.py`: shared fixed-layout metadata helpers and layout signatures
 
 ### 2) Layout and structure sampling {#2-layout-and-structure-sampling}
 
@@ -312,8 +314,8 @@ Each bundle includes runtime metadata for lineage, deferred-filter
 status, shift, noise distribution, and resolved config snapshot.
 
 - `lineage` aligns emitted columns with DAG node assignments.
-- `requested_device`, `resolved_device`, and optional fallback reason
-  are emitted for runtime observability.
+- `requested_device`, `resolved_device`, and the reserved
+  `device_fallback_reason` field are emitted for runtime observability.
 - Canonical generation outputs add `layout_mode`, `layout_plan_seed`,
   `layout_signature`, `dataset_seed`, and `keyed_replay`.
 
