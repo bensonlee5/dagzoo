@@ -442,8 +442,11 @@ metadata JSON contract, and DAG lineage schema.
   - Core generation/runtime randomness is keyed by semantic namespace rather than draw order or offset-only coupling.
   - Retrying one stage does not perturb sibling-stage randomness.
   - Scalar and batched typed-plan execution preserve semantic equivalence under the keyed contract.
-  - Reproducibility docs describe the new contract and its intended non-goals.
-  - Benchmark and replay checks cover the new semantic reproducibility invariants.
+  - Reproducibility docs describe the new contract and its intended non-goals,
+    including `keyed_replay` as the exact subtree replay surface.
+  - Benchmark and replay checks cover the new semantic reproducibility
+    invariants while separating workload-shape drift from true engine
+    regressions.
 
 ## Milestone Board
 

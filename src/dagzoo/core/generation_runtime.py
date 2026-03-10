@@ -9,7 +9,6 @@ from typing import Any
 import torch
 
 from dagzoo.config import GeneratorConfig
-from dagzoo.core.generation_context import _split_permutation_seed
 from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.core.metadata import _build_lineage_metadata, _build_shift_metadata
 from dagzoo.core.noise_runtime import (
@@ -28,6 +27,7 @@ from dagzoo.postprocess.postprocess import (
     postprocess_dataset,
     postprocess_fixed_schema_batch,
 )
+from dagzoo.rng import KeyedRng
 from dagzoo.types import DatasetBundle
 
 
@@ -96,23 +96,16 @@ def _classification_class_structure(
     }
 
 
-def _make_split_postprocess_generator(seed: int, attempt: int) -> torch.Generator:
-    """Create the shared CPU generator used for splitting and postprocess permutation."""
-
-    generator = torch.Generator(device="cpu")
-    generator.manual_seed(_split_permutation_seed(seed, attempt))
-    return generator
-
-
 def _resolve_split_indices(
     y: torch.Tensor,
     *,
     task: str,
     n_train: int,
-    generator: torch.Generator,
+    keyed_rng: KeyedRng,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Resolve one dataset's train/test split indices using the shared CPU generator."""
 
+    generator = keyed_rng.torch_rng(device="cpu")
     if task == "classification":
         return _stratified_split_indices(
             y.to(device="cpu"),
@@ -249,9 +242,10 @@ def _finalize_processed_bundle(
     config: GeneratorConfig,
     layout: LayoutPlan,
     *,
-    seed: int,
+    dataset_seed: int,
     attempt: int,
     attempts_used: int,
+    attempt_root: KeyedRng,
     device: str,
     requested_device: str,
     resolved_device: str,
@@ -274,8 +268,7 @@ def _finalize_processed_bundle(
         x_train,
         x_test,
         dataset_cfg=config.dataset,
-        seed=seed,
-        attempt=attempt,
+        keyed_rng=attempt_root.keyed("missingness"),
         device=device,
     )
 
@@ -302,7 +295,7 @@ def _finalize_processed_bundle(
         feature_index_map=feature_index_map,
         config_payload=config_payload,
         shift_metadata=shift_metadata,
-        seed=seed,
+        seed=dataset_seed,
         attempt=attempt,
         attempts_used=attempts_used,
         device=device,
@@ -330,7 +323,7 @@ def _finalize_generated_chunk_preserve_schema(
     layout: LayoutPlan,
     *,
     context: _FixedSchemaFinalizationContext,
-    seeds: list[int],
+    dataset_roots: list[KeyedRng],
     attempt: int,
     attempts_used: int,
     device: str,
@@ -347,22 +340,22 @@ def _finalize_generated_chunk_preserve_schema(
 ) -> list[DatasetBundle | None]:
     """Finalize one fixed-schema raw chunk while preserving scalar retry semantics."""
 
-    if int(x.shape[0]) != len(seeds) or int(y.shape[0]) != len(seeds):
-        raise ValueError("Chunk tensors must align with provided dataset seeds.")
+    if int(x.shape[0]) != len(dataset_roots) or int(y.shape[0]) != len(dataset_roots):
+        raise ValueError("Chunk tensors must align with provided dataset roots.")
 
-    results: list[DatasetBundle | None] = [None] * len(seeds)
+    results: list[DatasetBundle | None] = [None] * len(dataset_roots)
     valid_positions: list[int] = []
     train_idx_cpu_list: list[torch.Tensor] = []
     test_idx_cpu_list: list[torch.Tensor] = []
-    postprocess_generator_states: list[torch.Tensor] = []
-    for batch_index, seed in enumerate(seeds):
-        split_postprocess_generator = _make_split_postprocess_generator(seed, attempt)
+    postprocess_roots: list[KeyedRng] = []
+    for batch_index, dataset_root in enumerate(dataset_roots):
+        attempt_root = dataset_root.keyed("attempt", attempt)
         try:
             train_idx_cpu, test_idx_cpu = _resolve_split_indices(
                 y[batch_index],
                 task=config.dataset.task,
                 n_train=n_train,
-                generator=split_postprocess_generator,
+                keyed_rng=attempt_root.keyed("split"),
             )
         except InfeasibleStratifiedSplitError:
             continue
@@ -370,7 +363,7 @@ def _finalize_generated_chunk_preserve_schema(
         valid_positions.append(int(batch_index))
         train_idx_cpu_list.append(train_idx_cpu)
         test_idx_cpu_list.append(test_idx_cpu)
-        postprocess_generator_states.append(split_postprocess_generator.get_state())
+        postprocess_roots.append(attempt_root.keyed("postprocess"))
 
     if not valid_positions:
         return results
@@ -401,16 +394,19 @@ def _finalize_generated_chunk_preserve_schema(
         y_test_t,
         list(context.feature_types),
         config.dataset.task,
-        postprocess_generator_states=postprocess_generator_states,
+        postprocess_roots=postprocess_roots,
     )
     for local_index, batch_index in enumerate(valid_positions):
         try:
+            dataset_root = dataset_roots[batch_index]
+            dataset_seed = dataset_root.child_seed()
             results[batch_index] = _finalize_processed_bundle(
                 config,
                 layout,
-                seed=seeds[batch_index],
+                dataset_seed=dataset_seed,
                 attempt=attempt,
                 attempts_used=attempts_used,
+                attempt_root=dataset_root.keyed("attempt", attempt),
                 device=device,
                 requested_device=requested_device,
                 resolved_device=resolved_device,
@@ -437,9 +433,10 @@ def _finalize_generated_tensors(
     config: GeneratorConfig,
     layout: LayoutPlan,
     *,
-    seed: int,
+    dataset_seed: int,
     attempt: int,
     attempts_used: int,
+    dataset_root: KeyedRng,
     device: str,
     n_train: int,
     n_test: int,
@@ -456,13 +453,13 @@ def _finalize_generated_tensors(
 ) -> DatasetBundle:
     """Finalize one raw `x`/`y` pair into the standard dataset bundle contract."""
 
-    split_postprocess_generator = _make_split_postprocess_generator(seed, attempt)
+    attempt_root = dataset_root.keyed("attempt", attempt)
     try:
         train_idx_cpu, test_idx_cpu = _resolve_split_indices(
             y,
             task=config.dataset.task,
             n_train=n_train,
-            generator=split_postprocess_generator,
+            keyed_rng=attempt_root.keyed("split"),
         )
     except InfeasibleStratifiedSplitError as exc:
         raise InvalidClassSplitError("invalid_class_split") from exc
@@ -481,7 +478,7 @@ def _finalize_generated_tensors(
         y_test_t,
         list(layout.feature_types),
         config.dataset.task,
-        split_postprocess_generator,
+        attempt_root.keyed("postprocess"),
         device,
         return_feature_index_map=True,
         preserve_feature_schema=preserve_feature_schema,
@@ -498,9 +495,10 @@ def _finalize_generated_tensors(
     return _finalize_processed_bundle(
         config,
         layout,
-        seed=seed,
+        dataset_seed=dataset_seed,
         attempt=attempt,
         attempts_used=attempts_used,
+        attempt_root=attempt_root,
         device=device,
         requested_device=requested_device,
         resolved_device=resolved_device,

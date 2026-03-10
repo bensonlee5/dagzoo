@@ -14,7 +14,7 @@ from dagzoo.config import (
     MISSINGNESS_MECHANISM_NONE,
     normalize_missing_mechanism,
 )
-from dagzoo.rng import SeedManager
+from dagzoo.rng import KeyedRng
 
 _MIN_STD = 1e-6
 _CALIBRATION_ITERS = 48
@@ -75,13 +75,13 @@ def _sample_mcar_mask(
     x: torch.Tensor,
     *,
     missing_rate: float,
-    seed_manager: SeedManager,
+    keyed_rng: KeyedRng,
     device: str,
 ) -> torch.Tensor:
     """MCAR sampler: each cell is independently missing with fixed probability."""
 
     probs = torch.full_like(x, fill_value=float(missing_rate), dtype=torch.float32)
-    draw_generator = seed_manager.torch_rng("missingness", "mcar", "draws", device=device)
+    draw_generator = keyed_rng.keyed("mcar", "draws").torch_rng(device=device)
     return _sample_mask_from_probabilities(probs, generator=draw_generator)
 
 
@@ -90,7 +90,7 @@ def _sample_mar_mask(
     *,
     dataset_cfg: DatasetConfig,
     missing_rate: float,
-    seed_manager: SeedManager,
+    keyed_rng: KeyedRng,
     device: str,
 ) -> torch.Tensor:
     """MAR sampler: missingness depends on a sampled observed feature subset."""
@@ -102,12 +102,12 @@ def _sample_mar_mask(
         min(n_cols, int(math.ceil(float(dataset_cfg.missing_mar_observed_fraction) * n_cols))),
     )
 
-    obs_generator = seed_manager.torch_rng("missingness", "mar", "observed_idx", device=device)
+    obs_generator = keyed_rng.keyed("mar", "observed_idx").torch_rng(device=device)
     observed_perm = torch.randperm(n_cols, device=x_standardized.device, generator=obs_generator)
     observed_mask = torch.zeros(n_cols, dtype=torch.bool, device=x_standardized.device)
     observed_mask[observed_perm[:observed_count]] = True
 
-    weight_generator = seed_manager.torch_rng("missingness", "mar", "weights", device=device)
+    weight_generator = keyed_rng.keyed("mar", "weights").torch_rng(device=device)
     weights = torch.randn(
         (n_cols, n_cols),
         dtype=x_standardized.dtype,
@@ -122,7 +122,7 @@ def _sample_mar_mask(
     base_logits = raw_scores * float(dataset_cfg.missing_mar_logit_scale)
     probs = _calibrated_probabilities(base_logits, missing_rate)
 
-    draw_generator = seed_manager.torch_rng("missingness", "mar", "draws", device=device)
+    draw_generator = keyed_rng.keyed("mar", "draws").torch_rng(device=device)
     return _sample_mask_from_probabilities(probs, generator=draw_generator)
 
 
@@ -131,14 +131,14 @@ def _sample_mnar_mask(
     *,
     dataset_cfg: DatasetConfig,
     missing_rate: float,
-    seed_manager: SeedManager,
+    keyed_rng: KeyedRng,
     device: str,
 ) -> torch.Tensor:
     """MNAR sampler: missingness depends on each feature's own standardized value."""
 
     x_standardized = _standardize_columns(x)
     n_cols = int(x_standardized.shape[1])
-    weight_generator = seed_manager.torch_rng("missingness", "mnar", "weights", device=device)
+    weight_generator = keyed_rng.keyed("mnar", "weights").torch_rng(device=device)
     feature_weights = torch.randn(
         (1, n_cols),
         dtype=x_standardized.dtype,
@@ -148,7 +148,7 @@ def _sample_mnar_mask(
     base_logits = (x_standardized * feature_weights) * float(dataset_cfg.missing_mnar_logit_scale)
     probs = _calibrated_probabilities(base_logits, missing_rate)
 
-    draw_generator = seed_manager.torch_rng("missingness", "mnar", "draws", device=device)
+    draw_generator = keyed_rng.keyed("mnar", "draws").torch_rng(device=device)
     return _sample_mask_from_probabilities(probs, generator=draw_generator)
 
 
@@ -156,7 +156,7 @@ def sample_missingness_mask(
     x: torch.Tensor,
     *,
     dataset_cfg: DatasetConfig,
-    seed_manager: SeedManager,
+    keyed_rng: KeyedRng,
     device: str = "cpu",
 ) -> torch.Tensor:
     """
@@ -184,14 +184,14 @@ def sample_missingness_mask(
 
     if mechanism == MISSINGNESS_MECHANISM_MCAR:
         mask = _sample_mcar_mask(
-            work, missing_rate=missing_rate, seed_manager=seed_manager, device=device
+            work, missing_rate=missing_rate, keyed_rng=keyed_rng, device=device
         )
     elif mechanism == MISSINGNESS_MECHANISM_MAR:
         mask = _sample_mar_mask(
             work,
             dataset_cfg=dataset_cfg,
             missing_rate=missing_rate,
-            seed_manager=seed_manager,
+            keyed_rng=keyed_rng,
             device=device,
         )
     elif mechanism == MISSINGNESS_MECHANISM_MNAR:
@@ -199,7 +199,7 @@ def sample_missingness_mask(
             work,
             dataset_cfg=dataset_cfg,
             missing_rate=missing_rate,
-            seed_manager=seed_manager,
+            keyed_rng=keyed_rng,
             device=device,
         )
     else:

@@ -94,34 +94,32 @@ The keyed namespace tree for canonical public generation should be:
 
 ```text
 run
+├── rows
+├── plan_candidate/{attempt_index}
+│   ├── layout
+│   │   ├── feature_count
+│   │   ├── correlated
+│   │   ├── categorical_feature_indices
+│   │   ├── cardinality/{feature_index}
+│   │   ├── n_classes
+│   │   ├── graph_nodes
+│   │   ├── graph
+│   │   └── assignments/{feature|target}
+│   └── execution_plan
+│       ├── node_spec/{node_index}
+│       └── node_plan/{node_index}
 └── dataset/{dataset_index}
-    ├── rows
-    ├── layout
-    │   ├── graph
-    │   ├── assignments
-    │   ├── feature_types
-    │   └── correlated
-    ├── plan
-    │   ├── node_spec/{node_index}
-    │   └── node_plan/{node_index}
-    ├── execution
-    │   └── node/{node_index}
-    │       ├── source
-    │       ├── parent/{parent_index}
-    │       ├── function
-    │       ├── product/lhs
-    │       ├── product/rhs
-    │       └── converter/{spec_index}
-    ├── split/{attempt_index}
-    ├── postprocess/{attempt_index}
-    │   ├── feature_permutation
-    │   └── label_permutation
-    ├── missingness/{attempt_index}
-    │   ├── train
-    │   └── test
-    └── noise_runtime
-        ├── family_selection
-        └── samples
+    ├── noise_runtime
+    │   └── family_selection
+    └── attempt/{attempt_index}
+        ├── raw_generation
+        ├── split
+        ├── postprocess
+        │   ├── feature_permutation
+        │   └── label_permutation
+        └── missingness
+            ├── train
+            └── test
 ```
 
 Benchmark and diagnostic namespaces should remain separate from public
@@ -139,7 +137,9 @@ These namespaces must not share generators with canonical generation paths.
 The epic should preserve the following:
 
 - Valid config behavior and default-off public interfaces.
-- Emitted schema alignment, metadata shape, and replay metadata contracts.
+- Emitted schema alignment and replay metadata contracts. BL-136 adds explicit
+  `keyed_replay` metadata while preserving the existing top-level seed
+  identifiers used by deferred replay and diagnostics.
 - Deterministic output for the same post-migration keyed contract.
 - Existing scalar-vs-batched typed-plan equivalence promises where tests
   already assert them.
@@ -151,6 +151,8 @@ generator-order implementation:
   substreams.
 - Internal draw order inside plan sampling, grouped execution, or fallback
   sampling is not a compatibility target.
+- Raw fixed-layout batched generation still uses chunk-scoped kernels, so
+  chunk-size invariance is not part of the BL-136 compatibility contract.
 - Benchmark microbench helper seeds may move to named namespaces without
   preserving their current offset formulas.
 
@@ -186,20 +188,37 @@ branches for `BL-134` and later must perform the repo-policy version bump and
 
 ### BL-136: Runtime and postprocess migration
 
-- Migrate remaining orchestration, layout/runtime, noise selection, split
-  permutation, missingness, and postprocess flows onto explicit keyed
+- Migrate remaining orchestration, run-level rows realization, shared
+  fixed-layout plan preparation, layout/correlated sampling, noise selection,
+  split permutation, missingness, and postprocess flows onto explicit keyed
   namespaces.
 - Eliminate offset-only stage derivations from core runtime paths.
+- Keep raw fixed-layout graph kernels chunk-scoped for throughput, but make
+  retry planning and replay correctness align with that boundary by falling
+  back to scalar classification generation when a cached retry plan requires
+  nonzero per-dataset attempts.
 - Do not defer remaining typed-plan sibling-independence work into BL-136; that
   belongs in BL-135.
 
 ### BL-137: Hardening and docs
 
-- Update user-facing reproducibility docs once the runtime contract is real.
-- Add end-to-end regression coverage for regrouping, retries, replay, and
-  benchmark reproducibility.
-- Add benchmark and perf hardening coverage for the selective keyed-plan
-  strategy, including representative smoke throughput checks.
+- Treat BL-136's metadata contract as settled:
+  - `dataset_seed` and `layout_plan_seed` remain stable child-seed identifiers
+  - `keyed_replay` is the exact keyed subtree replay source of truth
+- Update user-facing reproducibility docs to explain when to use:
+  - `seed` + `dataset_index` + `run_num_datasets` for canonical bundle replay
+  - `dataset_seed` for deferred filter / diagnostics compatibility
+  - `keyed_replay` for exact keyed subtree replay
+- Add end-to-end regression coverage for persisted-artifact replay, regrouping,
+  retries, and benchmark reproducibility under the `keyed_replay` contract.
+- Audit downstream consumers that currently assume `dataset_seed` or
+  `layout_plan_seed` alone are exact keyed runtime roots and update them to use
+  the correct replay source.
+- Add benchmark and perf hardening coverage so smoke regressions can
+  distinguish engine slowdown from workload-shape drift caused by changed
+  sampled layouts/plans.
+- Keep chunk-size-invariant fixed-layout raw generation as an optional follow-up
+  investigation rather than the main BL-137 deliverable.
 
 ## Out Of Scope For BL-133
 

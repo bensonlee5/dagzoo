@@ -54,7 +54,7 @@ from dagzoo.core.trees import (
     sample_odt_splits_batch,
 )
 from dagzoo.functions import activations as activations_module
-from dagzoo.rng import KeyedRng, SeedManager
+from dagzoo.rng import KeyedRng
 from dagzoo.sampling.noise import NoiseSamplingSpec, sample_noise_from_spec
 
 _PAIRWISE_CENTER_BLOCK_SIZE = 32
@@ -1603,7 +1603,7 @@ def _generate_fixed_layout_raw_batch(
     n_rows = int(config.dataset.n_train + config.dataset.n_test)
     num_features = int(layout.n_features)
     dtype = torch.float32
-    batch_seed = SeedManager(int(dataset_seeds[0])).child("fixed_layout_chunk", batch_size)
+    batch_seed = KeyedRng(int(dataset_seeds[0])).child_seed("fixed_layout_chunk", batch_size)
     rng = FixedLayoutBatchRng(seed=batch_seed, batch_size=batch_size, device=device)
     typed_execution_plan = coerce_fixed_layout_execution_plan(execution_plan)
 

@@ -11,7 +11,7 @@ from dagzoo.config import (
     MISSINGNESS_MECHANISM_NONE,
     normalize_missing_mechanism,
 )
-from dagzoo.rng import SeedManager
+from dagzoo.rng import KeyedRng
 from dagzoo.sampling import sample_missingness_mask
 
 
@@ -59,7 +59,7 @@ def _postprocess_feature_splits(
     x_test: torch.Tensor,
     feature_types: list[str],
     *,
-    generator: torch.Generator | None,
+    keyed_rng: KeyedRng | None,
     preserve_feature_schema: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, list[str], list[int]]:
     """Postprocess feature tensors for both scalar and fixed-schema batched flows."""
@@ -77,9 +77,13 @@ def _postprocess_feature_splits(
     x_all = _clip_and_standardize_rows(x_all, feature_types_out)
 
     if not preserve_feature_schema:
-        if generator is None:
-            raise ValueError("generator is required when preserve_feature_schema is False.")
-        perm_cpu = torch.randperm(x_all.shape[-1], generator=generator, device="cpu")
+        if keyed_rng is None:
+            raise ValueError("keyed_rng is required when preserve_feature_schema is False.")
+        perm_cpu = torch.randperm(
+            x_all.shape[-1],
+            generator=keyed_rng.keyed("feature_permutation").torch_rng(device="cpu"),
+            device="cpu",
+        )
         perm_list = [int(i) for i in perm_cpu.tolist()]
         perm = perm_cpu.to(device=x_all.device)
         x_all = x_all.index_select(dim=x_all.ndim - 1, index=perm)
@@ -129,7 +133,7 @@ def _has_at_least_two_classes(y: torch.Tensor) -> bool:
 def _postprocess_classification_labels(
     y_train: torch.Tensor,
     y_test: torch.Tensor,
-    generator: torch.Generator,
+    keyed_rng: KeyedRng,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Remap classification labels into dense space with deterministic permutation."""
 
@@ -138,7 +142,11 @@ def _postprocess_classification_labels(
     classes, inverse = torch.unique(y_all_original, sorted=True, return_inverse=True)
     y_all_original_dense = inverse.to(torch.int64)
 
-    perm_dense_cpu = torch.randperm(classes.numel(), generator=generator, device="cpu")
+    perm_dense_cpu = torch.randperm(
+        classes.numel(),
+        generator=keyed_rng.keyed("label_permutation").torch_rng(device="cpu"),
+        device="cpu",
+    )
     perm_dense = perm_dense_cpu.to(device=inverse.device)
     y_all_permuted_dense = perm_dense[inverse].to(torch.int64)
     y_train_candidate = y_all_permuted_dense[:n_train]
@@ -161,7 +169,7 @@ def postprocess_dataset(
     y_test: torch.Tensor,
     feature_types: list[str],
     task: str,
-    generator: torch.Generator,
+    keyed_rng: KeyedRng,
     device: str,
     *,
     return_feature_index_map: Literal[False] = False,
@@ -177,7 +185,7 @@ def postprocess_dataset(
     y_test: torch.Tensor,
     feature_types: list[str],
     task: str,
-    generator: torch.Generator,
+    keyed_rng: KeyedRng,
     device: str,
     *,
     return_feature_index_map: Literal[True],
@@ -192,7 +200,7 @@ def postprocess_dataset(
     y_test: torch.Tensor,
     feature_types: list[str],
     task: str,
-    generator: torch.Generator,
+    keyed_rng: KeyedRng,
     device: str,
     *,
     return_feature_index_map: bool = False,
@@ -215,7 +223,7 @@ def postprocess_dataset(
         x_train,
         x_test,
         feature_types,
-        generator=generator,
+        keyed_rng=keyed_rng,
         preserve_feature_schema=preserve_feature_schema,
     )
 
@@ -232,7 +240,7 @@ def postprocess_dataset(
             )
         return x_train_p, y_train_p, x_test_p, y_test_p, feature_types
 
-    y_train_p, y_test_p = _postprocess_classification_labels(y_train, y_test, generator)
+    y_train_p, y_test_p = _postprocess_classification_labels(y_train, y_test, keyed_rng)
 
     if return_feature_index_map:
         return x_train_p, y_train_p, x_test_p, y_test_p, feature_types, feature_index_map
@@ -247,7 +255,7 @@ def postprocess_fixed_schema_batch(
     feature_types: list[str],
     task: str,
     *,
-    postprocess_generator_states: list[torch.Tensor],
+    postprocess_roots: list[KeyedRng],
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Postprocess one batch of fixed-schema train/test splits."""
 
@@ -255,16 +263,14 @@ def postprocess_fixed_schema_batch(
         raise ValueError("Expected batched feature tensors with shape [batch, rows, features].")
     if y_train.ndim != 2 or y_test.ndim != 2:
         raise ValueError("Expected batched target tensors with shape [batch, rows].")
-    if int(x_train.shape[0]) != len(postprocess_generator_states):
-        raise ValueError(
-            "postprocess_generator_states must align with the leading batch dimension."
-        )
+    if int(x_train.shape[0]) != len(postprocess_roots):
+        raise ValueError("postprocess_roots must align with the leading batch dimension.")
 
     x_train_p, x_test_p, _feature_types, _feature_index_map = _postprocess_feature_splits(
         x_train,
         x_test,
         feature_types,
-        generator=None,
+        keyed_rng=None,
         preserve_feature_schema=True,
     )
 
@@ -274,13 +280,11 @@ def postprocess_fixed_schema_batch(
 
     y_train_batches: list[torch.Tensor] = []
     y_test_batches: list[torch.Tensor] = []
-    for batch_index, generator_state in enumerate(postprocess_generator_states):
-        generator = torch.Generator(device="cpu")
-        generator.set_state(generator_state)
+    for batch_index, keyed_rng in enumerate(postprocess_roots):
         y_train_p, y_test_p = _postprocess_classification_labels(
             y_train[batch_index],
             y_test[batch_index],
-            generator,
+            keyed_rng,
         )
         y_train_batches.append(y_train_p)
         y_test_batches.append(y_test_p)
@@ -293,8 +297,7 @@ def inject_missingness(
     x_test: torch.Tensor,
     *,
     dataset_cfg: DatasetConfig,
-    seed: int,
-    attempt: int,
+    keyed_rng: KeyedRng,
     device: str,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any] | None]:
     """
@@ -309,20 +312,16 @@ def inject_missingness(
     if not enabled:
         return x_train, x_test, None
 
-    run_manager = SeedManager(seed)
-    train_manager = SeedManager(run_manager.child("missingness", attempt, "train"))
-    test_manager = SeedManager(run_manager.child("missingness", attempt, "test"))
-
     train_mask = sample_missingness_mask(
         x_train,
         dataset_cfg=dataset_cfg,
-        seed_manager=train_manager,
+        keyed_rng=keyed_rng.keyed("train"),
         device=device,
     )
     test_mask = sample_missingness_mask(
         x_test,
         dataset_cfg=dataset_cfg,
-        seed_manager=test_manager,
+        keyed_rng=keyed_rng.keyed("test"),
         device=device,
     )
 

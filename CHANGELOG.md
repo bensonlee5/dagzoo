@@ -10,6 +10,24 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.6.7] - 2026-03-10
+
+### Changed
+
+- Canonical runtime orchestration, layout sampling, correlated sampling,
+  dataset-level noise-family selection, split permutation, missingness, and
+  postprocess now derive randomness from explicit keyed namespaces instead of
+  offset-only stage seeds and shared compatibility wrappers.
+- Fixed-layout plan preparation now keys run-level rows realization, shared
+  plan candidates, node-spec sampling, and dataset attempt roots explicitly,
+  and canonical bundle metadata now records exact keyed subtree replay paths in
+  `keyed_replay` while preserving `dataset_seed` and `layout_plan_seed` as
+  stable child-seed identifiers for deferred filter replay and diagnostics.
+- Classification fixed-layout replay now keeps cached retry planning and actual
+  retry execution on aligned keyed roots, falling back to scalar generation for
+  runs that require nonzero per-dataset retry attempts so replay stays correct
+  with the current chunk-scoped raw batch kernels.
+
 ## [0.6.5] - 2026-03-09
 
 ### Changed

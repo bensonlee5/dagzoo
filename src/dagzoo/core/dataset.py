@@ -9,7 +9,7 @@ from dagzoo.core.fixed_layout_runtime import (
     _generate_batch_with_plan_iter,
     prepare_canonical_fixed_layout_run,
 )
-from dagzoo.rng import SeedManager
+from dagzoo.rng import KeyedRng
 from dagzoo.types import DatasetBundle
 
 __all__ = [
@@ -40,11 +40,16 @@ def _annotate_canonical_batch_metadata(
 
     dataset_seed = bundle.metadata.get("seed")
     if not isinstance(dataset_seed, int) or isinstance(dataset_seed, bool):
-        dataset_seed = SeedManager(int(run_seed)).child("dataset", int(dataset_index))
+        dataset_seed = KeyedRng(int(run_seed)).child_seed("dataset", int(dataset_index))
+    keyed_replay = bundle.metadata.get("keyed_replay")
+    if not isinstance(keyed_replay, dict):
+        keyed_replay = {}
+    keyed_replay["dataset_root_path"] = ["dataset", int(dataset_index)]
     bundle.metadata["seed"] = int(run_seed)
     bundle.metadata["dataset_seed"] = int(dataset_seed)
     bundle.metadata["dataset_index"] = int(dataset_index)
     bundle.metadata["run_num_datasets"] = int(run_num_datasets)
+    bundle.metadata["keyed_replay"] = keyed_replay
     return bundle
 
 

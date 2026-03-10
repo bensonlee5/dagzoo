@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from dagzoo.config import DatasetConfig
+from dagzoo.rng import KeyedRng
 from dagzoo.postprocess.postprocess import (
     _clip_and_standardize_rows,
     inject_missingness,
@@ -56,7 +57,7 @@ def _clip_and_standardize_reference_loop(x: torch.Tensor, feature_types: list[st
 def test_removes_constant_columns() -> None:
     g = _make_generator(0)
     xt, yt, xte, yte, ft, task = _make_data(g, n_feat=4, add_constant_col=True)
-    xtp, _, xtep, _, ft_out = postprocess_dataset(xt, yt, xte, yte, ft, task, g, "cpu")
+    xtp, _, xtep, _, ft_out = postprocess_dataset(xt, yt, xte, yte, ft, task, KeyedRng(0), "cpu")
     assert xtp.shape[1] < 4
     assert len(ft_out) == xtp.shape[1]
 
@@ -64,7 +65,7 @@ def test_removes_constant_columns() -> None:
 def test_standardizes_numeric() -> None:
     g = _make_generator(1)
     xt, yt, xte, yte, ft, task = _make_data(g)
-    xtp, _, xtep, _, _ = postprocess_dataset(xt, yt, xte, yte, ft, task, g, "cpu")
+    xtp, _, xtep, _, _ = postprocess_dataset(xt, yt, xte, yte, ft, task, KeyedRng(1), "cpu")
     combined = torch.cat([xtp, xtep], dim=0)
     for i in range(combined.shape[1]):
         col = combined[:, i]
@@ -118,7 +119,7 @@ def test_clip_and_standardize_batch_matches_scalar_helper() -> None:
 def test_preserves_class_counts() -> None:
     g = _make_generator(2)
     xt, yt, xte, yte, ft, task = _make_data(g, n_classes=4)
-    _, ytp, _, ytep, _ = postprocess_dataset(xt, yt, xte, yte, ft, task, g, "cpu")
+    _, ytp, _, ytep, _ = postprocess_dataset(xt, yt, xte, yte, ft, task, KeyedRng(2), "cpu")
     y_all_before = torch.cat([yt, yte])
     y_all_after = torch.cat([ytp, ytep])
     before_counts = sorted(torch.bincount(y_all_before).tolist())
@@ -141,7 +142,7 @@ def test_classification_labels_are_remapped_to_contiguous_indices() -> None:
         y_test,
         feature_types,
         "classification",
-        _make_generator(13),
+        KeyedRng(13),
         "cpu",
     )
 
@@ -160,7 +161,7 @@ def test_classification_labels_are_remapped_to_contiguous_indices() -> None:
 def test_many_class_postprocess_outputs_contiguous_labels() -> None:
     g = _make_generator(14)
     xt, yt, xte, yte, ft, task = _make_data(g, n_classes=32, n_train=256, n_test=256)
-    _, ytp, _, ytep, _ = postprocess_dataset(xt, yt, xte, yte, ft, task, _make_generator(15), "cpu")
+    _, ytp, _, ytep, _ = postprocess_dataset(xt, yt, xte, yte, ft, task, KeyedRng(15), "cpu")
 
     y_all = torch.cat([ytp, ytep], dim=0)
     unique_after = torch.unique(y_all, sorted=True)
@@ -174,7 +175,7 @@ def test_regression_clips_targets() -> None:
     g = _make_generator(3)
     xt, yt, xte, yte, ft, task = _make_data(g, task="regression")
     yt[0] = 1e6
-    _, ytp, _, ytep, _ = postprocess_dataset(xt, yt, xte, yte, ft, task, g, "cpu")
+    _, ytp, _, ytep, _ = postprocess_dataset(xt, yt, xte, yte, ft, task, KeyedRng(3), "cpu")
     y_all = torch.cat([ytp, ytep])
     assert torch.all(torch.isfinite(y_all))
 
@@ -183,10 +184,10 @@ def test_deterministic() -> None:
     g_data = _make_generator(99)
     xt, yt, xte, yte, ft, task = _make_data(g_data)
     out1 = postprocess_dataset(
-        xt.clone(), yt.clone(), xte.clone(), yte.clone(), list(ft), task, _make_generator(0), "cpu"
+        xt.clone(), yt.clone(), xte.clone(), yte.clone(), list(ft), task, KeyedRng(0), "cpu"
     )
     out2 = postprocess_dataset(
-        xt.clone(), yt.clone(), xte.clone(), yte.clone(), list(ft), task, _make_generator(0), "cpu"
+        xt.clone(), yt.clone(), xte.clone(), yte.clone(), list(ft), task, KeyedRng(0), "cpu"
     )
     torch.testing.assert_close(out1[0], out2[0])
     torch.testing.assert_close(out1[1], out2[1])
@@ -203,7 +204,7 @@ def test_feature_index_map_tracks_dropped_and_permuted_columns() -> None:
         yte,
         feature_types,
         task,
-        _make_generator(11),
+        KeyedRng(11),
         "cpu",
         return_feature_index_map=True,
     )
@@ -243,10 +244,6 @@ def test_postprocess_fixed_schema_batch_matches_scalar_preserve_schema(task: str
         y_test = torch.randn(2, 16, generator=g)
 
     seeds = [301, 302]
-    generator_states = []
-    for seed in seeds:
-        generator = _make_generator(seed)
-        generator_states.append(generator.get_state())
     batched = postprocess_fixed_schema_batch(
         x_train,
         y_train,
@@ -254,7 +251,7 @@ def test_postprocess_fixed_schema_batch_matches_scalar_preserve_schema(task: str
         y_test,
         feature_types,
         task,
-        postprocess_generator_states=generator_states,
+        postprocess_roots=[KeyedRng(seed) for seed in seeds],
     )
     scalar = [
         postprocess_dataset(
@@ -264,7 +261,7 @@ def test_postprocess_fixed_schema_batch_matches_scalar_preserve_schema(task: str
             y_test[index],
             list(feature_types),
             task,
-            _make_generator(seeds[index]),
+            KeyedRng(seeds[index]),
             "cpu",
             preserve_feature_schema=True,
         )
@@ -285,7 +282,7 @@ def test_inject_missingness_disabled_noop() -> None:
     cfg = DatasetConfig(missing_rate=0.0, missing_mechanism="none")
 
     out_train, out_test, summary = inject_missingness(
-        x_train, x_test, dataset_cfg=cfg, seed=77, attempt=0, device="cpu"
+        x_train, x_test, dataset_cfg=cfg, keyed_rng=KeyedRng(77), device="cpu"
     )
 
     torch.testing.assert_close(out_train, x_train)
@@ -300,7 +297,7 @@ def test_inject_missingness_adds_nans_and_preserves_shape() -> None:
     cfg = DatasetConfig(missing_rate=0.3, missing_mechanism="mcar")
 
     out_train, out_test, summary = inject_missingness(
-        x_train, x_test, dataset_cfg=cfg, seed=88, attempt=1, device="cpu"
+        x_train, x_test, dataset_cfg=cfg, keyed_rng=KeyedRng(88), device="cpu"
     )
 
     assert out_train.shape == x_train.shape
@@ -320,10 +317,10 @@ def test_inject_missingness_deterministic_for_fixed_seed_and_attempt() -> None:
     cfg = DatasetConfig(missing_rate=0.35, missing_mechanism="mar")
 
     a_train, a_test, _ = inject_missingness(
-        x_train, x_test, dataset_cfg=cfg, seed=101, attempt=2, device="cpu"
+        x_train, x_test, dataset_cfg=cfg, keyed_rng=KeyedRng(101), device="cpu"
     )
     b_train, b_test, _ = inject_missingness(
-        x_train, x_test, dataset_cfg=cfg, seed=101, attempt=2, device="cpu"
+        x_train, x_test, dataset_cfg=cfg, keyed_rng=KeyedRng(101), device="cpu"
     )
 
     assert torch.equal(torch.isnan(a_train), torch.isnan(b_train))
@@ -337,10 +334,10 @@ def test_inject_missingness_changes_for_different_seed() -> None:
     cfg = DatasetConfig(missing_rate=0.35, missing_mechanism="mnar")
 
     a_train, a_test, _ = inject_missingness(
-        x_train, x_test, dataset_cfg=cfg, seed=202, attempt=0, device="cpu"
+        x_train, x_test, dataset_cfg=cfg, keyed_rng=KeyedRng(202), device="cpu"
     )
     b_train, b_test, _ = inject_missingness(
-        x_train, x_test, dataset_cfg=cfg, seed=203, attempt=0, device="cpu"
+        x_train, x_test, dataset_cfg=cfg, keyed_rng=KeyedRng(203), device="cpu"
     )
 
     assert not torch.equal(torch.isnan(a_train), torch.isnan(b_train))

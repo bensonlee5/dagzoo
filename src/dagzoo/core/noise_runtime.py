@@ -10,7 +10,7 @@ from dagzoo.config import (
     GeneratorConfig,
     NoiseFamily,
 )
-from dagzoo.rng import SeedManager
+from dagzoo.rng import KeyedRng
 from dagzoo.sampling.noise import (
     NoiseSamplingSpec,
     normalize_mixture_weights,
@@ -33,7 +33,8 @@ class NoiseRuntimeSelection:
 def _resolve_noise_runtime_selection(
     config: GeneratorConfig,
     *,
-    run_seed: int,
+    keyed_rng: KeyedRng,
+    device: str = "cpu",
 ) -> NoiseRuntimeSelection:
     """Resolve deterministic per-dataset noise-family selection."""
 
@@ -56,10 +57,10 @@ def _resolve_noise_runtime_selection(
         else None
     )
     normalized_weights = normalize_mixture_weights(mixture_weights_raw)
-    selector = SeedManager(run_seed).torch_rng("noise_family", device="cpu")
+    selector = keyed_rng.keyed("family_selection").torch_rng(device=device)
     sampled_family = sample_mixture_component_family(
         generator=selector,
-        device="cpu",
+        device=device,
         mixture_weights=normalized_weights,
     )
     return NoiseRuntimeSelection(

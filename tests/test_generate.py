@@ -11,11 +11,8 @@ from dagzoo.config import (
     GeneratorConfig,
     NOISE_FAMILY_GAUSSIAN,
     NOISE_FAMILY_LAPLACE,
+    NOISE_FAMILY_MIXTURE,
     NOISE_FAMILY_STUDENT_T,
-)
-from dagzoo.core.constants import (
-    FIXED_LAYOUT_PLAN_SEED_OFFSET,
-    SPLIT_PERMUTATION_SEED_OFFSET,
 )
 from dagzoo.core.dataset import (
     generate_batch,
@@ -24,11 +21,14 @@ from dagzoo.core.dataset import (
 )
 from dagzoo.core.fixed_layout import (
     _FixedLayoutPlan,
+    _layout_signature,
 )
 from dagzoo.core.fixed_layout_runtime import (
+    _fixed_layout_plan_classification_attempt_plan,
     _fixed_layout_plan_supports_classification_run,
     _generate_batch_with_plan_iter,
     _resolve_fixed_layout_batch_size,
+    _sample_fixed_layout_candidate,
     _sample_fixed_layout,
     prepare_canonical_fixed_layout_run,
 )
@@ -40,8 +40,13 @@ from dagzoo.core.generation_runtime import (
     _parent_node_indices,
 )
 from dagzoo.core.fixed_layout_plan_types import FixedLayoutExecutionPlan
+from dagzoo.core.layout import _sample_layout
 from dagzoo.core.layout_types import LayoutPlan
-from dagzoo.core.noise_runtime import NoiseRuntimeSelection
+from dagzoo.core.noise_runtime import (
+    NoiseRuntimeSelection,
+    _build_noise_distribution_metadata,
+    _resolve_noise_runtime_selection,
+)
 from dagzoo.core.shift import mechanism_nonlinear_mass, resolve_shift_runtime_params
 from dagzoo.core.validation import InfeasibleStratifiedSplitError, _stratified_split_indices
 from dagzoo.io.lineage_schema import (
@@ -50,7 +55,7 @@ from dagzoo.io.lineage_schema import (
     validate_metadata_lineage,
     validate_lineage_payload,
 )
-from dagzoo.rng import SeedManager, offset_seed32
+from dagzoo.rng import KeyedRng
 from dagzoo.types import DatasetBundle
 
 
@@ -131,12 +136,13 @@ def test_parent_node_indices_reads_parents_from_adjacency_columns() -> None:
     assert _parent_node_indices(adjacency, 3) == [0, 1, 2]
 
 
-def test_dataset_seed_helpers_match_offset_seed32_formulas() -> None:
+def test_dataset_seed_helpers_match_keyed_derivation() -> None:
     run_seed = 1337
     attempt = 5
-    assert _attempt_seed(run_seed, attempt) == offset_seed32(run_seed, attempt)
-    assert _split_permutation_seed(run_seed, attempt) == offset_seed32(
-        run_seed, SPLIT_PERMUTATION_SEED_OFFSET + attempt
+    run_root = KeyedRng(run_seed)
+    assert _attempt_seed(run_seed, attempt) == run_root.child_seed("attempt", attempt)
+    assert _split_permutation_seed(run_seed, attempt) == run_root.child_seed(
+        "attempt", attempt, "split"
     )
 
 
@@ -538,7 +544,7 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
         y_test,
         feature_types,
         _task,
-        _generator,
+        _keyed_rng,
         _device,
         *,
         return_feature_index_map=False,
@@ -566,9 +572,10 @@ def test_generate_one_lineage_assignments_follow_postprocess_feature_mapping(
     bundle = _finalize_generated_tensors(
         cfg,
         layout,
-        seed=777,
+        dataset_seed=777,
         attempt=0,
         attempts_used=1,
+        dataset_root=KeyedRng(777),
         device="cpu",
         n_train=cfg.dataset.n_train,
         n_test=cfg.dataset.n_test,
@@ -632,9 +639,10 @@ def test_generate_torch_forces_cpu_for_stratified_split(
                 feature_node_assignment=[0, 1, 2, 3],
                 target_node_assignment=3,
             ),
-            seed=111,
+            dataset_seed=111,
             attempt=0,
             attempts_used=1,
+            dataset_root=KeyedRng(111),
             device="cuda",
             n_train=8,
             n_test=4,
@@ -670,7 +678,7 @@ def test_generate_torch_routes_postprocess_to_runtime_device(
         y_test: torch.Tensor,
         _feature_types: list[str],
         _task: str,
-        generator: torch.Generator,
+        keyed_rng: KeyedRng,
         device: str,
         *,
         return_feature_index_map: bool = False,
@@ -683,7 +691,7 @@ def test_generate_torch_routes_postprocess_to_runtime_device(
         captured["postprocess_device_arg"] = device
         captured["postprocess_x_train_device"] = x_train.device.type
         captured["postprocess_x_test_device"] = x_test.device.type
-        captured["postprocess_rng_device"] = str(generator.device)
+        captured["postprocess_rng_device"] = str(keyed_rng.torch_rng(device="cpu").device)
         raise _PostprocessSentinel
 
     monkeypatch.setattr(
@@ -701,9 +709,10 @@ def test_generate_torch_routes_postprocess_to_runtime_device(
                 feature_node_assignment=[0, 1, 2, 3],
                 target_node_assignment=3,
             ),
-            seed=222,
+            dataset_seed=222,
             attempt=0,
             attempts_used=1,
+            dataset_root=KeyedRng(222),
             device="cuda",
             n_train=8,
             n_test=4,
@@ -740,7 +749,7 @@ def test_generate_torch_routes_missingness_to_runtime_device(
         y_test: torch.Tensor,
         feature_types: list[str],
         _task: str,
-        _generator: torch.Generator,
+        _keyed_rng: KeyedRng,
         _device: str,
         *,
         return_feature_index_map: bool = False,
@@ -756,13 +765,11 @@ def test_generate_torch_routes_missingness_to_runtime_device(
         x_test: torch.Tensor,
         *,
         dataset_cfg,
-        seed: int,
-        attempt: int,
+        keyed_rng: KeyedRng,
         device: str,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, object] | None]:
         _ = dataset_cfg
-        _ = seed
-        _ = attempt
+        _ = keyed_rng
         captured["missingness_device_arg"] = device
         captured["missingness_x_train_device"] = x_train.device.type
         captured["missingness_x_test_device"] = x_test.device.type
@@ -787,9 +794,10 @@ def test_generate_torch_routes_missingness_to_runtime_device(
                 feature_node_assignment=[0, 1, 2, 3],
                 target_node_assignment=3,
             ),
-            seed=333,
+            dataset_seed=333,
             attempt=0,
             attempts_used=1,
+            dataset_root=KeyedRng(333),
             device="cuda",
             n_train=8,
             n_test=4,
@@ -857,7 +865,7 @@ def test_finalize_generated_chunk_preserve_schema_matches_scalar_helper(task: st
         cfg,
         layout,
         context=context,
-        seeds=seeds,
+        dataset_roots=[KeyedRng(seed) for seed in seeds],
         attempt=0,
         attempts_used=1,
         device="cpu",
@@ -877,9 +885,10 @@ def test_finalize_generated_chunk_preserve_schema_matches_scalar_helper(task: st
         _finalize_generated_tensors(
             cfg,
             layout,
-            seed=seed,
+            dataset_seed=KeyedRng(seed).child_seed(),
             attempt=0,
             attempts_used=1,
+            dataset_root=KeyedRng(seed),
             device="cpu",
             n_train=cfg.dataset.n_train,
             n_test=cfg.dataset.n_test,
@@ -938,7 +947,7 @@ def test_finalize_generated_chunk_preserve_schema_copies_metadata_templates() ->
         cfg,
         layout,
         context=context,
-        seeds=[13, 17],
+        dataset_roots=[KeyedRng(13), KeyedRng(17)],
         attempt=0,
         attempts_used=1,
         device="cpu",
@@ -993,7 +1002,7 @@ def test_finalize_generated_chunk_preserve_schema_omits_unset_fixed_layout_targe
         cfg,
         layout,
         context=context,
-        seeds=[23],
+        dataset_roots=[KeyedRng(23)],
         attempt=0,
         attempts_used=1,
         device="cpu",
@@ -1189,17 +1198,24 @@ def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
         execution_plan=FixedLayoutExecutionPlan(),
         plan_signature="plan_sig",
     )
-    manager = SeedManager(run_seed)
-    dataset_seeds = [manager.child("dataset", idx) for idx in range(4)]
+    run_root = KeyedRng(run_seed)
+    dataset_roots = [run_root.keyed("dataset", idx) for idx in range(4)]
+    dataset_seeds = [dataset_root.child_seed() for dataset_root in dataset_roots]
     family_pattern = ["gaussian", "gaussian", "laplace", "gaussian"]
-    family_by_data_seed = {
-        SeedManager(dataset_seed).child("data"): family
-        for dataset_seed, family in zip(dataset_seeds, family_pattern, strict=True)
+    family_by_noise_root_seed = {
+        dataset_root.keyed("noise_runtime").child_seed(): family
+        for dataset_root, family in zip(dataset_roots, family_pattern, strict=True)
     }
     grouped_call_sizes: list[int] = []
 
-    def _stub_resolve_noise_runtime_selection(_config, *, run_seed: int) -> NoiseRuntimeSelection:
-        family = family_by_data_seed[int(run_seed)]
+    def _stub_resolve_noise_runtime_selection(
+        _config,
+        *,
+        keyed_rng: KeyedRng,
+        device: str = "cpu",
+    ) -> NoiseRuntimeSelection:
+        _ = device
+        family = family_by_noise_root_seed[int(keyed_rng.child_seed())]
         return NoiseRuntimeSelection(
             family_requested="mixture",
             family_sampled=family,
@@ -1241,7 +1257,7 @@ def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
         _layout,
         *,
         context,
-        seeds,
+        dataset_roots,
         attempt,
         attempts_used,
         device,
@@ -1279,7 +1295,7 @@ def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
                 metadata={
                     "backend": "torch",
                     "n_features": 2,
-                    "dataset_seed_seen": int(dataset_seed),
+                    "dataset_seed_seen": int(dataset_root.child_seed()),
                     "family_sampled": str(noise_runtime_selection.family_sampled),
                     "lineage": {
                         "assignments": {
@@ -1289,7 +1305,7 @@ def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
                     },
                 },
             )
-            for dataset_seed in seeds
+            for dataset_root in dataset_roots
         ]
 
     monkeypatch.setattr(
@@ -1346,17 +1362,23 @@ def test_fixed_layout_plan_supports_classification_run_groups_mixed_noise_runtim
         execution_plan=FixedLayoutExecutionPlan(),
         plan_signature="plan_sig",
     )
-    manager = SeedManager(run_seed)
-    dataset_seeds = [manager.child("dataset", idx) for idx in range(3)]
+    run_root = KeyedRng(run_seed)
+    dataset_roots = [run_root.keyed("dataset", idx) for idx in range(3)]
     family_pattern = ["gaussian", "laplace", "gaussian"]
-    family_by_data_seed = {
-        SeedManager(dataset_seed).child("data"): family
-        for dataset_seed, family in zip(dataset_seeds, family_pattern, strict=True)
+    family_by_noise_root_seed = {
+        dataset_root.keyed("noise_runtime").child_seed(): family
+        for dataset_root, family in zip(dataset_roots, family_pattern, strict=True)
     }
     grouped_call_sizes: list[int] = []
 
-    def _stub_resolve_noise_runtime_selection(_config, *, run_seed: int) -> NoiseRuntimeSelection:
-        family = family_by_data_seed[int(run_seed)]
+    def _stub_resolve_noise_runtime_selection(
+        _config,
+        *,
+        keyed_rng: KeyedRng,
+        device: str = "cpu",
+    ) -> NoiseRuntimeSelection:
+        _ = device
+        family = family_by_noise_root_seed[int(keyed_rng.child_seed())]
         return NoiseRuntimeSelection(
             family_requested="mixture",
             family_sampled=family,
@@ -1416,13 +1438,153 @@ def test_fixed_layout_plan_supports_classification_run_groups_mixed_noise_runtim
         plan=plan,
         requested_device="cpu",
         resolved_device="cpu",
-        run_seed=run_seed,
+        run_root=run_root,
         num_datasets=3,
         batch_size=3,
     )
 
     assert supported is True
     assert grouped_call_sizes == [2, 1]
+
+
+def test_fixed_layout_plan_classification_attempt_plan_does_not_scalarize_other_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_config()
+    cfg.dataset.task = "classification"
+    cfg.filter.enabled = False
+    cfg.filter.max_attempts = 3
+    cfg.dataset.n_train = 4
+    cfg.dataset.n_test = 2
+    plan = _FixedLayoutPlan(
+        layout=_layout_stub(
+            feature_types=["num", "num"],
+            graph_nodes=2,
+            adjacency=torch.zeros((2, 2), dtype=torch.bool),
+            feature_node_assignment=[0, 1],
+            target_node_assignment=1,
+        ),
+        requested_device="cpu",
+        resolved_device="cpu",
+        plan_seed=17,
+        n_train=cfg.dataset.n_train,
+        n_test=cfg.dataset.n_test,
+        layout_signature="layout_sig",
+        execution_plan=FixedLayoutExecutionPlan(),
+        plan_signature="plan_sig",
+    )
+    run_root = KeyedRng(654)
+    dataset_roots = [run_root.keyed("dataset", idx) for idx in range(4)]
+    retry_calls: list[int] = []
+
+    def _stub_group_noise_runtime_chunk(
+        _config: GeneratorConfig,
+        *,
+        dataset_roots: list[KeyedRng],
+        attempts: list[int] | None = None,
+    ):
+        local_attempts = list(attempts or [0] * len(dataset_roots))
+        assert all(int(attempt) == 0 for attempt in local_attempts)
+        return [
+            SimpleNamespace(
+                chunk_offsets=list(range(len(dataset_roots))),
+                generation_seeds=[
+                    dataset_root.keyed("attempt", 0, "raw_generation").child_seed()
+                    for dataset_root in dataset_roots
+                ],
+                selection=NoiseRuntimeSelection(
+                    family_requested="gaussian",
+                    family_sampled="gaussian",
+                    sampling_strategy="dataset_level",
+                    base_scale=1.0,
+                    student_t_df=5.0,
+                    mixture_weights=None,
+                ),
+                attempt=0,
+            )
+        ]
+
+    def _stub_generate_fixed_layout_label_batch_with_fallback(
+        _config: GeneratorConfig,
+        _layout,
+        *,
+        execution_plan,
+        dataset_seeds: list[int],
+        requested_device: str,
+        resolved_device: str,
+        noise_sigma_multiplier: float,
+        noise_spec,
+    ) -> tuple[torch.Tensor, list[dict[str, object]], str, str | None]:
+        _ = execution_plan
+        _ = requested_device
+        _ = resolved_device
+        _ = noise_sigma_multiplier
+        _ = noise_spec
+        y_batch = torch.zeros(
+            (len(dataset_seeds), cfg.dataset.n_train + cfg.dataset.n_test), dtype=torch.int64
+        )
+        return y_batch, [{} for _ in dataset_seeds], "cpu", None
+
+    def _stub_raw_classification_labels_support_split(
+        _y: torch.Tensor,
+        *,
+        dataset_root: KeyedRng,
+        attempt: int,
+        n_train: int,
+    ) -> bool:
+        _ = n_train
+        dataset_seed = dataset_root.child_seed()
+        if dataset_seed == dataset_roots[0].child_seed():
+            return False
+        return attempt == 0
+
+    def _stub_first_valid_classification_attempt_for_dataset(
+        _config: GeneratorConfig,
+        *,
+        plan: _FixedLayoutPlan,
+        dataset_root: KeyedRng,
+        requested_device: str,
+        resolved_device: str,
+        start_attempt: int = 0,
+    ) -> int | None:
+        _ = plan
+        _ = requested_device
+        _ = resolved_device
+        retry_calls.append(dataset_root.child_seed())
+        if dataset_root.child_seed() == dataset_roots[0].child_seed():
+            assert start_attempt == 1
+            return 1
+        raise AssertionError("only the invalid attempt-0 dataset should use scalar replay lookup")
+
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._group_noise_runtime_chunk",
+        _stub_group_noise_runtime_chunk,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._generate_fixed_layout_label_batch_with_fallback",
+        _stub_generate_fixed_layout_label_batch_with_fallback,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._raw_classification_labels_support_split",
+        _stub_raw_classification_labels_support_split,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._first_valid_classification_attempt_for_dataset",
+        _stub_first_valid_classification_attempt_for_dataset,
+    )
+
+    attempt_plan = _fixed_layout_plan_classification_attempt_plan(
+        cfg,
+        plan=plan,
+        requested_device="cpu",
+        resolved_device="cpu",
+        run_root=run_root,
+        num_datasets=4,
+        batch_size=2,
+    )
+
+    assert attempt_plan == (1, 0, 0, 0)
+    assert retry_calls == [dataset_roots[0].child_seed()]
 
 
 def test_generate_one_returns_torch_tensors_on_cpu() -> None:
@@ -1628,8 +1790,66 @@ def test_sample_fixed_layout_accepts_32bit_seed_boundaries() -> None:
     cfg = _tiny_config()
     plan_min = _sample_fixed_layout(cfg, seed=0, device="cpu")
     plan_max = _sample_fixed_layout(cfg, seed=4294967295, device="cpu")
-    assert plan_min.plan_seed == 0
-    assert plan_max.plan_seed == 4294967295
+    assert plan_min.plan_seed == KeyedRng(0).child_seed("plan_candidate", 0, "layout")
+    assert plan_max.plan_seed == KeyedRng(4294967295).child_seed("plan_candidate", 0, "layout")
+
+
+def test_sample_fixed_layout_candidate_stores_layout_root_seed() -> None:
+    cfg = _tiny_regression_config()
+    run_root = KeyedRng(4321)
+    candidate_root = run_root.keyed("plan_candidate", 0)
+
+    plan = _sample_fixed_layout_candidate(
+        cfg,
+        keyed_rng=candidate_root,
+        rows_seed=run_root.child_seed("rows"),
+        requested_device="cpu",
+        resolved_device="cpu",
+    )
+
+    assert plan.plan_seed == run_root.child_seed("plan_candidate", 0, "layout")
+
+
+def test_prepare_canonical_fixed_layout_run_uses_candidate_root_for_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _tiny_regression_config()
+    plan = _sample_fixed_layout(_tiny_regression_config(), seed=701, device="cpu")
+    sample_calls: list[tuple[tuple[str | int, ...], int, str, str]] = []
+
+    def _stub_sample_fixed_layout_candidate(
+        _config: GeneratorConfig,
+        *,
+        keyed_rng: KeyedRng,
+        rows_seed: int,
+        requested_device: str,
+        resolved_device: str,
+    ) -> _FixedLayoutPlan:
+        sample_calls.append(
+            (
+                tuple(keyed_rng.path),
+                int(rows_seed),
+                str(requested_device),
+                str(resolved_device),
+            )
+        )
+        return plan
+
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._sample_fixed_layout_candidate",
+        _stub_sample_fixed_layout_candidate,
+    )
+    monkeypatch.setattr(
+        "dagzoo.core.fixed_layout_runtime._sample_fixed_layout",
+        lambda *_args, **_kwargs: pytest.fail(
+            "regression preparation should sample directly from the candidate root"
+        ),
+    )
+
+    prepared = prepare_canonical_fixed_layout_run(cfg, num_datasets=2, seed=19, device="cpu")
+
+    assert sample_calls == [(("plan_candidate", 0), KeyedRng(19).child_seed("rows"), "cpu", "cpu")]
+    assert int(prepared.plan.plan_seed) == int(plan.plan_seed)
 
 
 def test_zero_num_datasets_does_not_resolve_device(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1739,19 +1959,20 @@ def test_prepare_canonical_fixed_layout_run_validates_full_classification_run(
 
     first_plan = _sample_fixed_layout(_tiny_regression_config(), seed=701, device="cpu")
     second_plan = _sample_fixed_layout(_tiny_regression_config(), seed=702, device="cpu")
-    sample_calls: list[int] = []
-    validation_calls: list[tuple[int, int, int, int]] = []
+    sample_calls: list[tuple[tuple[str | int, ...], int]] = []
+    validation_calls: list[tuple[int, tuple[str | int, ...], int, int]] = []
 
     def _stub_sample_fixed_layout_candidate(
         _config: GeneratorConfig,
         *,
-        seed: int,
+        keyed_rng: KeyedRng,
+        rows_seed: int,
         requested_device: str,
         resolved_device: str,
     ) -> _FixedLayoutPlan:
         assert requested_device == "cpu"
         assert resolved_device == "cpu"
-        sample_calls.append(int(seed))
+        sample_calls.append((tuple(keyed_rng.path), int(rows_seed)))
         return first_plan if len(sample_calls) == 1 else second_plan
 
     def _stub_classification_attempt_plan(
@@ -1760,14 +1981,14 @@ def test_prepare_canonical_fixed_layout_run_validates_full_classification_run(
         plan: _FixedLayoutPlan,
         requested_device: str,
         resolved_device: str,
-        run_seed: int,
+        run_root: KeyedRng,
         num_datasets: int = 1,
         batch_size: int = 1,
     ) -> tuple[int, ...] | None:
         assert requested_device == "cpu"
         assert resolved_device == "cpu"
         validation_calls.append(
-            (int(plan.plan_seed), int(run_seed), int(num_datasets), int(batch_size))
+            (int(plan.plan_seed), tuple(run_root.path), int(num_datasets), int(batch_size))
         )
         if int(plan.plan_seed) != int(second_plan.plan_seed):
             return None
@@ -1783,19 +2004,22 @@ def test_prepare_canonical_fixed_layout_run_validates_full_classification_run(
     )
 
     prepared = prepare_canonical_fixed_layout_run(cfg, num_datasets=10, seed=16, device="cpu")
-    base_plan_seed = offset_seed32(16, FIXED_LAYOUT_PLAN_SEED_OFFSET)
+    expected_rows_seed = KeyedRng(16).child_seed("rows")
 
-    assert sample_calls == [base_plan_seed, _attempt_seed(base_plan_seed, 1)]
+    assert sample_calls == [
+        (("plan_candidate", 0), expected_rows_seed),
+        (("plan_candidate", 1), expected_rows_seed),
+    ]
     assert validation_calls == [
         (
             int(first_plan.plan_seed),
-            16,
+            (),
             10,
             _resolve_fixed_layout_batch_size(first_plan, num_datasets=10, batch_size=None),
         ),
         (
             int(second_plan.plan_seed),
-            16,
+            (),
             10,
             _resolve_fixed_layout_batch_size(second_plan, num_datasets=10, batch_size=None),
         ),
@@ -1820,10 +2044,13 @@ def test_prepare_canonical_fixed_layout_run_uses_lightweight_classification_vali
     def _stub_sample_fixed_layout_candidate(
         _config: GeneratorConfig,
         *,
-        seed: int,
+        keyed_rng: KeyedRng,
+        rows_seed: int,
         requested_device: str,
         resolved_device: str,
     ) -> _FixedLayoutPlan:
+        assert tuple(keyed_rng.path) == ("plan_candidate", 0)
+        assert int(rows_seed) == KeyedRng(17).child_seed("rows")
         assert requested_device == "cpu"
         assert resolved_device == "cpu"
         return plan
@@ -1967,14 +2194,19 @@ def test_generate_batch_with_plan_iter_uses_cached_classification_attempt_plan_f
     def _stub_group_noise_runtime_chunk(
         _config: GeneratorConfig,
         *,
-        dataset_seeds: list[int],
+        dataset_roots: list[KeyedRng],
         attempts: list[int] | None = None,
     ):
-        grouped_attempts_seen.append(list(attempts or [0] * len(dataset_seeds)))
+        local_attempts = list(attempts or [0] * len(dataset_roots))
+        grouped_attempts_seen.append(local_attempts)
         return [
             SimpleNamespace(
-                chunk_offsets=list(range(len(dataset_seeds))),
-                generation_seeds=[SeedManager(seed).child("data") for seed in dataset_seeds],
+                chunk_offsets=[index],
+                generation_seeds=[
+                    dataset_root.keyed(
+                        "attempt", local_attempts[index], "raw_generation"
+                    ).child_seed()
+                ],
                 selection=NoiseRuntimeSelection(
                     family_requested="gaussian",
                     family_sampled="gaussian",
@@ -1983,8 +2215,9 @@ def test_generate_batch_with_plan_iter_uses_cached_classification_attempt_plan_f
                     student_t_df=5.0,
                     mixture_weights=None,
                 ),
-                attempt=0,
+                attempt=local_attempts[index],
             )
+            for index, dataset_root in enumerate(dataset_roots)
         ]
 
     def _stub_generate_grouped_raw_batches(
@@ -2001,20 +2234,20 @@ def test_generate_batch_with_plan_iter_uses_cached_classification_attempt_plan_f
         _ = requested_device
         _ = resolved_device
         _ = noise_sigma_multiplier
-        assert [group.attempt for group in grouped_noise_runtime] == [0]
-        batch_size = len(grouped_noise_runtime[0].chunk_offsets)
+        assert all(group.attempt == 0 for group in grouped_noise_runtime)
         n_rows = cfg.dataset.n_train + cfg.dataset.n_test
         return [
             SimpleNamespace(
-                chunk_offsets=list(grouped_noise_runtime[0].chunk_offsets),
-                selection=grouped_noise_runtime[0].selection,
-                attempt=0,
-                x_batch=torch.zeros((batch_size, n_rows, 2), dtype=torch.float32),
-                y_batch=torch.zeros((batch_size, n_rows), dtype=torch.int64),
-                aux_meta_batch=[{"filter": {"mode": "deferred", "status": "not_run"}}] * batch_size,
+                chunk_offsets=list(group.chunk_offsets),
+                selection=group.selection,
+                attempt=group.attempt,
+                x_batch=torch.zeros((1, n_rows, 2), dtype=torch.float32),
+                y_batch=torch.zeros((1, n_rows), dtype=torch.int64),
+                aux_meta_batch=[{"filter": {"mode": "deferred", "status": "not_run"}}],
                 effective_resolved_device="cpu",
                 device_fallback_reason=None,
             )
+            for group in grouped_noise_runtime
         ]
 
     def _stub_finalize_generated_chunk_preserve_schema(
@@ -2022,7 +2255,7 @@ def test_generate_batch_with_plan_iter_uses_cached_classification_attempt_plan_f
         _layout,
         *,
         context,
-        seeds: list[int],
+        dataset_roots: list[KeyedRng],
         attempt: int,
         attempts_used: int,
         device: str,
@@ -2049,15 +2282,16 @@ def test_generate_batch_with_plan_iter_uses_cached_classification_attempt_plan_f
         _ = aux_meta_batch
         _ = noise_runtime_selection
         _ = dtype
-        assert attempt == 0
-        assert attempts_used == 1
-        return [None, _make_bundle(seeds[1]), None]
+        assert len(dataset_roots) == 1
+        dataset_seed = dataset_roots[0].child_seed()
+        assert attempts_used == attempt + 1
+        return [_make_bundle(dataset_seed)]
 
     def _stub_generate_fixed_layout_bundle_with_retries(
         _config: GeneratorConfig,
         *,
         plan: _FixedLayoutPlan,
-        dataset_seed: int,
+        dataset_root: KeyedRng,
         requested_device: str,
         resolved_device: str,
         preserve_feature_schema: bool,
@@ -2068,7 +2302,7 @@ def test_generate_batch_with_plan_iter_uses_cached_classification_attempt_plan_f
         _ = resolved_device
         _ = preserve_feature_schema
         retry_starts.append(int(start_attempt))
-        return _make_bundle(dataset_seed)
+        return _make_bundle(dataset_root.child_seed())
 
     monkeypatch.setattr(
         "dagzoo.core.fixed_layout_runtime._group_noise_runtime_chunk",
@@ -2101,6 +2335,11 @@ def test_generate_batch_with_plan_iter_uses_cached_classification_attempt_plan_f
     assert len(bundles) == 3
     assert grouped_attempts_seen == [[0, 0, 0]]
     assert retry_starts == [2, 1]
+    assert [int(bundle.metadata["seed"]) for bundle in bundles] == [
+        KeyedRng(33).child_seed("dataset", 0),
+        KeyedRng(33).child_seed("dataset", 1),
+        KeyedRng(33).child_seed("dataset", 2),
+    ]
 
 
 def test_generate_one_replays_from_emitted_metadata_seed() -> None:
@@ -2110,12 +2349,57 @@ def test_generate_one_replays_from_emitted_metadata_seed() -> None:
     replayed = generate_one(cfg, seed=int(bundle.metadata["seed"]), device="cpu")
 
     assert int(bundle.metadata["seed"]) == 4321
+    assert int(bundle.metadata["layout_plan_seed"]) == KeyedRng(4321).child_seed(
+        "plan_candidate",
+        0,
+        "layout",
+    )
     assert int(replayed.metadata["seed"]) == 4321
     np.testing.assert_allclose(np.asarray(bundle.X_train), np.asarray(replayed.X_train), atol=1e-6)
     np.testing.assert_allclose(np.asarray(bundle.X_test), np.asarray(replayed.X_test), atol=1e-6)
     np.testing.assert_allclose(np.asarray(bundle.y_train), np.asarray(replayed.y_train), atol=1e-6)
     np.testing.assert_allclose(np.asarray(bundle.y_test), np.asarray(replayed.y_test), atol=1e-6)
     assert bundle.metadata["layout_plan_signature"] == replayed.metadata["layout_plan_signature"]
+
+
+def test_generate_one_keyed_replay_layout_root_path_replays_layout_signature() -> None:
+    cfg = _tiny_regression_config()
+
+    bundle = generate_one(cfg, seed=4321, device="cpu")
+    keyed_replay = bundle.metadata["keyed_replay"]
+    replayed_layout = _sample_layout(
+        cfg,
+        KeyedRng(int(bundle.metadata["seed"])).keyed(*keyed_replay["layout_root_path"]),
+        "cpu",
+    )
+
+    assert keyed_replay["layout_root_path"] == ["plan_candidate", 0, "layout"]
+    assert _layout_signature(replayed_layout) == str(bundle.metadata["layout_signature"])
+
+
+def test_generate_one_keyed_replay_dataset_root_path_replays_noise_runtime_metadata() -> None:
+    cfg = _tiny_regression_config()
+    cfg.noise.family = NOISE_FAMILY_MIXTURE
+    cfg.noise.mixture_weights = {
+        str(NOISE_FAMILY_GAUSSIAN): 0.2,
+        str(NOISE_FAMILY_LAPLACE): 0.8,
+    }
+    cfg.noise.base_scale = 0.35
+    cfg.noise.student_t_df = 7.0
+
+    bundle = generate_one(cfg, seed=4321, device="cpu")
+    keyed_replay = bundle.metadata["keyed_replay"]
+    dataset_root = KeyedRng(int(bundle.metadata["seed"])).keyed(*keyed_replay["dataset_root_path"])
+    replayed_selection = _resolve_noise_runtime_selection(
+        cfg,
+        keyed_rng=dataset_root.keyed("noise_runtime"),
+    )
+
+    assert keyed_replay["dataset_root_path"] == ["dataset", 0]
+    assert int(bundle.metadata["dataset_seed"]) == int(dataset_root.child_seed())
+    assert bundle.metadata["noise_distribution"] == _build_noise_distribution_metadata(
+        replayed_selection
+    )
 
 
 def _tiny_missingness_config(

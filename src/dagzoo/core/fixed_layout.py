@@ -18,7 +18,7 @@ from dagzoo.core.fixed_layout_plan_types import FixedLayoutExecutionPlan
 from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.types import DatasetBundle
 
-_FIXED_LAYOUT_METADATA_SCHEMA_VERSION = 3
+_FIXED_LAYOUT_METADATA_SCHEMA_VERSION = 4
 
 
 @dataclass(slots=True)
@@ -32,6 +32,7 @@ class _FixedLayoutPlan:
     n_train: int
     n_test: int
     layout_signature: str
+    candidate_attempt: int = 0
     execution_plan: FixedLayoutExecutionPlan = field(default_factory=FixedLayoutExecutionPlan)
     plan_signature: str | None = None
 
@@ -77,6 +78,16 @@ def _annotate_fixed_layout_metadata(bundle: DatasetBundle, *, plan: _FixedLayout
     bundle.metadata["layout_signature"] = str(plan.layout_signature)
     bundle.metadata["layout_plan_schema_version"] = int(_FIXED_LAYOUT_METADATA_SCHEMA_VERSION)
     bundle.metadata["layout_execution_contract"] = str(plan.execution_plan.execution_contract)
+    keyed_replay = bundle.metadata.get("keyed_replay")
+    if not isinstance(keyed_replay, dict):
+        keyed_replay = {}
+    keyed_replay["layout_root_path"] = ["plan_candidate", int(plan.candidate_attempt), "layout"]
+    keyed_replay["execution_plan_root_path"] = [
+        "plan_candidate",
+        int(plan.candidate_attempt),
+        "execution_plan",
+    ]
+    bundle.metadata["keyed_replay"] = keyed_replay
     if plan.plan_signature is not None:
         bundle.metadata["layout_plan_signature"] = str(plan.plan_signature)
 

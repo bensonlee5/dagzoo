@@ -56,7 +56,7 @@ def _sample_assignments(
 
 def _sample_layout(
     config: GeneratorConfig,
-    generator: torch.Generator,
+    keyed_rng: KeyedRng,
     device: str,
 ) -> LayoutPlan:
     """Sample dataset layout, graph, and node assignments for one dataset instance."""
@@ -74,11 +74,11 @@ def _sample_layout(
             sampled_feature_min,
             sampled_feature_max + 1,
             (1,),
-            generator=generator,
+            generator=keyed_rng.keyed("feature_count").torch_rng(device=device),
         ).item()
     )
 
-    corr = CorrelatedSampler(generator, device)
+    corr = CorrelatedSampler(keyed_rng.keyed("correlated"), device)
     cat_ratio = float(
         corr.sample_num(
             "categorical_ratio",
@@ -91,9 +91,11 @@ def _sample_layout(
     num_categorical_features = int(round(cat_ratio * num_features))
     num_categorical_features = max(0, min(num_features, num_categorical_features))
     if num_categorical_features > 0:
-        cat_idx_t = torch.randperm(num_features, generator=generator, device=device)[
-            :num_categorical_features
-        ]
+        cat_idx_t = torch.randperm(
+            num_features,
+            generator=keyed_rng.keyed("categorical_feature_indices").torch_rng(device=device),
+            device=device,
+        )[:num_categorical_features]
         cat_idx_t, _ = torch.sort(cat_idx_t)
         cat_idx = cat_idx_t.tolist()
     else:
@@ -101,7 +103,8 @@ def _sample_layout(
 
     max_card = max(2, config.dataset.max_categorical_cardinality)
     cardinalities = []
-    for _ in cat_idx:
+    for feature_index in cat_idx:
+        generator = keyed_rng.keyed("cardinality", int(feature_index)).torch_rng(device=device)
         log_low = math.log(2.0)
         log_high = math.log(float(max_card))
         u = torch.empty(1, device=device).uniform_(log_low, log_high, generator=generator)
@@ -115,7 +118,7 @@ def _sample_layout(
             config.dataset.n_classes_min,
             config.dataset.n_classes_max + 1,
             (1,),
-            generator=generator,
+            generator=keyed_rng.keyed("n_classes").torch_rng(device=device),
         ).item()
     )
     n_classes = max(2, n_classes)
@@ -123,18 +126,28 @@ def _sample_layout(
     num_nodes = _sample_node_count(
         int(config.graph.n_nodes_min),
         int(config.graph.n_nodes_max),
-        generator,
+        keyed_rng.keyed("graph_nodes").torch_rng(device=device),
         device,
     )
     adjacency = sample_dag(
         num_nodes,
-        generator,
+        keyed_rng.keyed("graph").torch_rng(device="cpu"),
         edge_logit_bias=float(shift_params.edge_logit_bias_shift),
     )
     graph_depth_nodes = dag_longest_path_nodes(adjacency)
     graph_edge_density = dag_edge_density(adjacency)
-    feature_to_node = _sample_assignments(num_features, num_nodes, generator, device)
-    target_to_node = _sample_assignments(1, num_nodes, generator, device)[0]
+    feature_to_node = _sample_assignments(
+        num_features,
+        num_nodes,
+        keyed_rng.keyed("assignments", "feature").torch_rng(device=device),
+        device,
+    )
+    target_to_node = _sample_assignments(
+        1,
+        num_nodes,
+        keyed_rng.keyed("assignments", "target").torch_rng(device=device),
+        device,
+    )[0]
 
     feature_types: list[FeatureType] = ["num"] * num_features
     for i in cat_idx:
