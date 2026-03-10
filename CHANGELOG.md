@@ -10,6 +10,22 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.8.2] - 2026-03-10
+
+### Changed
+
+- Benchmark preset results now expose
+  `filter_accepted_datasets_per_minute` so accepted-corpus throughput is a
+  first-class metric alongside filter-stage throughput and dataset-level
+  acceptance yield.
+- Newly saved benchmark baselines now persist
+  `filter_accepted_datasets_per_minute` in the default gating metric set, so
+  `--baseline` and `--fail-on-regression` catch accepted-corpus throughput
+  regressions by default.
+- Added a public filter-enabled smoke benchmark preset and documented the
+  canonical benchmark command plus the summary fields to inspect for accepted
+  throughput and acceptance/rejection yield.
+
 ## [0.8.1] - 2026-03-10
 
 ### Changed

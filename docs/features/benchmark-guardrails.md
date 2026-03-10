@@ -44,6 +44,14 @@ ______________________________________________________________________
 
 ```bash
 dagzoo benchmark \
+  --config configs/preset_filter_benchmark_smoke.yaml \
+  --preset custom \
+  --suite smoke \
+  --hardware-policy none \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_filter
+
+dagzoo benchmark \
   --config configs/preset_missingness_mar.yaml \
   --preset custom \
   --suite smoke \
@@ -64,6 +72,39 @@ dagzoo benchmark \
   --no-memory \
   --out-dir benchmarks/results/smoke_noise_guardrails
 ```
+
+______________________________________________________________________
+
+## Filter-enabled benchmark workflow
+
+Use the filter smoke preset when you want one canonical CPU benchmark run that
+surfaces filter-stage throughput, accepted-corpus throughput, and acceptance
+yield together:
+
+```bash
+dagzoo benchmark \
+  --config configs/preset_filter_benchmark_smoke.yaml \
+  --preset custom \
+  --suite smoke \
+  --hardware-policy none \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_filter
+```
+
+Inspect these `summary.json` preset-result fields first:
+
+- `filter_datasets_per_minute`
+- `filter_accepted_datasets_per_minute`
+- `filter_accepted_datasets_measured`
+- `filter_rejected_datasets_measured`
+- `filter_acceptance_rate_dataset_level`
+- `filter_rejection_rate_dataset_level`
+- `filter_rejection_rate_attempt_level`
+- `filter_retry_dataset_rate`
+
+The CLI preset line prints the same headline values as `filter/min`,
+`filter_accepted/min`, `filter_accept_dataset_pct`, and
+`filter_reject_dataset_pct`.
 
 ______________________________________________________________________
 

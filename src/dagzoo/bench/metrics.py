@@ -20,6 +20,7 @@ HIGHER_IS_BETTER_METRICS = frozenset(
         "generation_datasets_per_minute",
         "write_datasets_per_minute",
         "filter_datasets_per_minute",
+        "filter_accepted_datasets_per_minute",
         "filter_acceptance_rate_dataset_level",
     }
 )

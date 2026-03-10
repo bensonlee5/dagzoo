@@ -52,8 +52,8 @@ def _build_preset_table(preset_results: list[dict[str, Any]]) -> list[str]:
     """Create a markdown table summarizing per-preset performance metrics."""
 
     lines = [
-        "| Preset | Rows | Mode | Device | Backend | Datasets/min | Gen/min | Write/min | Filter/min | Repro | Workload | Filter Reject % (attempt) | Filter Accept % (dataset) | Filter Reject % (dataset) | Filter Retry % (dataset) | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) | Diagnostics | Missingness | Lineage | Shift | Noise |",
-        "|---|---:|---|---|---:|---:|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
+        "| Preset | Rows | Mode | Device | Backend | Datasets/min | Gen/min | Write/min | Filter/min | Filter Accepted/min | Repro | Workload | Filter Reject % (attempt) | Filter Accept % (dataset) | Filter Reject % (dataset) | Filter Retry % (dataset) | Elapsed (s) | Latency p95 (ms) | Peak RSS (MB) | Diagnostics | Missingness | Lineage | Shift | Noise |",
+        "|---|---:|---|---|---:|---:|---:|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|---|",
     ]
     for result in preset_results:
         diagnostics_state = "on" if bool(result.get("diagnostics_enabled")) else "off"
@@ -84,6 +84,7 @@ def _build_preset_table(preset_results: list[dict[str, Any]]) -> list[str]:
             f"{_format_float(result.get('generation_datasets_per_minute'), 2)} | "
             f"{_format_float(result.get('write_datasets_per_minute'), 2)} | "
             f"{_format_float(result.get('filter_datasets_per_minute'), 2)} | "
+            f"{_format_float(result.get('filter_accepted_datasets_per_minute'), 2)} | "
             f"{_format_match(result.get('reproducibility_match'))} | "
             f"{_format_match(result.get('reproducibility_workload_match'))} | "
             f"{_format_percent(result.get('filter_rejection_rate_attempt_level'), 2)} | "

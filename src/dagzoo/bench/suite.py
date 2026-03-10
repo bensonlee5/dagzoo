@@ -584,6 +584,11 @@ def run_preset_benchmark(
         if filter_dataset_yield_total > 0
         else None
     )
+    filter_accepted_datasets_per_minute = (
+        float(filter_dpm) * float(filter_acceptance_rate_dataset_level)
+        if filter_dpm is not None and filter_acceptance_rate_dataset_level is not None
+        else None
+    )
     filter_rejection_rate_dataset_level = (
         float(filter_rejected_datasets_measured) / float(filter_dataset_yield_total)
         if filter_dataset_yield_total > 0
@@ -618,6 +623,7 @@ def run_preset_benchmark(
     result["generation_datasets_per_minute"] = generation_dpm
     result["write_datasets_per_minute"] = float(write_dpm)
     result["filter_datasets_per_minute"] = float(filter_dpm) if filter_dpm is not None else None
+    result["filter_accepted_datasets_per_minute"] = filter_accepted_datasets_per_minute
     result["stage_sample_datasets"] = int(stage_sample_datasets)
     result["filter_stage_enabled"] = filter_stage_enabled
     result["total_attempts"] = int(throughput_pressure_summary["attempts_total"])

@@ -40,6 +40,7 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
     assert float(profile["generation_datasets_per_minute"]) >= 0.0
     assert float(profile["write_datasets_per_minute"]) >= 0.0
     assert profile["filter_datasets_per_minute"] is None
+    assert profile["filter_accepted_datasets_per_minute"] is None
     assert "accepted_datasets_measured" not in profile
     assert profile["filter_accepted_datasets_measured"] == 0
     assert profile["filter_rejected_datasets_measured"] == 0
@@ -160,6 +161,35 @@ def test_benchmark_cli_builtin_cpu_reports_fixed_batched_generation_mode(tmp_pat
     assert all(result["generation_mode"] == "fixed_batched" for result in preset_results)
 
 
+def test_benchmark_cli_filter_smoke_config_reports_accepted_corpus_throughput(tmp_path) -> None:
+    out_dir = tmp_path / "filter_smoke_results"
+    code = main(
+        [
+            "benchmark",
+            "--config",
+            "configs/preset_filter_benchmark_smoke.yaml",
+            "--preset",
+            "custom",
+            "--suite",
+            "smoke",
+            "--hardware-policy",
+            "none",
+            "--no-memory",
+            "--out-dir",
+            str(out_dir),
+        ]
+    )
+    assert code == 0
+    payload = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+    profile = payload["preset_results"][0]
+    assert profile["filter_datasets_per_minute"] is not None
+    assert float(profile["filter_accepted_datasets_per_minute"]) > 0.0
+    assert int(profile["filter_accepted_datasets_measured"]) > 0
+    assert int(profile["filter_rejected_datasets_measured"]) > 0
+    assert 0.0 < float(profile["filter_acceptance_rate_dataset_level"]) < 1.0
+    assert 0.0 < float(profile["filter_rejection_rate_dataset_level"]) < 1.0
+
+
 def test_benchmark_cli_fail_on_regression(tmp_path) -> None:
     baseline_path = tmp_path / "baseline.json"
     baseline_payload = {
@@ -198,6 +228,102 @@ def test_benchmark_cli_fail_on_regression(tmp_path) -> None:
         ]
     )
     assert code == 1
+
+
+def test_benchmark_cli_fail_on_regression_for_filter_accepted_throughput(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    baseline_payload = {
+        "version": 1,
+        "suite": "smoke",
+        "metrics": ["filter_accepted_datasets_per_minute"],
+        "presets": {
+            "custom": {"filter_accepted_datasets_per_minute": 100.0},
+        },
+    }
+    baseline_path.write_text(json.dumps(baseline_payload), encoding="utf-8")
+
+    summary = {
+        "suite": "smoke",
+        "preset_results": [
+            {
+                "preset_key": "custom",
+                "filter_accepted_datasets_per_minute": 70.0,
+                "datasets_per_minute": 1000.0,
+                "latency_p95_ms": 1.0,
+            }
+        ],
+        "regression": {
+            "status": "fail",
+            "issues": [
+                {
+                    "preset": "custom",
+                    "metric": "filter_accepted_datasets_per_minute",
+                    "current": 70.0,
+                    "baseline": 100.0,
+                    "degradation_pct": 30.0,
+                    "severity": "fail",
+                }
+            ],
+            "hard_fail": True,
+        },
+    }
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_run_benchmark_suite(*args, **kwargs):
+        calls.append(kwargs)
+        return summary
+
+    monkeypatch.setattr("dagzoo.cli.run_benchmark_suite", _fake_run_benchmark_suite)
+
+    code = main(
+        [
+            "benchmark",
+            "--config",
+            "configs/default.yaml",
+            "--preset",
+            "custom",
+            "--suite",
+            "smoke",
+            "--num-datasets",
+            "2",
+            "--warmup",
+            "0",
+            "--hardware-policy",
+            "none",
+            "--no-memory",
+            "--baseline",
+            str(baseline_path),
+            "--warn-threshold-pct",
+            "1",
+            "--fail-threshold-pct",
+            "2",
+            "--fail-on-regression",
+        ]
+    )
+
+    assert code == 1
+    assert calls == [
+        {
+            "suite": "smoke",
+            "warn_threshold_pct": 1.0,
+            "fail_threshold_pct": 2.0,
+            "baseline_payload": baseline_payload,
+            "num_datasets_override": 2,
+            "warmup_override": 0,
+            "collect_memory": False,
+            "collect_reproducibility": False,
+            "collect_diagnostics": False,
+            "diagnostics_root_dir": None,
+            "fail_on_regression": True,
+            "hardware_policy": "none",
+        }
+    ]
+    captured = capsys.readouterr()
+    assert "Regression status=fail issues=1" in captured.out
+    assert "filter_accepted/min=70.00" in captured.out
 
 
 def test_benchmark_cli_diagnostics_emits_artifacts(tmp_path) -> None:
@@ -493,6 +619,7 @@ def test_print_preset_result_line_includes_stage_and_filter_rejection_metrics(ca
             "generation_datasets_per_minute": 124.0,
             "write_datasets_per_minute": 80.0,
             "filter_datasets_per_minute": 60.0,
+            "filter_accepted_datasets_per_minute": 45.0,
             "filter_acceptance_rate_dataset_level": 0.75,
             "filter_rejection_rate_dataset_level": 0.25,
             "filter_rejection_rate_attempt_level": 0.125,
@@ -504,6 +631,7 @@ def test_print_preset_result_line_includes_stage_and_filter_rejection_metrics(ca
     assert "gen/min=124.00" in output
     assert "write/min=80.00" in output
     assert "filter/min=60.00" in output
+    assert "filter_accepted/min=45.00" in output
     assert "filter_reject_attempt_pct=12.50" in output
     assert "filter_accept_dataset_pct=75.00" in output
     assert "filter_reject_dataset_pct=25.00" in output

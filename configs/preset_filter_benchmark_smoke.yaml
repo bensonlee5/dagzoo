@@ -1,0 +1,50 @@
+seed: 1
+
+dataset:
+  task: classification
+  n_train: 128
+  n_test: 32
+  n_features_min: 8
+  n_features_max: 16
+  n_classes_min: 8
+  n_classes_max: 16
+
+graph:
+  n_nodes_min: 8
+  n_nodes_max: 12
+
+runtime:
+  device: cpu
+
+output:
+  out_dir: benchmarks/results/smoke_filter
+  shard_size: 16
+  compression: zstd
+
+diagnostics:
+  enabled: false
+
+benchmark:
+  preset_name: filter_smoke
+  suite: smoke
+  num_datasets: 20
+  warmup_datasets: 0
+  warn_threshold_pct: 10.0
+  fail_threshold_pct: 20.0
+  collect_memory: false
+  collect_reproducibility: false
+  reproducibility_num_datasets: 1
+  latency_num_samples: 5
+  presets:
+    filter_smoke:
+      device: cpu
+      num_datasets: 20
+      warmup_datasets: 0
+
+filter:
+  enabled: true
+  n_estimators: 6
+  max_depth: 3
+  threshold: 0.95
+  max_attempts: 3
+  n_jobs: -1
