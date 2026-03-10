@@ -4,6 +4,14 @@ The project is organized into functional modules that manage the lifecycle
 of a synthetic dataset, from configuration and causal graph sampling to
 node execution and quality filtering.
 
+For dependency-aware ripple analysis, see
+[`module-dependency-map.md`](module-dependency-map.md). It complements this file
+with a generated package graph plus hotspot reverse-dependency summaries. For
+example, changes in `src/dagzoo/core/execution_semantics.py` currently cascade
+into `fixed_layout_batched.py`, `node_pipeline.py`, converter modules, function
+modules, and then outward into `fixed_layout_runtime.py`, benchmarks, and CLI
+surfaces.
+
 ## 1. Entry Points & Orchestration
 
 The high-level logic that bridges CLI/API requests to the canonical generation

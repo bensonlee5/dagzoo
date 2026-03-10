@@ -1,0 +1,29 @@
+[importlinter]
+root_package = dagzoo
+
+[importlinter:contract:core_product_surface]
+name = dagzoo.core does not depend on product entrypoints
+type = forbidden
+source_modules =
+    dagzoo.core
+forbidden_modules =
+    dagzoo.cli
+    dagzoo.bench
+    dagzoo.diagnostics
+
+[importlinter:contract:library_product_surface]
+name = dagzoo libraries do not depend on product entrypoints
+type = forbidden
+source_modules =
+    dagzoo.functions
+    dagzoo.converters
+    dagzoo.sampling
+    dagzoo.io
+    dagzoo.filtering
+    dagzoo.graph
+    dagzoo.linalg
+    dagzoo.postprocess
+forbidden_modules =
+    dagzoo.cli
+    dagzoo.bench
+    dagzoo.diagnostics

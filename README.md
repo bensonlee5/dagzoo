@@ -86,6 +86,7 @@ Examples in this README assume a repo checkout (so `configs/*.yaml` is available
 ```bash
 uv sync --group dev
 source .venv/bin/activate
+./scripts/dev doctor all
 ```
 
 Install the packaged CLI globally when you do not need repo presets/config files:
@@ -140,6 +141,13 @@ dagzoo filter --help
 dagzoo benchmark --help
 ```
 
+Local repo workflow before review:
+
+```bash
+./scripts/dev impact
+./scripts/dev verify quick
+```
+
 ## Features
 
 - Diagnostics: exposes per-dataset artifacts so you can verify coverage, inspect drift, and debug generation outcomes.
@@ -181,6 +189,8 @@ node execution and quality filtering.
 
 See [docs/development/codebase-navigation.md](docs/development/codebase-navigation.md)
 for the full module map with file paths and descriptions.
+See [docs/development/module-dependency-map.md](docs/development/module-dependency-map.md)
+for the generated dependency graph and change-impact hotspots.
 
 ## Python API
 

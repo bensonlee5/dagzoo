@@ -27,3 +27,15 @@ repos:
     types: [markdown]
     exclude: ^(WORKFLOW\.md|docs/transforms.md|site/)
     pass_filenames: true
+  - id: deptry
+    name: deptry
+    entry: ./.venv/bin/deptry .
+    language: system
+    pass_filenames: false
+    files: ^(pyproject\.toml|src/dagzoo/)
+  - id: release-contract
+    name: release contract
+    entry: ./.venv/bin/python scripts/dev.py contract --files
+    language: system
+    pass_filenames: true
+    files: ^(src/dagzoo/(cli\.py|config\.py|core/(config_resolution|metadata|dataset|fixed_layout_runtime)\.py|io/.*)|configs/.*|pyproject\.toml|CHANGELOG\.md)$

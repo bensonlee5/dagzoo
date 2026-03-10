@@ -4,6 +4,19 @@ Run these wrappers and helper scripts from the repo root. CLI-oriented entries
 typically use `uv run dagzoo ...`; docs and maintenance helpers are invoked
 directly.
 
+## Developer CLI
+
+- `./scripts/dev doctor [code|docs|all]`
+  - Verifies local toolchain prerequisites for repo work.
+- `./scripts/dev deps [--scope package|hybrid|full] [--format text|json] [--write-docs] [--check]`
+  - Builds the repo dependency graph and can refresh the checked-in docs snapshot.
+- `./scripts/dev impact [--source working-tree|--base <git-ref>] [--files ...] [--format text|json]`
+  - Classifies changed files and shows dependency-aware downstream impact.
+- `./scripts/dev contract [--source working-tree|--base <git-ref>] [--files ...] [--strict]`
+  - Enforces version/changelog expectations for likely user-facing changes.
+- `./scripts/dev verify quick|code|docs|bench|full [--dry-run] [--incremental] [--parallel]`
+  - Canonical local verification entrypoint for normal code, docs, and benchmark work.
+
 ## Scripts
 
 - `scripts/generate-from-config.sh [config] [num_datasets] [device] [out_dir] [seed]`
@@ -44,6 +57,14 @@ directly.
 ## Examples
 
 ```bash
+./scripts/dev doctor all
+./scripts/dev impact
+./scripts/dev impact --files src/dagzoo/core/execution_semantics.py
+./scripts/dev deps --write-docs
+./scripts/dev verify quick
+./scripts/dev verify code --incremental
+./scripts/dev verify docs
+./scripts/dev verify bench
 ./scripts/generate-default.sh
 ./scripts/generate-default.sh 50 cpu data/run_cpu_50
 ./scripts/generate-h100.sh 500 cuda data/run_h100_500 123

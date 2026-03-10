@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+import importlib
+import importlib.util
+from pathlib import Path
+import sys
+
+import pytest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_ROOT = REPO_ROOT / "scripts"
+
+
+def _import_dev_module(module_name: str):
+    if str(SCRIPTS_ROOT) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS_ROOT))
+    return importlib.import_module(module_name)
+
+
+def _load_dev_cli():
+    module_name = "repo_dev_cli"
+    script_path = SCRIPTS_ROOT / "dev.py"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_dependency_graph_hotspot_captures_execution_semantics_cascade() -> None:
+    deps_module = _import_dev_module("devlib.deps")
+
+    graph = deps_module.build_import_graph()
+    summary = graph.module_summary("dagzoo.core.execution_semantics")
+
+    assert "dagzoo.core.fixed_layout_batched" in summary.direct_importers
+    assert "dagzoo.core.node_pipeline" in summary.direct_importers
+    assert "dagzoo.functions.random_functions" in summary.direct_importers
+    assert "dagzoo.functions.multi" in summary.direct_importers
+    assert "dagzoo.converters.numeric" in summary.direct_importers
+    assert "dagzoo.converters.categorical" in summary.direct_importers
+    assert "dagzoo.sampling.random_points" in summary.direct_importers
+    assert "dagzoo.core.fixed_layout_runtime" in summary.transitive_importers
+    assert "dagzoo.bench" in summary.impacted_packages
+    assert "dagzoo.cli" in summary.impacted_packages
+
+
+def test_render_dependency_map_includes_hotspot_example() -> None:
+    deps_module = _import_dev_module("devlib.deps")
+
+    content = deps_module.render_dependency_map_markdown(deps_module.build_import_graph())
+
+    assert "## Change-Impact Hotspots" in content
+    assert "### `dagzoo.core.execution_semantics`" in content
+    assert "dagzoo.core.fixed_layout_batched" in content
+    assert "dagzoo.core.fixed_layout_runtime" in content
+
+
+def test_write_dependency_docs_and_check_current(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    deps_module = _import_dev_module("devlib.deps")
+    target = tmp_path / "module-dependency-map.md"
+    monkeypatch.setattr(deps_module, "DOCS_DEP_MAP_PATH", target)
+
+    graph = deps_module.build_import_graph()
+    deps_module.write_dependency_docs(graph)
+
+    assert target.exists()
+    assert deps_module.dependency_docs_are_current(graph) is True
+
+    target.write_text(target.read_text() + "\nextra\n")
+
+    assert deps_module.dependency_docs_are_current(graph) is False
+
+
+def test_impact_report_flags_execution_semantics_as_architecture_and_bench() -> None:
+    impact_module = _import_dev_module("devlib.impact")
+
+    report = impact_module.build_impact_report(("src/dagzoo/core/execution_semantics.py",))
+
+    assert report.tags == ("architecture", "code")
+    assert report.recommended_modes == ("quick", "code", "bench")
+    assert report.module_summaries[0].module == "dagzoo.core.execution_semantics"
+    assert "dagzoo.bench" in report.module_summaries[0].downstream_packages
+
+
+def test_release_contract_requires_version_and_changelog_for_release_risk() -> None:
+    impact_module = _import_dev_module("devlib.impact")
+    contract_module = _import_dev_module("devlib.contract")
+
+    report = impact_module.build_impact_report(("src/dagzoo/cli.py",))
+    result = contract_module.evaluate_release_contract(report)
+
+    assert result.ok is False
+    assert "pyproject.toml" in result.errors[0]
+    assert "CHANGELOG.md" in result.errors[0]
+
+
+def test_release_contract_warns_for_internal_code_change() -> None:
+    impact_module = _import_dev_module("devlib.impact")
+    contract_module = _import_dev_module("devlib.contract")
+
+    report = impact_module.build_impact_report(("src/dagzoo/functions/activations.py",))
+    result = contract_module.evaluate_release_contract(report)
+
+    assert result.ok is True
+    assert result.warnings
+    assert "Internal-only refactors" in result.warnings[0]
+
+
+def test_pyproject_change_alone_does_not_trigger_release_risk_contract() -> None:
+    impact_module = _import_dev_module("devlib.impact")
+    contract_module = _import_dev_module("devlib.contract")
+
+    report = impact_module.build_impact_report(("pyproject.toml",))
+    result = contract_module.evaluate_release_contract(report)
+
+    assert "release-risk" not in report.tags
+    assert result.ok is True
+    assert result.warnings == ()
+
+
+def test_verify_plan_docs_only_uses_docs_commands() -> None:
+    verify_module = _import_dev_module("devlib.verify")
+
+    plan = verify_module.build_verify_plan(
+        mode="quick",
+        source="working-tree",
+        base=None,
+        files=["README.md"],
+        incremental=False,
+        parallel=False,
+    )
+
+    assert plan.headline == "verify quick (docs-only change set)"
+    assert all(command.label.startswith("docs") for command in plan.commands)
+
+
+def test_verify_plan_code_includes_incremental_parallel_pytest_and_architecture_checks() -> None:
+    verify_module = _import_dev_module("devlib.verify")
+
+    plan = verify_module.build_verify_plan(
+        mode="code",
+        source="working-tree",
+        base=None,
+        files=["src/dagzoo/core/layout.py"],
+        incremental=True,
+        parallel=True,
+    )
+
+    labels = [command.label for command in plan.commands]
+    assert "ruff check" in labels
+    assert "mypy" in labels
+    assert "deptry" in labels
+    assert "import-linter" in labels
+    pytest_command = next(command for command in plan.commands if command.label == "pytest")
+    assert "--testmon" in pytest_command.argv
+    assert "-n" in pytest_command.argv
+    assert "auto" in pytest_command.argv
+
+
+def test_verify_execute_dry_run_lists_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    verify_module = _import_dev_module("devlib.verify")
+    contract_module = _import_dev_module("devlib.contract")
+
+    plan = verify_module.build_verify_plan(
+        mode="quick",
+        source="working-tree",
+        base=None,
+        files=["src/dagzoo/core/layout.py"],
+        incremental=False,
+        parallel=False,
+    )
+
+    monkeypatch.setattr(verify_module, "run_doctor", lambda mode: ())
+    monkeypatch.setattr(verify_module, "doctor_passed", lambda results: True)
+    monkeypatch.setattr(
+        verify_module,
+        "evaluate_release_contract",
+        lambda report: contract_module.ContractResult(ok=True, warnings=(), errors=()),
+    )
+    monkeypatch.setattr(verify_module, "dependency_docs_are_current", lambda graph: True)
+
+    output = verify_module.execute_verify_plan(plan, dry_run=True)
+
+    assert "dry-run:" in output
+    assert "ruff check" in output
+    assert "deptry" in output
+
+
+def test_dev_cli_help_exposes_new_commands(capsys: pytest.CaptureFixture[str]) -> None:
+    module = _load_dev_cli()
+
+    with pytest.raises(SystemExit) as exc_info:
+        module.main(["--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "doctor" in captured.out
+    assert "deps" in captured.out
+    assert "impact" in captured.out
+    assert "contract" in captured.out
+    assert "verify" in captured.out

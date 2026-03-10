@@ -9,3 +9,4 @@
 - We prefer shared utility packages over hand-rolled helpers to keep invariants centralized
 - We don’t probe data “YOLO-style”—we validate boundaries or rely on typed SDKs
 - Prior to declaring a branch ready for review, run /review and resolve all issues found
+- Canonical local verification is `./scripts/dev verify quick`; use `./scripts/dev impact` when you need a dependency-aware ripple check before broader refactors
