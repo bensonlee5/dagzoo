@@ -120,6 +120,8 @@ Data-quality acceptance is a separate stage:
 
 - Run `dagzoo filter --in <shard_dir> --out <out_dir>`.
 - Backend: CPU ExtraTrees-based wins-ratio filter.
+- Replay config is taken from embedded shard metadata; metadata-missing legacy
+  artifacts are rejected.
 - Deferred runs emit acceptance/rejection artifacts and optional curated
   shards.
 
@@ -156,8 +158,8 @@ The trace is field-level provenance (`path`, `source`, `old_value`,
 Notable runtime behavior:
 
 - `auto` resolves to available accelerator first, else CPU.
-- `auto` + resolved `mps` has a guarded fallback path to CPU on runtime
-  failure.
+- Backend runtime errors surface directly; generation does not rewrite the
+  resolved device after execution starts.
 - Split/postprocess control RNG runs on CPU to avoid tiny-op accelerator
   overhead.
 

@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import pytest
 import torch
 
@@ -15,12 +17,17 @@ from dagzoo.core.fixed_layout_plan_types import (
     StackedNodeSource,
     fixed_layout_converter_groups,
 )
-from dagzoo.core.node_pipeline import (
-    ConverterSpec,
-    apply_node_pipeline,
-)
+from dagzoo.core.node_pipeline import apply_node_pipeline
 import dagzoo.core.node_pipeline as node_pipeline_mod
 from conftest import make_generator as _make_generator, make_keyed_rng as _make_keyed_rng
+
+
+@dataclass(slots=True)
+class ConverterSpec:
+    key: str
+    kind: str
+    dim: int
+    cardinality: int | None = None
 
 
 def test_node_pipeline_extracts_requested_columns() -> None:
@@ -32,7 +39,7 @@ def test_node_pipeline_extracts_requested_columns() -> None:
         ConverterSpec(key="target", kind="target_cls", dim=3, cardinality=3),
     ]
 
-    x_node, extracted = apply_node_pipeline(parents, 128, specs, g, "cpu")
+    x_node, extracted = apply_node_pipeline(parents, 128, typed_converter_specs(specs), g, "cpu")
     assert x_node.shape[0] == 128
     assert "feature_0" in extracted
     assert "feature_1" in extracted
@@ -48,7 +55,7 @@ def test_torch_output_shapes() -> None:
         ConverterSpec(key="f0", kind="num", dim=1),
         ConverterSpec(key="f1", kind="cat", dim=3, cardinality=4),
     ]
-    x, ext = apply_node_pipeline(parents, 64, specs, g, "cpu")
+    x, ext = apply_node_pipeline(parents, 64, typed_converter_specs(specs), g, "cpu")
     assert x.shape[0] == 64
     assert "f0" in ext
     assert ext["f0"].shape == (64,)
@@ -59,7 +66,7 @@ def test_torch_output_shapes() -> None:
 def test_torch_no_parents() -> None:
     g = _make_generator(7)
     specs = [ConverterSpec(key="v", kind="num", dim=1)]
-    x, ext = apply_node_pipeline([], 64, specs, g, "cpu")
+    x, ext = apply_node_pipeline([], 64, typed_converter_specs(specs), g, "cpu")
     assert x.shape[0] == 64
     assert "v" in ext
 
@@ -69,10 +76,10 @@ def test_torch_deterministic() -> None:
     parents = [torch.randn(32, 4)]
 
     g1 = _make_generator(0)
-    x1, e1 = apply_node_pipeline(parents, 32, specs, g1, "cpu")
+    x1, e1 = apply_node_pipeline(parents, 32, typed_converter_specs(specs), g1, "cpu")
 
     g2 = _make_generator(0)
-    x2, e2 = apply_node_pipeline(parents, 32, specs, g2, "cpu")
+    x2, e2 = apply_node_pipeline(parents, 32, typed_converter_specs(specs), g2, "cpu")
 
     torch.testing.assert_close(x1, x2)
     torch.testing.assert_close(e1["v"], e2["v"])
@@ -105,7 +112,9 @@ def test_node_pipeline_sanitizes_non_finite_parent_values(
         )
     ]
 
-    x, ext = apply_node_pipeline(parents, 3, specs, _make_generator(5), "cpu")
+    x, ext = apply_node_pipeline(
+        parents, 3, typed_converter_specs(specs), _make_generator(5), "cpu"
+    )
 
     assert torch.all(torch.isfinite(x))
     assert torch.all(torch.isfinite(ext["v"]))
@@ -167,7 +176,7 @@ def test_node_pipeline_splits_grouped_center_random_fn_converters(
     actual_latent, actual_extracted = apply_node_pipeline(
         [],
         12,
-        specs,
+        typed_converter_specs(specs),
         actual_generator,
         "cpu",
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import random
+import copy
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeVar
@@ -1307,3 +1308,15 @@ class GeneratorConfig:
         """Serialize config dataclasses into a plain nested dictionary."""
 
         return asdict(self)
+
+
+def clone_generator_config(
+    config: GeneratorConfig,
+    *,
+    revalidate: bool,
+) -> GeneratorConfig:
+    """Clone generator config state with explicit validation semantics."""
+
+    if revalidate:
+        return GeneratorConfig.from_dict(config.to_dict())
+    return copy.deepcopy(config)

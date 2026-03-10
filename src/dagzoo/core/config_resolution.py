@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from dagzoo.config import GeneratorConfig
+from dagzoo.config import GeneratorConfig, clone_generator_config
 from dagzoo.hardware import HardwareInfo, detect_hardware
 from dagzoo.hardware_policy import (
     apply_hardware_policy,
@@ -60,7 +60,7 @@ class ResolvedBenchmarkPresetConfig:
 def _clone_config(config: GeneratorConfig) -> GeneratorConfig:
     """Clone nested config state so resolution does not mutate caller-owned objects."""
 
-    return GeneratorConfig.from_dict(config.to_dict())
+    return clone_generator_config(config, revalidate=True)
 
 
 def _append_event(

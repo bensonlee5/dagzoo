@@ -102,7 +102,7 @@ Each line contains:
 | `device`                     | str         | Compute device (e.g., `"cpu"`, `"cuda"`)                                                            |
 | `requested_device`           | str         | Requested runtime device after CLI/config normalization (for example `auto`, `cpu`, `cuda`, `mps`)  |
 | `resolved_device`            | str         | Runtime backend selected from the requested device for generation                                   |
-| `device_fallback_reason`     | str or null | Runtime fallback reason when execution backend is rewritten after resolution; `null` otherwise      |
+| `device_fallback_reason`     | str or null | Reserved field for runtime device-rewrite history; currently always `null`                          |
 | `compute_backend`            | str         | Implementation variant identifier                                                                   |
 | `n_features`                 | int         | Number of features                                                                                  |
 | `n_categorical_features`     | int         | Number of categorical features                                                                      |

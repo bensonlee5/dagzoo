@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 import hashlib
@@ -17,7 +16,7 @@ from typing import Any, Iterator
 import torch
 from sklearn.metrics import adjusted_rand_score
 
-from dagzoo.config import GeneratorConfig
+from dagzoo.config import GeneratorConfig, clone_generator_config
 from dagzoo.core import fixed_layout_batched as fixed_layout_batched_module
 from dagzoo.core.dataset import generate_batch_iter
 from dagzoo.core import execution_semantics as execution_semantics_module
@@ -1470,7 +1469,7 @@ def _run_scale_arm(
             "filter_summary": None,
         }
 
-    arm_config = copy.deepcopy(base_config)
+    arm_config = clone_generator_config(base_config, revalidate=False)
     coverage_aggregator = CoverageAggregator(_coverage_config_for_scale(arm_config))
     filter_telemetry = _FilterTelemetry()
     emitted = 0
@@ -2040,7 +2039,11 @@ def run_effective_diversity_audit(
     if normalized_phase not in {"both", "local", "scale"}:
         raise ValueError(f"Unsupported phase: {phase!r}")
 
-    resolved_config = copy.deepcopy(base_config) if base_config is not None else GeneratorConfig()
+    resolved_config = (
+        clone_generator_config(base_config, revalidate=False)
+        if base_config is not None
+        else GeneratorConfig()
+    )
 
     local_report: dict[str, Any] | None = None
     scale_report: dict[str, Any] | None = None

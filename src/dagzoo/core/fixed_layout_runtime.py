@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -12,6 +11,7 @@ import torch
 from dagzoo.config import (
     DatasetRowsSpec,
     GeneratorConfig,
+    clone_generator_config,
     dataset_rows_is_variable,
     resolve_dataset_total_rows,
 )
@@ -19,13 +19,13 @@ from dagzoo.core.fixed_layout import (
     _FixedLayoutPlan,
     _annotate_fixed_layout_metadata,
     _extract_emitted_schema_signature,
-    _generate_fixed_layout_graph_batch_with_fallback,
-    _generate_fixed_layout_label_batch_with_fallback,
     _layout_signature,
 )
 from dagzoo.core.fixed_layout_batched import (
     build_fixed_layout_execution_plan,
     fixed_layout_plan_signature,
+    generate_fixed_layout_graph_batch,
+    generate_fixed_layout_label_batch,
 )
 from dagzoo.core.fixed_layout_plan_types import FixedLayoutExecutionPlan
 from dagzoo.core.generation_context import (
@@ -183,15 +183,12 @@ def _generate_grouped_raw_batches(
             x_batch,
             y_batch,
             aux_meta_batch,
-            effective_resolved_device,
-            device_fallback_reason,
-        ) = _generate_fixed_layout_graph_batch_with_fallback(
+        ) = generate_fixed_layout_graph_batch(
             config,
             layout,
             execution_plan=execution_plan,
             dataset_seeds=group.generation_seeds,
-            requested_device=requested_device,
-            resolved_device=resolved_device,
+            device=resolved_device,
             noise_sigma_multiplier=noise_sigma_multiplier,
             noise_spec=noise_spec,
         )
@@ -203,8 +200,8 @@ def _generate_grouped_raw_batches(
                 x_batch=x_batch,
                 y_batch=y_batch,
                 aux_meta_batch=aux_meta_batch,
-                effective_resolved_device=str(effective_resolved_device),
-                device_fallback_reason=device_fallback_reason,
+                effective_resolved_device=str(resolved_device),
+                device_fallback_reason=None,
             )
         )
     return grouped_batches
@@ -255,7 +252,7 @@ def realize_generation_config_for_run(
     requested_device = (device or config.runtime.device or "auto").lower()
     resolved_device = _resolve_device(config, device)
 
-    realized = copy.deepcopy(config)
+    realized = clone_generator_config(config, revalidate=False)
     rows_seed = KeyedRng(run_seed).child_seed("rows")
     total_rows = resolve_dataset_total_rows(realized.dataset.rows, dataset_seed=rows_seed)
     if total_rows is not None:
@@ -434,19 +431,14 @@ def _first_valid_classification_attempt_for_dataset(
     attempts = max(1, int(config.filter.max_attempts))
 
     for attempt in range(max(0, int(start_attempt)), attempts):
-        y_batch, _aux_meta_batch, _effective_resolved_device, _device_fallback_reason = (
-            _generate_fixed_layout_label_batch_with_fallback(
-                config,
-                plan.layout,
-                execution_plan=plan.execution_plan,
-                dataset_seeds=[
-                    dataset_root.keyed("attempt", attempt, "raw_generation").child_seed()
-                ],
-                requested_device=requested_device,
-                resolved_device=resolved_device,
-                noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
-                noise_spec=noise_spec,
-            )
+        y_batch, _aux_meta_batch = generate_fixed_layout_label_batch(
+            config,
+            plan.layout,
+            execution_plan=plan.execution_plan,
+            dataset_seeds=[dataset_root.keyed("attempt", attempt, "raw_generation").child_seed()],
+            device=resolved_device,
+            noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
+            noise_spec=noise_spec,
         )
         if _raw_classification_labels_support_split(
             y_batch[0],
@@ -486,17 +478,14 @@ def _fixed_layout_plan_classification_attempt_plan(
         raw_batch_by_offset: list[tuple[torch.Tensor, int] | None] = [None] * chunk_size
         for group in grouped_noise_runtime:
             noise_spec = _noise_sampling_spec(group.selection)
-            y_batch, _aux_meta_batch, _effective_resolved_device, _device_fallback_reason = (
-                _generate_fixed_layout_label_batch_with_fallback(
-                    config,
-                    plan.layout,
-                    execution_plan=plan.execution_plan,
-                    dataset_seeds=group.generation_seeds,
-                    requested_device=requested_device,
-                    resolved_device=resolved_device,
-                    noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
-                    noise_spec=noise_spec,
-                )
+            y_batch, _aux_meta_batch = generate_fixed_layout_label_batch(
+                config,
+                plan.layout,
+                execution_plan=plan.execution_plan,
+                dataset_seeds=group.generation_seeds,
+                device=resolved_device,
+                noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
+                noise_spec=noise_spec,
             )
             for local_index, chunk_offset in enumerate(group.chunk_offsets):
                 raw_batch_by_offset[chunk_offset] = (y_batch, int(local_index))
@@ -656,15 +645,12 @@ def _generate_fixed_layout_bundle_with_retries(
             x_batch,
             y_batch,
             aux_meta_batch,
-            effective_resolved_device,
-            device_fallback_reason,
-        ) = _generate_fixed_layout_graph_batch_with_fallback(
+        ) = generate_fixed_layout_graph_batch(
             config,
             plan.layout,
             execution_plan=plan.execution_plan,
             dataset_seeds=[dataset_root.keyed("attempt", attempt, "raw_generation").child_seed()],
-            requested_device=requested_device,
-            resolved_device=resolved_device,
+            device=resolved_device,
             noise_sigma_multiplier=float(shift_params.variance_sigma_multiplier),
             noise_spec=noise_spec,
         )
@@ -676,12 +662,12 @@ def _generate_fixed_layout_bundle_with_retries(
                 attempt=attempt,
                 attempts_used=attempt + 1,
                 dataset_root=dataset_root,
-                device=effective_resolved_device,
+                device=resolved_device,
                 n_train=int(plan.n_train),
                 n_test=int(plan.n_test),
                 requested_device=requested_device,
-                resolved_device=effective_resolved_device,
-                device_fallback_reason=device_fallback_reason,
+                resolved_device=resolved_device,
+                device_fallback_reason=None,
                 x=x_batch[0],
                 y=y_batch[0],
                 aux_meta=aux_meta_batch[0],

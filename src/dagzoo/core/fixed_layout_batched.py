@@ -45,7 +45,6 @@ from dagzoo.core.fixed_layout_plan_types import (
     StackedNodeSource,
     TreeFunctionPlan,
     WeightsMatrixPlan,
-    coerce_fixed_layout_execution_plan,
     fixed_layout_signature_payloads,
 )
 from dagzoo.core.layout_types import AggregationKind, LayoutPlan
@@ -1588,7 +1587,7 @@ def _generate_fixed_layout_raw_batch(
     config: GeneratorConfig,
     layout: LayoutPlan,
     *,
-    execution_plan: FixedLayoutExecutionPlan | list[dict[str, object]],
+    execution_plan: FixedLayoutExecutionPlan,
     dataset_seeds: list[int],
     device: str,
     noise_sigma_multiplier: float,
@@ -1605,7 +1604,6 @@ def _generate_fixed_layout_raw_batch(
     dtype = torch.float32
     batch_seed = KeyedRng(int(dataset_seeds[0])).child_seed("fixed_layout_chunk", batch_size)
     rng = FixedLayoutBatchRng(seed=batch_seed, batch_size=batch_size, device=device)
-    typed_execution_plan = coerce_fixed_layout_execution_plan(execution_plan)
 
     node_outputs: list[torch.Tensor | None] = [None] * int(layout.graph_nodes)
     feature_values: list[torch.Tensor | None] | None = (
@@ -1614,7 +1612,7 @@ def _generate_fixed_layout_raw_batch(
     target_values: torch.Tensor | None = None
     aux_meta_batch = [{"filter": {"mode": "deferred", "status": "not_run"}} for _ in dataset_seeds]
 
-    for node_index, node_plan in enumerate(typed_execution_plan.node_plans):
+    for node_index, node_plan in enumerate(execution_plan.node_plans):
         parent_tensors = []
         for parent_index in node_plan.parent_indices:
             parent_output = node_outputs[int(parent_index)]
@@ -1685,7 +1683,7 @@ def generate_fixed_layout_graph_batch(
     config: GeneratorConfig,
     layout: LayoutPlan,
     *,
-    execution_plan: FixedLayoutExecutionPlan | list[dict[str, object]],
+    execution_plan: FixedLayoutExecutionPlan,
     dataset_seeds: list[int],
     device: str,
     noise_sigma_multiplier: float,
@@ -1712,7 +1710,7 @@ def generate_fixed_layout_label_batch(
     config: GeneratorConfig,
     layout: LayoutPlan,
     *,
-    execution_plan: FixedLayoutExecutionPlan | list[dict[str, object]],
+    execution_plan: FixedLayoutExecutionPlan,
     dataset_seeds: list[int],
     device: str,
     noise_sigma_multiplier: float,

@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import pytest
 import torch
@@ -36,7 +37,7 @@ from dagzoo.core.fixed_layout_plan_types import (
     fixed_layout_converter_groups,
 )
 from dagzoo.core.layout_types import MechanismFamily
-from dagzoo.core.node_pipeline import ConverterSpec, apply_node_pipeline
+from dagzoo.core.node_pipeline import apply_node_pipeline
 from dagzoo.diagnostics.effective_diversity import AblationArm, _runtime_override_context
 from dagzoo.functions.multi import apply_multi_function
 from dagzoo.functions.random_functions import apply_random_function
@@ -51,6 +52,14 @@ import dagzoo.functions.multi as multi_mod
 import dagzoo.functions.random_functions as random_functions_mod
 import dagzoo.sampling.random_points as random_points_mod
 from dagzoo.rng import KeyedRng
+
+
+@dataclass(slots=True)
+class ConverterSpec:
+    key: str
+    kind: str
+    dim: int
+    cardinality: int | None = None
 
 
 @pytest.mark.parametrize(
@@ -113,7 +122,7 @@ def test_apply_random_function_matches_explicit_plan(
     root = _make_keyed_rng(reference_generator, "apply_random_function")
     rng = FixedLayoutBatchRng.from_keyed_rng(root.keyed("execution"), batch_size=1, device="cpu")
     expected = apply_function_plan_batch(
-        random_functions_mod._standardize(x).unsqueeze(0),
+        random_functions_mod.sanitize_and_standardize(x).unsqueeze(0),
         rng,
         plan,  # type: ignore[arg-type]
         out_dim=3,
@@ -823,7 +832,7 @@ def test_apply_node_pipeline_matches_explicit_node_plan(
     actual_latent, actual_extracted = apply_node_pipeline(
         [parent.clone()],
         16,
-        specs,
+        typed_converter_specs(specs),
         actual_generator,
         "cpu",
     )
@@ -897,7 +906,7 @@ def test_apply_node_pipeline_respects_logsumexp_aggregation_override(
         actual_latent, actual_extracted = apply_node_pipeline(
             [parent.clone() for parent in parents],
             16,
-            specs,
+            typed_converter_specs(specs),
             actual_generator,
             "cpu",
         )
@@ -907,7 +916,7 @@ def test_apply_node_pipeline_respects_logsumexp_aggregation_override(
     expected_latent, expected_extracted = apply_node_pipeline(
         [parent.clone() for parent in parents],
         16,
-        specs,
+        typed_converter_specs(specs),
         expected_generator,
         "cpu",
     )

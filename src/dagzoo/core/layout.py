@@ -7,9 +7,9 @@ import math
 import torch
 
 from dagzoo.config import GeneratorConfig
+from dagzoo.core.fixed_layout_plan_types import FixedLayoutConverterSpec
 from dagzoo.functions._rng_helpers import randint_scalar
 from dagzoo.core.layout_types import FeatureType, LayoutPlan
-from dagzoo.core.node_pipeline import ConverterSpec
 from dagzoo.graph import dag_edge_density, dag_longest_path_nodes, sample_dag
 from dagzoo.core.shift import resolve_shift_runtime_params
 from dagzoo.rng import KeyedRng
@@ -182,13 +182,35 @@ def _build_node_specs(
     layout: LayoutPlan,
     task: str,
     keyed_rng: KeyedRng,
-) -> list[ConverterSpec]:
+) -> list[FixedLayoutConverterSpec]:
     """Build converter specs for one node in the graph execution order."""
 
-    specs: list[ConverterSpec] = []
+    specs: list[FixedLayoutConverterSpec] = []
     feature_to_node = layout.feature_node_assignment
     feature_types = list(layout.feature_types)
     card_by_feature: dict[int, int] = layout.card_by_feature
+    column_cursor = 0
+
+    def _append_spec(
+        *,
+        key: str,
+        kind: str,
+        dim: int,
+        cardinality: int | None,
+    ) -> None:
+        nonlocal column_cursor
+        width = max(1, int(dim))
+        specs.append(
+            FixedLayoutConverterSpec(
+                key=key,
+                kind=kind,  # type: ignore[arg-type]
+                dim=width,
+                cardinality=cardinality,
+                column_start=column_cursor,
+                column_end=column_cursor + width,
+            )
+        )
+        column_cursor += width
 
     feature_indices = [
         index for index, assignment in enumerate(feature_to_node) if assignment == node_index
@@ -204,28 +226,34 @@ def _build_node_specs(
                 output_dim = int(randint_scalar(1, cardinality, feature_generator))
             else:
                 output_dim = cardinality
-            specs.append(
-                ConverterSpec(
-                    key=_feature_key(feature_index),
-                    kind="cat",
-                    dim=max(1, output_dim),
-                    cardinality=cardinality,
-                )
+            _append_spec(
+                key=_feature_key(feature_index),
+                kind="cat",
+                dim=max(1, output_dim),
+                cardinality=cardinality,
             )
         else:
-            specs.append(ConverterSpec(key=_feature_key(feature_index), kind="num", dim=1))
+            _append_spec(
+                key=_feature_key(feature_index),
+                kind="num",
+                dim=1,
+                cardinality=None,
+            )
 
     if int(layout.target_node_assignment) == node_index:
         if task == "classification":
             n_classes = int(layout.n_classes)
-            specs.append(
-                ConverterSpec(
-                    key="target",
-                    kind="target_cls",
-                    dim=max(2, n_classes),
-                    cardinality=n_classes,
-                )
+            _append_spec(
+                key="target",
+                kind="target_cls",
+                dim=max(2, n_classes),
+                cardinality=n_classes,
             )
         else:
-            specs.append(ConverterSpec(key="target", kind="target_reg", dim=1))
+            _append_spec(
+                key="target",
+                kind="target_reg",
+                dim=1,
+                cardinality=None,
+            )
     return specs

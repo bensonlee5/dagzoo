@@ -34,6 +34,15 @@ except Exception:  # pragma: no cover - optional dependency
     pq = None
 
 
+def _require_pyarrow() -> None:
+    """Require pyarrow before accessing parquet writer helpers."""
+
+    if pa is None or pq is None:
+        raise RuntimeError(
+            "pyarrow is required for Parquet output. Install project dependencies with uv."
+        )
+
+
 def _shard_id_for_dataset(*, dataset_index: int, shard_size: int) -> int:
     """Return shard id for a dataset index under configured shard size."""
 
@@ -345,10 +354,7 @@ def _finalize_lineage_states(
 def _build_split_table(*, dataset_index: int, x: np.ndarray, y: np.ndarray) -> Any:
     """Build packed row-wise table for one split of one dataset."""
 
-    if pa is None:
-        raise RuntimeError(
-            "pyarrow is required for Parquet output. Install project dependencies with uv."
-        )
+    _require_pyarrow()
 
     if x.ndim != 2:
         raise ValueError(f"Expected 2D features, got shape={x.shape}.")
@@ -393,10 +399,7 @@ def _ensure_split_writer(
 ) -> Any:
     """Get or initialize a split writer for one shard."""
 
-    if pq is None:
-        raise RuntimeError(
-            "pyarrow is required for Parquet output. Install project dependencies with uv."
-        )
+    _require_pyarrow()
 
     if split == "train":
         writer = state.train_writer

@@ -19,11 +19,6 @@ from dagzoo.sampling.noise import NoiseSamplingSpec
 _sample_function_family = sample_function_family
 
 
-def _standardize(x: torch.Tensor) -> torch.Tensor:
-    """Standardize columns in torch after clipping non-finite/extreme values."""
-    return sanitize_and_standardize(x)
-
-
 def apply_random_function(
     x: torch.Tensor,
     generator: torch.Generator,
@@ -40,7 +35,7 @@ def apply_random_function(
     y = x.to(torch.float32)
     if y.dim() == 1:
         y = y.unsqueeze(1)
-    y = _standardize(y)
+    y = sanitize_and_standardize(y)
 
     dout = out_dim if out_dim is not None else y.shape[1]
     root = _keyed_root or keyed_rng_from_generator(generator, "apply_random_function")

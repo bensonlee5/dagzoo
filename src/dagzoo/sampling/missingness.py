@@ -25,6 +25,10 @@ def _standardize_columns(x: torch.Tensor) -> torch.Tensor:
     """Column-wise z-score normalization with safe variance floor."""
 
     means = x.mean(dim=0, keepdim=True)
+    # correction=0 uses population std (1/N) rather than sample std (1/(N-1)).
+    # This differs from math_utils.standardize() intentionally: missingness
+    # logits are calibrated per-dataset, so population std is the correct
+    # normalizer and avoids instability when N is small.
     stds = torch.clamp(x.std(dim=0, correction=0, keepdim=True), min=_MIN_STD)
     return (x - means) / stds
 

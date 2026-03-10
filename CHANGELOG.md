@@ -10,6 +10,37 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.8.0] - 2026-03-10
+
+### Removed
+
+- Deleted dead `scripts/benchmark-issue148-cuda-desktop.sh` and its
+  `configs/benchmark_filter_enabled.yaml` (issue closed).
+- Removed the `dagzoo filter --config` fallback path; deferred filtering now
+  replays strictly from embedded shard metadata.
+- Removed automatic MPS-to-CPU retry in fixed-layout generation; backend
+  runtime failures now surface directly.
+- Removed legacy untyped fixed-layout execution-plan coercion from runtime
+  generation paths.
+- Removed lazy `dagzoo.functions` `apply_*` re-exports.
+- Removed trivial `_standardize()` wrapper in `random_functions.py`; callers
+  now use `sanitize_and_standardize()` directly.
+- Removed redundant local `import math as _math` inside `sanitize_json()`.
+
+### Added
+
+- Clarifying comment on `correction=0` in `missingness._standardize_columns()`.
+
+### Changed
+
+- Broke the `layout` / `node_pipeline` / `fixed_layout_batched` dependency
+  cycle by moving fixed-layout node specs onto one typed converter contract.
+- Centralized generator-config cloning semantics under
+  `clone_generator_config(...)` and reused shared packed-parquet writer helpers
+  in deferred filtering.
+- `device_fallback_reason` remains in emitted metadata for contract stability,
+  but current generation leaves it `null`.
+
 ## [0.7.0] - 2026-03-10
 
 ### Changed

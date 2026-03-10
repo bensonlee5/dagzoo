@@ -332,11 +332,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional output directory for accepted-only curated shards.",
     )
     f.add_argument(
-        "--config",
-        default=None,
-        help="Optional fallback YAML config when shard metadata lacks embedded filter settings.",
-    )
-    f.add_argument(
         "--n-jobs",
         type=_filter_n_jobs,
         default=None,
@@ -780,11 +775,9 @@ def _run_filter(args: argparse.Namespace) -> int:
     """Execute the ``filter`` command."""
 
     try:
-        fallback_config = _load_config_or_usage_error(args.config) if args.config else None
         result = run_deferred_filter(
             in_dir=args.in_dir,
             out_dir=args.out,
-            config=fallback_config,
             curated_out_dir=args.curated_out,
             n_jobs_override=args.n_jobs,
         )

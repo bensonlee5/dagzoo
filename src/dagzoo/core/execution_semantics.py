@@ -95,10 +95,20 @@ _JOINT_VARIANTS: tuple[tuple[FixedLayoutConverterMethod, FixedLayoutConverterVar
 class ConverterSpecLike(Protocol):
     """Minimal protocol shared by scalar and fixed-layout converter specs."""
 
-    key: str
-    kind: ConverterKind
-    dim: int
-    cardinality: int | None
+    @property
+    def key(self) -> str: ...
+
+    @property
+    def kind(self) -> ConverterKind: ...
+
+    @property
+    def dim(self) -> int: ...
+
+    @property
+    def cardinality(self) -> int | None: ...
+
+
+ConverterSpecsInput = Sequence[ConverterSpecLike] | Sequence[FixedLayoutConverterSpec]
 
 
 def _rand_scalar(generator: torch.Generator) -> float:
@@ -587,7 +597,7 @@ def sample_converter_plan(
 
 
 def typed_converter_specs(
-    converter_specs: Sequence[ConverterSpecLike],
+    converter_specs: ConverterSpecsInput,
 ) -> tuple[FixedLayoutConverterSpec, ...]:
     """Lift scalar converter specs into typed fixed-layout converter specs."""
 
@@ -610,7 +620,7 @@ def typed_converter_specs(
 
 
 def sample_latent_plan(
-    converter_specs: Sequence[ConverterSpecLike],
+    converter_specs: ConverterSpecsInput,
     *,
     generator: torch.Generator | None = None,
     keyed_rng: KeyedRng | None = None,
@@ -734,7 +744,7 @@ def sample_node_plan(
     *,
     node_index: int,
     parent_indices: Sequence[int],
-    converter_specs: Sequence[ConverterSpecLike],
+    converter_specs: ConverterSpecsInput,
     generator: torch.Generator | None = None,
     keyed_rng: KeyedRng | None = None,
     device: str,
@@ -763,7 +773,7 @@ def sample_node_plan(
             function_family_mix=function_family_mix,
             device=resolved_device,
         )
-        for spec_index, spec in enumerate(converter_specs)
+        for spec_index, spec in enumerate(typed_specs)
     )
     source: ConcatNodeSource | StackedNodeSource | RandomPointsNodeSource
     if parent_indices:

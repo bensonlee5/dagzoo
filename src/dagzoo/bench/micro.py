@@ -18,9 +18,10 @@ from dagzoo.bench.constants import (
     MICRO_CONFIG_N_TRAIN_CAP,
     MILLISECONDS_PER_SECOND,
 )
-from dagzoo.config import GeneratorConfig
+from dagzoo.config import GeneratorConfig, clone_generator_config
 from dagzoo.core.dataset import generate_one
-from dagzoo.core.node_pipeline import ConverterSpec, apply_node_pipeline
+from dagzoo.core.fixed_layout_plan_types import FixedLayoutConverterSpec
+from dagzoo.core.node_pipeline import apply_node_pipeline
 from dagzoo.functions.random_functions import apply_random_function
 from dagzoo.rng import KeyedRng
 
@@ -38,7 +39,7 @@ def _time_ms(func: Callable[[], None], repeats: int) -> float:
 def _micro_config(config: GeneratorConfig) -> GeneratorConfig:
     """Create a lightweight config variant for inexpensive microbenchmarks."""
 
-    c = GeneratorConfig.from_dict(config.to_dict())
+    c = clone_generator_config(config, revalidate=False)
     c.dataset.n_train = min(MICRO_CONFIG_N_TRAIN_CAP, c.dataset.n_train)
     c.dataset.n_test = min(MICRO_CONFIG_N_TEST_CAP, c.dataset.n_test)
     c.dataset.n_features_min = min(MICRO_CONFIG_N_FEATURES_CAP, c.dataset.n_features_min)
@@ -85,9 +86,15 @@ def run_microbenchmarks(
         ),
     ]
     specs = [
-        ConverterSpec(key="feature_0", kind="num", dim=1),
-        ConverterSpec(key="feature_1", kind="cat", dim=4, cardinality=6),
-        ConverterSpec(key="target", kind="target_cls", dim=3, cardinality=3),
+        FixedLayoutConverterSpec(
+            key="feature_0", kind="num", dim=1, cardinality=None, column_start=0, column_end=1
+        ),
+        FixedLayoutConverterSpec(
+            key="feature_1", kind="cat", dim=4, cardinality=6, column_start=1, column_end=5
+        ),
+        FixedLayoutConverterSpec(
+            key="target", kind="target_cls", dim=3, cardinality=3, column_start=5, column_end=8
+        ),
     ]
 
     def run_node_pipeline() -> None:

@@ -12,18 +12,18 @@ import shutil
 import time
 from typing import Any, TextIO
 
-from dagzoo.config import FilterConfig, GeneratorConfig
+from dagzoo.config import FilterConfig
 from dagzoo.filtering.extra_trees_filter import apply_extra_trees_filter
-from dagzoo.io.parquet_writer import _build_split_table
+from dagzoo.io.parquet_writer import (
+    _PackedShardState,
+    _close_packed_shard_handles,
+    _ensure_metadata_file_open,
+    _require_pyarrow,
+    _write_packed_split,
+    pq,
+)
 from dagzoo.math_utils import sanitize_json as _sanitize_json
 from dagzoo.rng import SEED32_MAX, SEED32_MIN
-
-try:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-except Exception:  # pragma: no cover - optional dependency
-    pa = None
-    pq = None
 
 import numpy as np
 import torch
@@ -61,21 +61,12 @@ class _PackedSplitDataset:
 class _CuratedShardWriter:
     """Incremental writer state for one curated accepted-only shard."""
 
-    shard_dir: Path
+    shard_state: _PackedShardState
     final_shard_dir: Path
-    train_path: Path
-    test_path: Path
-    metadata_path: Path
-    train_writer: Any | None = None
-    test_writer: Any | None = None
-    metadata_file: TextIO | None = None
 
-
-def _require_pyarrow() -> None:
-    if pa is None or pq is None:
-        raise RuntimeError(
-            "pyarrow is required for deferred filtering. Install project dependencies with uv."
-        )
+    @property
+    def shard_dir(self) -> Path:
+        return self.shard_state.shard_dir
 
 
 def _discover_shard_dirs(input_path: Path) -> list[Path]:
@@ -256,7 +247,6 @@ def _resolve_filter_seed(metadata_payload: Mapping[str, Any], *, dataset_index: 
 def _resolve_task_and_filter_config(
     *,
     metadata_payload: Mapping[str, Any],
-    fallback_config: GeneratorConfig | None,
     n_jobs_override: int | None,
 ) -> tuple[str, FilterConfig]:
     """Resolve task + filter config for one dataset record."""
@@ -277,21 +267,15 @@ def _resolve_task_and_filter_config(
             embedded_filter = filter_payload
 
     if task not in {"classification", "regression"}:
-        if fallback_config is None:
-            raise ValueError(
-                "Missing dataset task in shard metadata. Provide --config so deferred filter can "
-                "resolve dataset.task."
-            )
-        task = str(fallback_config.dataset.task)
+        raise ValueError(
+            "Deferred filter requires embedded metadata.config.dataset.task in shard metadata."
+        )
 
     if embedded_filter is not None:
         filter_cfg = FilterConfig(**dict(embedded_filter))
-    elif fallback_config is not None:
-        filter_cfg = FilterConfig(**fallback_config.to_dict().get("filter", {}))
     else:
         raise ValueError(
-            "Missing filter config in shard metadata. Provide --config so deferred filter can "
-            "resolve filter parameters."
+            "Deferred filter requires embedded metadata.config.filter in shard metadata."
         )
 
     filter_cfg.enabled = True
@@ -432,53 +416,20 @@ def _create_curated_shard_writer(
     shard_dir.mkdir(parents=True, exist_ok=False)
     final_shard_dir = curated_out_dir / shard_name
     return _CuratedShardWriter(
-        shard_dir=shard_dir,
+        shard_state=_PackedShardState(
+            shard_dir=shard_dir,
+            train_path=shard_dir / "train.parquet",
+            test_path=shard_dir / "test.parquet",
+            metadata_path=shard_dir / "metadata.ndjson",
+        ),
         final_shard_dir=final_shard_dir,
-        train_path=shard_dir / "train.parquet",
-        test_path=shard_dir / "test.parquet",
-        metadata_path=shard_dir / "metadata.ndjson",
     )
 
 
 def _ensure_curated_metadata_file_open(state: _CuratedShardWriter) -> TextIO:
     """Return an append-ready metadata handle for a curated shard."""
 
-    metadata_file = state.metadata_file
-    if metadata_file is not None and not metadata_file.closed:
-        return metadata_file
-    opened = state.metadata_path.open("a", encoding="utf-8")
-    state.metadata_file = opened
-    return opened
-
-
-def _ensure_curated_split_writer(
-    *,
-    state: _CuratedShardWriter,
-    split: str,
-    schema: Any,
-    compression: str,
-) -> Any:
-    """Return an append-ready parquet writer for one curated split."""
-
-    if pq is None:
-        raise RuntimeError(
-            "pyarrow is required for deferred filtering. Install project dependencies with uv."
-        )
-
-    if split == "train":
-        writer = state.train_writer
-        path = state.train_path
-    else:
-        writer = state.test_writer
-        path = state.test_path
-
-    if writer is None:
-        writer = pq.ParquetWriter(path, schema=schema, compression=compression)
-        if split == "train":
-            state.train_writer = writer
-        else:
-            state.test_writer = writer
-    return writer
+    return _ensure_metadata_file_open(state.shard_state)
 
 
 def _write_curated_split(
@@ -492,22 +443,14 @@ def _write_curated_split(
 ) -> None:
     """Append one accepted dataset split into a curated shard parquet file."""
 
-    table = _build_split_table(dataset_index=dataset_index, x=x, y=y)
-    writer = _ensure_curated_split_writer(
-        state=state,
+    _write_packed_split(
+        state=state.shard_state,
         split=split,
-        schema=table.schema,
+        dataset_index=dataset_index,
+        x=x,
+        y=y,
         compression=compression,
     )
-    if not table.schema.equals(writer.schema, check_metadata=False):
-        split_path = state.train_path if split == "train" else state.test_path
-        raise ValueError(
-            "Incompatible curated "
-            f"{split} schema in shard output '{split_path}': "
-            f"expected {writer.schema}, got {table.schema} "
-            f"(dataset_index={dataset_index})."
-        )
-    writer.write_table(table)
 
 
 def _write_curated_dataset(
@@ -545,21 +488,7 @@ def _close_curated_shard_writer(state: _CuratedShardWriter | None) -> None:
 
     if state is None:
         return
-
-    train_writer = state.train_writer
-    if train_writer is not None:
-        train_writer.close()
-        state.train_writer = None
-
-    test_writer = state.test_writer
-    if test_writer is not None:
-        test_writer.close()
-        state.test_writer = None
-
-    metadata_file = state.metadata_file
-    if metadata_file is not None:
-        metadata_file.close()
-        state.metadata_file = None
+    _close_packed_shard_handles(state.shard_state)
 
 
 def _copy_lineage_tree_safe(*, source_dir: Path, dest_dir: Path) -> None:
@@ -629,7 +558,6 @@ def run_deferred_filter(
     *,
     in_dir: str | Path,
     out_dir: str | Path,
-    config: GeneratorConfig | None = None,
     curated_out_dir: str | Path | None = None,
     n_jobs_override: int | None = None,
 ) -> DeferredFilterRunResult:
@@ -734,7 +662,6 @@ def run_deferred_filter(
 
                         task, filter_cfg = _resolve_task_and_filter_config(
                             metadata_payload=metadata_payload,
-                            fallback_config=config,
                             n_jobs_override=n_jobs_override,
                         )
                         seed = _resolve_filter_seed(metadata_payload, dataset_index=dataset_index)

@@ -3,7 +3,6 @@ import json
 import numpy as np
 import pytest
 
-from dagzoo.config import GeneratorConfig
 from dagzoo.filtering.deferred_filter import run_deferred_filter
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 from dagzoo.types import DatasetBundle
@@ -166,7 +165,7 @@ def test_run_deferred_filter_writes_curated_output_for_accepted_only(
     assert dataset_indices == {0, 2}
 
 
-def test_run_deferred_filter_requires_fallback_config_when_metadata_lacks_filter_config(
+def test_run_deferred_filter_requires_embedded_filter_config(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -182,16 +181,8 @@ def test_run_deferred_filter_requires_fallback_config_when_metadata_lacks_filter
         lambda *_args, **_kwargs: (True, {"wins_ratio": 1.0, "n_valid_oob": 128}),
     )
 
-    with pytest.raises(ValueError, match="Missing filter config in shard metadata"):
+    with pytest.raises(ValueError, match="requires embedded metadata\\.config\\.filter"):
         _ = run_deferred_filter(in_dir=in_dir, out_dir=out_dir)
-
-    cfg = GeneratorConfig()
-    cfg.dataset.task = "classification"
-    cfg.filter.enabled = True
-
-    result = run_deferred_filter(in_dir=in_dir, out_dir=tmp_path / "filter_out_retry", config=cfg)
-    assert result.total_datasets == 1
-    assert result.accepted_datasets == 1
 
 
 def test_run_deferred_filter_prefers_dataset_seed_when_present(

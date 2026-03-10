@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import hashlib
-import copy
 import re
 import resource
 import sys
@@ -72,6 +71,7 @@ from dagzoo.config import (
     MISSINGNESS_MECHANISM_NONE,
     NOISE_FAMILY_GAUSSIAN,
     SHIFT_MODE_OFF,
+    clone_generator_config,
     normalize_dataset_rows,
 )
 from dagzoo.core.config_resolution import (
@@ -115,7 +115,7 @@ class PresetRunSpec:
 def _copy_runtime_config(config: GeneratorConfig) -> GeneratorConfig:
     """Copy an already validated runtime config without re-running schema validation."""
 
-    return copy.deepcopy(config)
+    return clone_generator_config(config, revalidate=False)
 
 
 def _cpu_row_profile_key(total_rows: int) -> str:

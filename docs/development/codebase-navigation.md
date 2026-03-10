@@ -20,7 +20,8 @@ runtime.
 - [`src/dagzoo/cli.py`](../../src/dagzoo/cli.py): Maps CLI flags to `GeneratorConfig` and handles command dispatch.
 - [`src/dagzoo/core/dataset.py`](../../src/dagzoo/core/dataset.py): Public generation facade. Resolves canonical runs, annotates replay metadata, and streams emitted bundles.
 - [`src/dagzoo/core/generation_runtime.py`](../../src/dagzoo/core/generation_runtime.py): Shared split/finalization helpers used by canonical fixed-layout generation.
-- [`src/dagzoo/core/fixed_layout.py`](../../src/dagzoo/core/fixed_layout.py): Internal canonical run preparation, per-run layout sampling, classification replay validation, and batched execution.
+- [`src/dagzoo/core/fixed_layout_runtime.py`](../../src/dagzoo/core/fixed_layout_runtime.py): Canonical fixed-layout run preparation, classification replay validation, and batched execution orchestration.
+- [`src/dagzoo/core/fixed_layout.py`](../../src/dagzoo/core/fixed_layout.py): Shared fixed-layout metadata helpers and layout signatures.
 - [`src/dagzoo/core/config_resolution.py`](../../src/dagzoo/core/config_resolution.py): Layered config resolution, produces `effective_config_trace.yaml`.
 
 ## 2. The Generation Pipeline (The "Assembly Line")
@@ -29,7 +30,8 @@ Follow this sequence to understand how a latent causal structure becomes a reali
 
 - **Structure ([`graph/`](../../src/dagzoo/graph/)):** Samples the underlying Directed Acyclic Graph (DAG).
 - **Layout ([`core/layout.py`](../../src/dagzoo/core/layout.py)):** Maps features and targets to DAG nodes and assigns data types.
-- **Execution ([`core/node_pipeline.py`](../../src/dagzoo/core/node_pipeline.py)):** Processes nodes in topological order, applying functional relationships.
+- **Execution ([`core/fixed_layout_batched.py`](../../src/dagzoo/core/fixed_layout_batched.py)):** Samples typed node plans and executes them in batched topological order.
+- **Leaf node helper ([`core/node_pipeline.py`](../../src/dagzoo/core/node_pipeline.py)):** Isolated node-plan execution helper used by tests and microbenchmarks.
 - **Mechanisms ([`functions/`](../../src/dagzoo/functions/)):** Contains the mathematical families (linear, non-linear, mixture) that define how nodes interact.
 - **Conversion ([`converters/`](../../src/dagzoo/converters/)):** Transforms latent continuous values into observable numeric or categorical data.
 - **Sampling ([`sampling/`](../../src/dagzoo/sampling/)):** Noise-family primitives (gaussian/laplace/student_t), random-point geometry, correlated sampling.

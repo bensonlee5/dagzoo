@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import copy
 import math
 from collections.abc import Callable
 
-from dagzoo.config import GeneratorConfig
+from dagzoo.config import GeneratorConfig, clone_generator_config
 from dagzoo.hardware import HardwareInfo
 
 HardwarePolicy = Callable[[GeneratorConfig, HardwareInfo], GeneratorConfig]
@@ -196,7 +195,7 @@ def apply_hardware_policy(
             f"{policy_name!r}. Available: {', '.join(list_hardware_policies()) or '(none)'}."
         )
 
-    base = copy.deepcopy(config)
+    base = clone_generator_config(config, revalidate=False)
     result = policy(base, hw)
     if not isinstance(result, GeneratorConfig):
         raise TypeError(

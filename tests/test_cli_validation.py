@@ -262,6 +262,23 @@ def test_filter_cli_invokes_deferred_runner(tmp_path, monkeypatch: pytest.Monkey
     assert captured["in_dir"] == "input_shards"
     assert str(captured["out_dir"]) == str(out_dir)
     assert captured["n_jobs_override"] == 4
+    assert "config" not in captured
+
+
+def test_filter_cli_rejects_removed_config_flag() -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "filter",
+                "--in",
+                "input",
+                "--out",
+                "out",
+                "--config",
+                "configs/default.yaml",
+            ]
+        )
+    assert int(exc.value.code) == 2
 
 
 def test_generate_cli_uses_default_config_without_noise_overrides(

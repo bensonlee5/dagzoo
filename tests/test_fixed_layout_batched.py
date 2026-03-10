@@ -1,5 +1,6 @@
 """Tests for internal fixed-layout batched helpers."""
 
+from dataclasses import dataclass
 from unittest.mock import patch
 
 import pytest
@@ -37,14 +38,19 @@ from dagzoo.core.fixed_layout_plan_types import (
     RandomPointsNodeSource,
     SingularValuesMatrixPlan,
     WeightsMatrixPlan,
-    coerce_fixed_layout_execution_plan,
     fixed_layout_converter_groups,
-    fixed_layout_execution_plan_payloads,
 )
 from dagzoo.functions.activations import _fixed_activation
-from dagzoo.core.node_pipeline import ConverterSpec
 from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.rng import KeyedRng
+
+
+@dataclass(slots=True)
+class ConverterSpec:
+    key: str
+    kind: str
+    dim: int
+    cardinality: int | None = None
 
 
 @pytest.mark.parametrize(
@@ -774,28 +780,3 @@ def test_generate_fixed_layout_label_batch_matches_graph_batch_targets() -> None
 
     assert x_batch.shape[0] == label_batch.shape[0] == len(dataset_seeds)
     torch.testing.assert_close(label_batch, y_batch)
-
-
-def test_coerce_fixed_layout_execution_plan_backfills_legacy_ranges_and_groups() -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.dataset.task = "regression"
-    cfg.dataset.n_train = 6
-    cfg.dataset.n_test = 4
-    cfg.dataset.n_features_min = 4
-    cfg.dataset.n_features_max = 4
-    cfg.graph.n_nodes_min = 2
-    cfg.graph.n_nodes_max = 3
-    plan = _sample_fixed_layout(cfg, seed=456, device="cpu")
-
-    legacy_payload = fixed_layout_execution_plan_payloads(plan.execution_plan)
-    assert legacy_payload
-    first_payload = legacy_payload[0]
-    first_payload.pop("converter_groups", None)
-    first_payload.pop("execution_contract", None)
-    for spec in first_payload["converter_specs"]:
-        spec.pop("column_start", None)
-        spec.pop("column_end", None)
-
-    coerced = coerce_fixed_layout_execution_plan(legacy_payload)
-
-    assert coerced == plan.execution_plan

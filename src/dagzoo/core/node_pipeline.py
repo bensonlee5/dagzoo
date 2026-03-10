@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from collections.abc import Sequence
+from dataclasses import replace
 
 import torch
 
@@ -10,19 +11,12 @@ from dagzoo.core.execution_semantics import sample_node_plan
 from dagzoo.core.fixed_layout_plan_types import (
     CategoricalConverterGroup,
     CategoricalConverterPlan,
+    FixedLayoutConverterSpec,
     FixedLayoutNodePlan,
 )
-from dagzoo.core.layout_types import ConverterKind, MechanismFamily
+from dagzoo.core.layout_types import MechanismFamily
 from dagzoo.rng import keyed_rng_from_generator
 from dagzoo.sampling.noise import NoiseSamplingSpec
-
-
-@dataclass(slots=True)
-class ConverterSpec:
-    key: str
-    kind: ConverterKind
-    dim: int
-    cardinality: int | None = None
 
 
 def _standalone_safe_node_plan(node_plan: FixedLayoutNodePlan) -> FixedLayoutNodePlan:
@@ -54,7 +48,7 @@ def _standalone_safe_node_plan(node_plan: FixedLayoutNodePlan) -> FixedLayoutNod
 def apply_node_pipeline(
     parent_data: list[torch.Tensor],
     n_rows: int,
-    converter_specs: list[ConverterSpec],
+    converter_specs: Sequence[FixedLayoutConverterSpec],
     generator: torch.Generator,
     device: str,
     *,

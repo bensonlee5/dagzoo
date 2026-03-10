@@ -59,10 +59,8 @@ def to_numpy(value: object) -> np.ndarray:
 
 def sanitize_json(value: object) -> object:
     """Recursively sanitize metadata for strict JSON serialization."""
-    import math as _math
-
     if isinstance(value, float):
-        return value if _math.isfinite(value) else None
+        return value if math.isfinite(value) else None
     if isinstance(value, dict):
         return {k: sanitize_json(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):

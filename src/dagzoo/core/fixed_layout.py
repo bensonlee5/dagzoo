@@ -1,4 +1,4 @@
-"""Fixed-layout plan models, metadata helpers, and raw batch fallback adapters."""
+"""Fixed-layout plan models and metadata helpers."""
 
 from __future__ import annotations
 
@@ -9,11 +9,6 @@ from typing import Any
 
 import torch
 
-from dagzoo.config import GeneratorConfig
-from dagzoo.core.fixed_layout_batched import (
-    generate_fixed_layout_graph_batch,
-    generate_fixed_layout_label_batch,
-)
 from dagzoo.core.fixed_layout_plan_types import FixedLayoutExecutionPlan
 from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.types import DatasetBundle
@@ -122,116 +117,9 @@ def _extract_emitted_schema_signature(
     return n_features, feature_types, feature_to_node
 
 
-def _generate_fixed_layout_graph_batch_with_fallback(
-    config: GeneratorConfig,
-    layout: LayoutPlan,
-    *,
-    execution_plan: FixedLayoutExecutionPlan,
-    dataset_seeds: list[int],
-    requested_device: str,
-    resolved_device: str,
-    noise_sigma_multiplier: float,
-    noise_spec: Any,
-) -> tuple[torch.Tensor, torch.Tensor, list[dict[str, Any]], str, str | None]:
-    if requested_device == "auto" and resolved_device == "mps":
-        try:
-            x_batch, y_batch, aux_meta_batch = generate_fixed_layout_graph_batch(
-                config,
-                layout,
-                execution_plan=execution_plan,
-                dataset_seeds=dataset_seeds,
-                device=resolved_device,
-                noise_sigma_multiplier=noise_sigma_multiplier,
-                noise_spec=noise_spec,
-            )
-            return x_batch, y_batch, aux_meta_batch, resolved_device, None
-        except Exception as exc:
-            x_batch, y_batch, aux_meta_batch = generate_fixed_layout_graph_batch(
-                config,
-                layout,
-                execution_plan=execution_plan,
-                dataset_seeds=dataset_seeds,
-                device="cpu",
-                noise_sigma_multiplier=noise_sigma_multiplier,
-                noise_spec=noise_spec,
-            )
-            return (
-                x_batch,
-                y_batch,
-                aux_meta_batch,
-                "cpu",
-                f"auto_mps_runtime_error:{exc.__class__.__name__}",
-            )
-
-    x_batch, y_batch, aux_meta_batch = generate_fixed_layout_graph_batch(
-        config,
-        layout,
-        execution_plan=execution_plan,
-        dataset_seeds=dataset_seeds,
-        device=resolved_device,
-        noise_sigma_multiplier=noise_sigma_multiplier,
-        noise_spec=noise_spec,
-    )
-    return x_batch, y_batch, aux_meta_batch, resolved_device, None
-
-
-def _generate_fixed_layout_label_batch_with_fallback(
-    config: GeneratorConfig,
-    layout: LayoutPlan,
-    *,
-    execution_plan: FixedLayoutExecutionPlan,
-    dataset_seeds: list[int],
-    requested_device: str,
-    resolved_device: str,
-    noise_sigma_multiplier: float,
-    noise_spec: Any,
-) -> tuple[torch.Tensor, list[dict[str, Any]], str, str | None]:
-    if requested_device == "auto" and resolved_device == "mps":
-        try:
-            y_batch, aux_meta_batch = generate_fixed_layout_label_batch(
-                config,
-                layout,
-                execution_plan=execution_plan,
-                dataset_seeds=dataset_seeds,
-                device=resolved_device,
-                noise_sigma_multiplier=noise_sigma_multiplier,
-                noise_spec=noise_spec,
-            )
-            return y_batch, aux_meta_batch, resolved_device, None
-        except Exception as exc:
-            y_batch, aux_meta_batch = generate_fixed_layout_label_batch(
-                config,
-                layout,
-                execution_plan=execution_plan,
-                dataset_seeds=dataset_seeds,
-                device="cpu",
-                noise_sigma_multiplier=noise_sigma_multiplier,
-                noise_spec=noise_spec,
-            )
-            return (
-                y_batch,
-                aux_meta_batch,
-                "cpu",
-                f"auto_mps_runtime_error:{exc.__class__.__name__}",
-            )
-
-    y_batch, aux_meta_batch = generate_fixed_layout_label_batch(
-        config,
-        layout,
-        execution_plan=execution_plan,
-        dataset_seeds=dataset_seeds,
-        device=resolved_device,
-        noise_sigma_multiplier=noise_sigma_multiplier,
-        noise_spec=noise_spec,
-    )
-    return y_batch, aux_meta_batch, resolved_device, None
-
-
 __all__ = [
     "_FixedLayoutPlan",
     "_annotate_fixed_layout_metadata",
     "_extract_emitted_schema_signature",
-    "_generate_fixed_layout_graph_batch_with_fallback",
-    "_generate_fixed_layout_label_batch_with_fallback",
     "_layout_signature",
 ]

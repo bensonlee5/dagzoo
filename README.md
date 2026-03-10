@@ -107,6 +107,8 @@ in the resolved output directory.
 datasets emitted in the same run share one sampled layout/execution plan.
 Generation no longer runs inline filtering; run `dagzoo filter` as a separate
 stage for acceptance decisions.
+Deferred filtering now replays strictly from embedded shard metadata; generated
+artifacts must include `metadata.config.dataset.task` and `metadata.config.filter`.
 Parallel generation has been removed; config files must not include
 `runtime.worker_count` or `runtime.worker_index`.
 

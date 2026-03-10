@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 import hashlib
 import json
@@ -185,13 +185,11 @@ FixedLayoutConverterPlan: TypeAlias = NumericConverterPlan | CategoricalConverte
 @dataclass(frozen=True, slots=True)
 class NumericConverterGroup:
     spec_indices: tuple[int, ...]
-    group_kind: Literal["numeric"] = "numeric"
 
 
 @dataclass(frozen=True, slots=True)
 class CategoricalConverterGroup:
     spec_indices: tuple[int, ...]
-    group_kind: Literal["categorical"] = "categorical"
 
 
 FixedLayoutConverterGroup: TypeAlias = NumericConverterGroup | CategoricalConverterGroup
@@ -201,22 +199,17 @@ FixedLayoutConverterGroup: TypeAlias = NumericConverterGroup | CategoricalConver
 class RandomPointsNodeSource:
     base_kind: FixedLayoutRootBaseKind
     function: FixedLayoutFunctionPlan
-    source_kind: Literal["random_points"] = "random_points"
 
 
 @dataclass(frozen=True, slots=True)
 class ConcatNodeSource:
     function: FixedLayoutFunctionPlan
-    source_kind: Literal["multi"] = "multi"
-    combine_kind: Literal["concat"] = "concat"
 
 
 @dataclass(frozen=True, slots=True)
 class StackedNodeSource:
     aggregation_kind: AggregationKind
     parent_functions: tuple[FixedLayoutFunctionPlan, ...]
-    source_kind: Literal["multi"] = "multi"
-    combine_kind: Literal["stack"] = "stack"
 
 
 FixedLayoutNodeSource: TypeAlias = RandomPointsNodeSource | ConcatNodeSource | StackedNodeSource
@@ -279,234 +272,10 @@ def fixed_layout_converter_groups(
     return tuple(groups[key] for key in ordered_keys)
 
 
-def fixed_layout_execution_plan_payloads(
-    execution_plan: FixedLayoutExecutionPlan,
-) -> list[dict[str, Any]]:
-    return [
-        _node_plan_payload(node_plan, execution_contract=execution_plan.execution_contract)
-        for node_plan in execution_plan.node_plans
-    ]
-
-
 def fixed_layout_signature_payloads(
     execution_plan: FixedLayoutExecutionPlan,
 ) -> list[dict[str, Any]]:
     return [_signature_node_plan_payload(node_plan) for node_plan in execution_plan.node_plans]
-
-
-def coerce_fixed_layout_execution_plan(
-    value: FixedLayoutExecutionPlan | Sequence[Mapping[str, Any]],
-) -> FixedLayoutExecutionPlan:
-    if isinstance(value, FixedLayoutExecutionPlan):
-        return value
-
-    node_plans: list[FixedLayoutNodePlan] = []
-    execution_contract: str | None = None
-    for raw_plan in value:
-        plan_mapping = dict(raw_plan)
-        raw_execution_contract = str(
-            plan_mapping.get("execution_contract", DEFAULT_FIXED_LAYOUT_EXECUTION_CONTRACT)
-        )
-        if execution_contract is None:
-            execution_contract = raw_execution_contract
-        elif raw_execution_contract != execution_contract:
-            raise ValueError("Legacy fixed-layout payload uses inconsistent execution contracts.")
-        converter_specs = _coerce_converter_specs(plan_mapping.get("converter_specs", []))
-        converter_plans = tuple(
-            _coerce_converter_plan(plan) for plan in list(plan_mapping.get("converter_plans", []))
-        )
-        if len(converter_specs) != len(converter_plans):
-            raise ValueError("converter_specs and converter_plans must have matching lengths.")
-        raw_groups = plan_mapping.get("converter_groups")
-        if raw_groups is None:
-            converter_groups = fixed_layout_converter_groups(converter_specs, converter_plans)
-        else:
-            converter_groups = tuple(_coerce_converter_group(group) for group in list(raw_groups))
-        node_plans.append(
-            FixedLayoutNodePlan(
-                node_index=int(plan_mapping["node_index"]),
-                parent_indices=tuple(
-                    int(parent_index)
-                    for parent_index in list(plan_mapping.get("parent_indices", []))
-                ),
-                converter_specs=converter_specs,
-                converter_plans=converter_plans,
-                converter_groups=converter_groups,
-                latent=FixedLayoutLatentPlan(
-                    required_dim=int(plan_mapping["latent"]["required_dim"]),
-                    extra_dim=int(plan_mapping["latent"]["extra_dim"]),
-                    total_dim=int(plan_mapping["latent"]["total_dim"]),
-                ),
-                source=_coerce_node_source(plan_mapping),
-            )
-        )
-    return FixedLayoutExecutionPlan(
-        node_plans=tuple(node_plans),
-        execution_contract=str(execution_contract or DEFAULT_FIXED_LAYOUT_EXECUTION_CONTRACT),  # type: ignore[arg-type]
-    )
-
-
-def _coerce_converter_specs(
-    raw_specs: Any,
-) -> tuple[FixedLayoutConverterSpec, ...]:
-    cursor = 0
-    specs: list[FixedLayoutConverterSpec] = []
-    for raw_spec in list(raw_specs):
-        spec_mapping = dict(raw_spec)
-        dim = max(1, int(spec_mapping["dim"]))
-        column_start = int(spec_mapping.get("column_start", cursor))
-        column_end = int(spec_mapping.get("column_end", column_start + dim))
-        cursor = column_end
-        specs.append(
-            FixedLayoutConverterSpec(
-                key=str(spec_mapping["key"]),
-                kind=str(spec_mapping["kind"]),  # type: ignore[arg-type]
-                dim=int(spec_mapping["dim"]),
-                cardinality=(
-                    None
-                    if spec_mapping.get("cardinality") is None
-                    else int(spec_mapping["cardinality"])
-                ),
-                column_start=column_start,
-                column_end=column_end,
-            )
-        )
-    return tuple(specs)
-
-
-def _coerce_converter_plan(raw_plan: Mapping[str, Any]) -> FixedLayoutConverterPlan:
-    plan_mapping = dict(raw_plan)
-    kind = str(plan_mapping["kind"])
-    if kind in {"num", "target_reg"}:
-        return NumericConverterPlan(
-            kind=kind,  # type: ignore[arg-type]
-            warp_enabled=bool(plan_mapping["warp_enabled"]),
-        )
-    function_payload = plan_mapping.get("function")
-    variant = str(plan_mapping["variant"])
-    if variant == "center_random_fn" and function_payload is None:
-        raise ValueError("center_random_fn converter plan requires a nested function payload.")
-    return CategoricalConverterPlan(
-        kind=kind,  # type: ignore[arg-type]
-        method=str(plan_mapping["method"]),  # type: ignore[arg-type]
-        variant=variant,  # type: ignore[arg-type]
-        function=(None if function_payload is None else _coerce_function_plan(function_payload)),
-    )
-
-
-def _coerce_converter_group(raw_group: Mapping[str, Any]) -> FixedLayoutConverterGroup:
-    group_kind = str(raw_group["group_kind"])
-    spec_indices = tuple(int(value) for value in list(raw_group["spec_indices"]))
-    if group_kind == "numeric":
-        return NumericConverterGroup(spec_indices=spec_indices)
-    if group_kind == "categorical":
-        return CategoricalConverterGroup(spec_indices=spec_indices)
-    raise ValueError(f"Unsupported fixed-layout converter group kind: {group_kind!r}")
-
-
-def _coerce_node_source(raw_plan: Mapping[str, Any]) -> FixedLayoutNodeSource:
-    source_kind = str(raw_plan["source_kind"])
-    if source_kind == "random_points":
-        return RandomPointsNodeSource(
-            base_kind=str(raw_plan["base_kind"]),  # type: ignore[arg-type]
-            function=_coerce_function_plan(raw_plan["function"]),
-        )
-    if source_kind != "multi":
-        raise ValueError(f"Unsupported fixed-layout source kind: {source_kind!r}")
-    combine_kind = str(raw_plan["combine_kind"])
-    if combine_kind == "concat":
-        return ConcatNodeSource(function=_coerce_function_plan(raw_plan["function"]))
-    if combine_kind == "stack":
-        return StackedNodeSource(
-            aggregation_kind=str(raw_plan["aggregation_kind"]),  # type: ignore[arg-type]
-            parent_functions=tuple(
-                _coerce_function_plan(plan) for plan in list(raw_plan["parent_functions"])
-            ),
-        )
-    raise ValueError(f"Unsupported fixed-layout combine kind: {combine_kind!r}")
-
-
-def _coerce_function_plan(raw_plan: Mapping[str, Any]) -> FixedLayoutFunctionPlan:
-    family = str(raw_plan["family"])
-    if family == "linear":
-        return LinearFunctionPlan(matrix=_coerce_matrix_plan(raw_plan["matrix"]))
-    if family == "quadratic":
-        return QuadraticFunctionPlan(matrix=_coerce_matrix_plan(raw_plan["matrix"]))
-    if family == "nn":
-        return NeuralNetFunctionPlan(
-            n_layers=int(raw_plan["n_layers"]),
-            hidden_width=int(raw_plan["hidden_width"]),
-            input_activation=(
-                None
-                if not bool(raw_plan.get("apply_input_activation"))
-                else _coerce_activation_plan(raw_plan["input_activation"])
-            ),
-            output_activation=(
-                None
-                if not bool(raw_plan.get("apply_output_activation"))
-                else _coerce_activation_plan(raw_plan["output_activation"])
-            ),
-            layer_matrices=tuple(
-                _coerce_matrix_plan(plan) for plan in list(raw_plan["layer_matrices"])
-            ),
-            hidden_activations=tuple(
-                _coerce_activation_plan(plan) for plan in list(raw_plan["hidden_activations"])
-            ),
-        )
-    if family == "tree":
-        return TreeFunctionPlan(
-            n_trees=int(raw_plan["n_trees"]),
-            depths=tuple(int(depth) for depth in list(raw_plan["depths"])),
-        )
-    if family == "discretization":
-        return DiscretizationFunctionPlan(
-            n_centers=int(raw_plan["n_centers"]),
-            linear_matrix=_coerce_matrix_plan(raw_plan["linear_matrix"]),
-        )
-    if family == "gp":
-        return GpFunctionPlan(branch_kind=str(raw_plan["branch_kind"]))  # type: ignore[arg-type]
-    if family == "em":
-        return EmFunctionPlan(
-            m_val=int(raw_plan["m_val"]),
-            linear_matrix=_coerce_matrix_plan(raw_plan["linear_matrix"]),
-        )
-    if family == "product":
-        return ProductFunctionPlan(
-            lhs=_coerce_function_plan(raw_plan["lhs"]),
-            rhs=_coerce_function_plan(raw_plan["rhs"]),
-        )
-    raise ValueError(f"Unsupported fixed-layout function family: {family!r}")
-
-
-def _coerce_matrix_plan(raw_plan: Mapping[str, Any]) -> FixedLayoutMatrixPlan:
-    kind = str(raw_plan["kind"])
-    if kind == "gaussian":
-        return GaussianMatrixPlan()
-    if kind == "weights":
-        return WeightsMatrixPlan()
-    if kind == "singular_values":
-        return SingularValuesMatrixPlan()
-    if kind == "kernel":
-        return KernelMatrixPlan()
-    if kind == "activation":
-        return ActivationMatrixPlan(
-            base_kind=str(raw_plan["base_kind"]),  # type: ignore[arg-type]
-            activation=_coerce_activation_plan(raw_plan["activation"]),
-        )
-    raise ValueError(f"Unsupported fixed-layout matrix kind: {kind!r}")
-
-
-def _coerce_activation_plan(raw_plan: Mapping[str, Any]) -> FixedLayoutActivationPlan:
-    mode = str(raw_plan["mode"])
-    if mode == "fixed":
-        return FixedActivationPlan(name=str(raw_plan["name"]))
-    if mode == "parametric":
-        poly_power = raw_plan.get("poly_power")
-        return ParametricActivationPlan(
-            kind=str(raw_plan["kind"]),  # type: ignore[arg-type]
-            poly_power=None if poly_power is None else int(poly_power),
-        )
-    raise ValueError(f"Unsupported fixed-layout activation mode: {mode!r}")
 
 
 def _converter_function_signature(plan: FixedLayoutFunctionPlan | None) -> str | None:
@@ -555,10 +324,11 @@ def _node_plan_payload(
         payload["function"] = _function_plan_payload(source.function)
         return payload
     payload["source_kind"] = "multi"
-    payload["combine_kind"] = str(source.combine_kind)
     if isinstance(source, ConcatNodeSource):
+        payload["combine_kind"] = "concat"
         payload["function"] = _function_plan_payload(source.function)
         return payload
+    payload["combine_kind"] = "stack"
     payload["aggregation_kind"] = str(source.aggregation_kind)
     payload["parent_functions"] = [_function_plan_payload(plan) for plan in source.parent_functions]
     return payload
@@ -754,8 +524,6 @@ __all__ = [
     "StackedNodeSource",
     "TreeFunctionPlan",
     "WeightsMatrixPlan",
-    "coerce_fixed_layout_execution_plan",
     "fixed_layout_converter_groups",
-    "fixed_layout_execution_plan_payloads",
     "fixed_layout_signature_payloads",
 ]

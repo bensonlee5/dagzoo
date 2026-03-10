@@ -52,6 +52,10 @@ dagzoo filter --in data/run1 --out data/run1_filter
 dagzoo filter --in data/run1 --out data/run1_filter --curated-out data/run1_curated
 ```
 
+Deferred filtering replays strictly from embedded shard metadata; current
+generated outputs include the required task and filter config under
+`metadata.config`.
+
 ______________________________________________________________________
 
 ## 3. Total-row control (`dataset.rows` / `--rows`)

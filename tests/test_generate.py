@@ -1225,20 +1225,18 @@ def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
             mixture_weights={"gaussian": 0.5, "laplace": 0.5},
         )
 
-    def _stub_generate_fixed_layout_label_batch_with_fallback(
+    def _stub_generate_fixed_layout_graph_batch(
         _config,
         _layout,
         *,
         execution_plan,
         dataset_seeds,
-        requested_device,
-        resolved_device,
+        device,
         noise_sigma_multiplier,
         noise_spec,
     ):
         _ = execution_plan
-        _ = requested_device
-        _ = resolved_device
+        _ = device
         _ = noise_sigma_multiplier
         _ = noise_spec
         grouped_call_sizes.append(len(dataset_seeds))
@@ -1248,8 +1246,6 @@ def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
             torch.zeros((batch_size, n_rows, 2), dtype=torch.float32),
             torch.zeros((batch_size, n_rows), dtype=torch.float32),
             [{} for _ in dataset_seeds],
-            "cpu",
-            None,
         )
 
     def _stub_finalize_generated_chunk_preserve_schema(
@@ -1313,8 +1309,8 @@ def test_generate_batch_with_plan_iter_groups_mixed_noise_runtime_subbatches(
         _stub_resolve_noise_runtime_selection,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout_runtime._generate_fixed_layout_graph_batch_with_fallback",
-        _stub_generate_fixed_layout_label_batch_with_fallback,
+        "dagzoo.core.fixed_layout_runtime.generate_fixed_layout_graph_batch",
+        _stub_generate_fixed_layout_graph_batch,
     )
     monkeypatch.setattr(
         "dagzoo.core.fixed_layout_runtime._finalize_generated_chunk_preserve_schema",
@@ -1388,39 +1384,32 @@ def test_fixed_layout_plan_supports_classification_run_groups_mixed_noise_runtim
             mixture_weights={"gaussian": 0.5, "laplace": 0.5},
         )
 
-    def _stub_generate_fixed_layout_graph_batch_with_fallback(
+    def _stub_generate_fixed_layout_label_batch(
         _config,
         _layout,
         *,
         execution_plan,
         dataset_seeds,
-        requested_device,
-        resolved_device,
+        device,
         noise_sigma_multiplier,
         noise_spec,
     ):
         _ = execution_plan
-        _ = requested_device
-        _ = resolved_device
+        _ = device
         _ = noise_sigma_multiplier
         _ = noise_spec
         grouped_call_sizes.append(len(dataset_seeds))
         batch_size = len(dataset_seeds)
         n_rows = cfg.dataset.n_train + cfg.dataset.n_test
-        return (
-            torch.zeros((batch_size, n_rows), dtype=torch.int64),
-            [{} for _ in dataset_seeds],
-            "cpu",
-            None,
-        )
+        return torch.zeros((batch_size, n_rows), dtype=torch.int64), [{} for _ in dataset_seeds]
 
     monkeypatch.setattr(
         "dagzoo.core.fixed_layout_runtime._resolve_noise_runtime_selection",
         _stub_resolve_noise_runtime_selection,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout_runtime._generate_fixed_layout_label_batch_with_fallback",
-        _stub_generate_fixed_layout_graph_batch_with_fallback,
+        "dagzoo.core.fixed_layout_runtime.generate_fixed_layout_label_batch",
+        _stub_generate_fixed_layout_label_batch,
     )
     monkeypatch.setattr(
         "dagzoo.core.fixed_layout_runtime._raw_classification_labels_support_split",
@@ -1504,26 +1493,24 @@ def test_fixed_layout_plan_classification_attempt_plan_does_not_scalarize_other_
             )
         ]
 
-    def _stub_generate_fixed_layout_label_batch_with_fallback(
+    def _stub_generate_fixed_layout_label_batch(
         _config: GeneratorConfig,
         _layout,
         *,
         execution_plan,
         dataset_seeds: list[int],
-        requested_device: str,
-        resolved_device: str,
+        device: str,
         noise_sigma_multiplier: float,
         noise_spec,
-    ) -> tuple[torch.Tensor, list[dict[str, object]], str, str | None]:
+    ) -> tuple[torch.Tensor, list[dict[str, object]]]:
         _ = execution_plan
-        _ = requested_device
-        _ = resolved_device
+        _ = device
         _ = noise_sigma_multiplier
         _ = noise_spec
         y_batch = torch.zeros(
             (len(dataset_seeds), cfg.dataset.n_train + cfg.dataset.n_test), dtype=torch.int64
         )
-        return y_batch, [{} for _ in dataset_seeds], "cpu", None
+        return y_batch, [{} for _ in dataset_seeds]
 
     def _stub_raw_classification_labels_support_split(
         _y: torch.Tensor,
@@ -1561,8 +1548,8 @@ def test_fixed_layout_plan_classification_attempt_plan_does_not_scalarize_other_
         _stub_group_noise_runtime_chunk,
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout_runtime._generate_fixed_layout_label_batch_with_fallback",
-        _stub_generate_fixed_layout_label_batch_with_fallback,
+        "dagzoo.core.fixed_layout_runtime.generate_fixed_layout_label_batch",
+        _stub_generate_fixed_layout_label_batch,
     )
     monkeypatch.setattr(
         "dagzoo.core.fixed_layout_runtime._raw_classification_labels_support_split",
@@ -1619,7 +1606,9 @@ def test_generate_rejects_inline_filter_enabled() -> None:
         _ = generate_one(cfg, seed=1122, device="cpu")
 
 
-def test_auto_retries_on_cpu_when_mps_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_auto_surfaces_mps_runtime_failure_in_generate_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[str] = []
 
     def _stub_generate_fixed_layout_graph_batch(
@@ -1652,17 +1641,17 @@ def test_auto_retries_on_cpu_when_mps_fails(monkeypatch: pytest.MonkeyPatch) -> 
         lambda *_args, **_kwargs: "mps",
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
+        "dagzoo.core.fixed_layout_runtime.generate_fixed_layout_graph_batch",
         _stub_generate_fixed_layout_graph_batch,
     )
     cfg = _tiny_regression_config()
 
-    bundle = generate_one(cfg, seed=123, device="auto")
-    assert calls == ["mps", "cpu"]
-    assert bundle.metadata["backend"] == "torch"
+    with pytest.raises(RuntimeError, match="simulated mps failure"):
+        generate_one(cfg, seed=123, device="auto")
+    assert calls == ["mps"]
 
 
-def test_generate_batch_iter_auto_retries_on_cpu_when_mps_batch_generation_fails(
+def test_generate_batch_iter_auto_surfaces_mps_batch_generation_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _tiny_regression_config()
@@ -1696,15 +1685,13 @@ def test_generate_batch_iter_auto_retries_on_cpu_when_mps_batch_generation_fails
         lambda *_args, **_kwargs: "mps",
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
+        "dagzoo.core.fixed_layout_runtime.generate_fixed_layout_graph_batch",
         _stub_generate_fixed_layout_graph_batch,
     )
 
-    bundle = next(generate_batch_iter(cfg, num_datasets=1, seed=230, device="auto"))
-
-    assert calls == ["mps", "cpu"]
-    assert bundle.metadata["resolved_device"] == "cpu"
-    assert bundle.metadata["device_fallback_reason"] == "auto_mps_runtime_error:RuntimeError"
+    with pytest.raises(RuntimeError, match="simulated mps failure"):
+        next(generate_batch_iter(cfg, num_datasets=1, seed=230, device="auto"))
+    assert calls == ["mps"]
 
 
 def test_auto_does_not_fallback_to_numpy_if_torch_runtime_fails(
@@ -1714,7 +1701,7 @@ def test_auto_does_not_fallback_to_numpy_if_torch_runtime_fails(
         raise RuntimeError("simulated torch runtime failure")
 
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout.generate_fixed_layout_graph_batch",
+        "dagzoo.core.fixed_layout_runtime.generate_fixed_layout_graph_batch",
         _raise_runtime,
     )
     cfg = _tiny_config()
@@ -2055,20 +2042,18 @@ def test_prepare_canonical_fixed_layout_run_uses_lightweight_classification_vali
         assert resolved_device == "cpu"
         return plan
 
-    def _stub_generate_fixed_layout_label_batch_with_fallback(
+    def _stub_generate_fixed_layout_label_batch(
         _config: GeneratorConfig,
         _layout,
         *,
         execution_plan,
         dataset_seeds: list[int],
-        requested_device: str,
-        resolved_device: str,
+        device: str,
         noise_sigma_multiplier: float,
         noise_spec,
-    ) -> tuple[torch.Tensor, torch.Tensor, list[dict[str, object]], str, str | None]:
+    ) -> tuple[torch.Tensor, list[dict[str, object]]]:
         _ = execution_plan
-        _ = requested_device
-        _ = resolved_device
+        _ = device
         _ = noise_sigma_multiplier
         _ = noise_spec
         y_batch = torch.tensor(
@@ -2076,7 +2061,7 @@ def test_prepare_canonical_fixed_layout_run_uses_lightweight_classification_vali
             dtype=torch.int64,
         )
         aux_meta_batch = [{} for _ in dataset_seeds]
-        return y_batch, aux_meta_batch, "cpu", None
+        return y_batch, aux_meta_batch
 
     monkeypatch.setattr(
         "dagzoo.core.fixed_layout_runtime._sample_fixed_layout_candidate",
@@ -2089,8 +2074,8 @@ def test_prepare_canonical_fixed_layout_run_uses_lightweight_classification_vali
         ),
     )
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout_runtime._generate_fixed_layout_label_batch_with_fallback",
-        _stub_generate_fixed_layout_label_batch_with_fallback,
+        "dagzoo.core.fixed_layout_runtime.generate_fixed_layout_label_batch",
+        _stub_generate_fixed_layout_label_batch,
     )
 
     prepared = prepare_canonical_fixed_layout_run(cfg, num_datasets=4, seed=17, device="cpu")

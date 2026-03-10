@@ -11,7 +11,7 @@ from dagzoo.bench.constants import (
     SECONDS_PER_MINUTE,
     THROUGHPUT_SLO_DATASETS_PER_MINUTE,
 )
-from dagzoo.config import GeneratorConfig
+from dagzoo.config import GeneratorConfig, clone_generator_config
 from dagzoo.core.dataset import generate_batch_iter
 from dagzoo.hardware import detect_hardware
 from dagzoo.hardware_policy import (
@@ -80,7 +80,7 @@ def run_fixed_layout_target_cells_sweep(
 
     results: list[dict[str, Any]] = []
     for target_cells in normalized_values:
-        tuned = GeneratorConfig.from_dict(config.to_dict())
+        tuned = clone_generator_config(config, revalidate=False)
         tuned.runtime.fixed_layout_target_cells = int(target_cells)
         result = run_throughput_benchmark(
             tuned,
