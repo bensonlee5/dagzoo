@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dagzoo"
-version = "0.8.0"
+version = "0.8.1"
 description = "High-performance synthetic tabular data generator"
 readme = "README.md"
 license = "MIT"

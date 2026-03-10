@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from dagzoo.filtering.deferred_filter import run_deferred_filter
+from dagzoo.filtering.deferred_filter import _iter_packed_split_datasets, run_deferred_filter
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 from dagzoo.types import DatasetBundle
 
@@ -87,6 +87,89 @@ def _write_split_table(
     pyarrow_parquet.write_table(table, path, compression="zstd")
 
 
+def test_iter_packed_split_datasets_handles_dataset_split_across_record_batches(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyarrow = pytest.importorskip("pyarrow")
+
+    table = pyarrow.table(
+        {
+            "dataset_index": pyarrow.array([0, 0, 0, 1, 1], type=pyarrow.int64()),
+            "row_index": pyarrow.array([0, 1, 2, 0, 1], type=pyarrow.int64()),
+            "x": pyarrow.array(
+                [[0.0, 0.5], [1.0, 1.5], [2.0, 2.5], [3.0, 3.5], [4.0, 4.5]],
+                type=pyarrow.list_(pyarrow.float32()),
+            ),
+            "y": pyarrow.array([0, 1, 0, 1, 0], type=pyarrow.int64()),
+        }
+    )
+    batches = [
+        table.slice(0, 2).to_batches()[0],
+        table.slice(2, 1).to_batches()[0],
+        table.slice(3, 2).to_batches()[0],
+    ]
+
+    class _FakeParquetFile:
+        def __init__(self, _path) -> None:
+            self.schema_arrow = table.schema
+
+        def iter_batches(self, *, columns):
+            assert columns == ["dataset_index", "row_index", "x", "y"]
+            return iter(batches)
+
+    monkeypatch.setattr("dagzoo.filtering.deferred_filter.pq.ParquetFile", _FakeParquetFile)
+
+    split_path = tmp_path / "train.parquet"
+    datasets = list(_iter_packed_split_datasets(split_path))
+
+    assert [dataset.dataset_index for dataset in datasets] == [0, 1]
+    assert datasets[0].x.shape == (3, 2)
+    assert datasets[0].y.tolist() == [0, 1, 0]
+    assert np.allclose(datasets[0].x[:, 0], np.array([0.0, 1.0, 2.0], dtype=np.float32))
+    assert datasets[1].x.shape == (2, 2)
+    assert datasets[1].y.tolist() == [1, 0]
+
+
+def test_iter_packed_split_datasets_handles_mixed_feature_widths_within_record_batch(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyarrow = pytest.importorskip("pyarrow")
+
+    table = pyarrow.table(
+        {
+            "dataset_index": pyarrow.array([0, 0, 1, 1], type=pyarrow.int64()),
+            "row_index": pyarrow.array([0, 1, 0, 1], type=pyarrow.int64()),
+            "x": pyarrow.array(
+                [[0.0, 0.5], [1.0, 1.5], [2.0, 2.5, 2.75], [3.0, 3.5, 3.75]],
+                type=pyarrow.list_(pyarrow.float32()),
+            ),
+            "y": pyarrow.array([0, 1, 1, 0], type=pyarrow.int64()),
+        }
+    )
+    batches = table.to_batches(max_chunksize=4)
+
+    class _FakeParquetFile:
+        def __init__(self, _path) -> None:
+            self.schema_arrow = table.schema
+
+        def iter_batches(self, *, columns):
+            assert columns == ["dataset_index", "row_index", "x", "y"]
+            return iter(batches)
+
+    monkeypatch.setattr("dagzoo.filtering.deferred_filter.pq.ParquetFile", _FakeParquetFile)
+
+    split_path = tmp_path / "train.parquet"
+    datasets = list(_iter_packed_split_datasets(split_path))
+
+    assert [dataset.dataset_index for dataset in datasets] == [0, 1]
+    assert datasets[0].x.shape == (2, 2)
+    assert datasets[0].y.tolist() == [0, 1]
+    assert datasets[1].x.shape == (2, 3)
+    assert datasets[1].y.tolist() == [1, 0]
+
+
 def test_run_deferred_filter_writes_manifest_and_summary(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -106,7 +189,9 @@ def test_run_deferred_filter_writes_manifest_and_summary(
             details["reason"] = "below_threshold"
         return accepted, details
 
-    monkeypatch.setattr("dagzoo.filtering.deferred_filter.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr(
+        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy", _stub_filter
+    )
 
     result = run_deferred_filter(in_dir=in_dir, out_dir=out_dir)
     assert result.total_datasets == 2
@@ -150,7 +235,9 @@ def test_run_deferred_filter_writes_curated_output_for_accepted_only(
         accepted = bool(seed % 2)
         return accepted, {"wins_ratio": 1.0 if accepted else 0.0, "n_valid_oob": 128}
 
-    monkeypatch.setattr("dagzoo.filtering.deferred_filter.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr(
+        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy", _stub_filter
+    )
 
     result = run_deferred_filter(in_dir=in_dir, out_dir=out_dir, curated_out_dir=curated_out)
     assert result.curated_accepted_datasets == 2
@@ -177,7 +264,7 @@ def test_run_deferred_filter_requires_embedded_filter_config(
     _ = write_packed_parquet_shards_stream(bundles, in_dir, shard_size=1, compression="zstd")
 
     monkeypatch.setattr(
-        "dagzoo.filtering.deferred_filter.apply_extra_trees_filter",
+        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy",
         lambda *_args, **_kwargs: (True, {"wins_ratio": 1.0, "n_valid_oob": 128}),
     )
 
@@ -205,7 +292,9 @@ def test_run_deferred_filter_prefers_dataset_seed_when_present(
         replay_seeds.append(int(_kwargs["seed"]))
         return True, {"wins_ratio": 1.0, "n_valid_oob": 128}
 
-    monkeypatch.setattr("dagzoo.filtering.deferred_filter.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr(
+        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy", _stub_filter
+    )
 
     result = run_deferred_filter(in_dir=in_dir, out_dir=out_dir)
 
@@ -255,7 +344,7 @@ def test_run_deferred_filter_rejects_extra_split_rows_beyond_metadata(
     _write_ndjson_records(metadata_path, [records[0]])
 
     monkeypatch.setattr(
-        "dagzoo.filtering.deferred_filter.apply_extra_trees_filter",
+        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy",
         lambda *_args, **_kwargs: (True, {"wins_ratio": 1.0, "n_valid_oob": 128}),
     )
 
@@ -329,7 +418,7 @@ def test_run_deferred_filter_rejects_non_monotonic_split_rows(
     )
 
     monkeypatch.setattr(
-        "dagzoo.filtering.deferred_filter.apply_extra_trees_filter",
+        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy",
         lambda *_args, **_kwargs: (True, {"wins_ratio": 1.0, "n_valid_oob": 128}),
     )
 
@@ -363,7 +452,7 @@ def test_run_deferred_filter_rejects_lineage_symlinks_during_curated_copy(
         pytest.skip("symlinks unavailable in this environment")
 
     monkeypatch.setattr(
-        "dagzoo.filtering.deferred_filter.apply_extra_trees_filter",
+        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy",
         lambda *_args, **_kwargs: (True, {"wins_ratio": 1.0, "n_valid_oob": 128}),
     )
 
@@ -399,7 +488,7 @@ def test_run_deferred_filter_cleans_up_curated_output_after_split_exhaustion_fai
     _write_ndjson_records(metadata_path, [records[0]])
 
     monkeypatch.setattr(
-        "dagzoo.filtering.deferred_filter.apply_extra_trees_filter",
+        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy",
         lambda *_args, **_kwargs: (True, {"wins_ratio": 1.0, "n_valid_oob": 128}),
     )
 

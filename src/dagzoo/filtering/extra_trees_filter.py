@@ -136,9 +136,9 @@ def _oob_valid_mask_from_samples(estimators_samples: Any, *, n_rows: int) -> np.
     return oob_vote_counts > 0
 
 
-def apply_extra_trees_filter(
-    x: torch.Tensor,
-    y: torch.Tensor,
+def _apply_extra_trees_filter_numpy(
+    x: np.ndarray,
+    y: np.ndarray,
     *,
     task: str,
     seed: int,
@@ -151,7 +151,7 @@ def apply_extra_trees_filter(
     threshold: float = 0.95,
     n_jobs: int = -1,
 ) -> tuple[bool, dict[str, Any]]:
-    """Apply CPU ExtraTrees filtering with OOB bootstrap win-ratio scoring."""
+    """Apply CPU ExtraTrees filtering from NumPy arrays."""
 
     seed = validate_seed32(seed, field_name="seed")
     if n_estimators < 1:
@@ -169,31 +169,33 @@ def apply_extra_trees_filter(
     if n_jobs == 0 or n_jobs < -1:
         raise ValueError(f"n_jobs must be -1 or an integer >= 1, got {n_jobs}")
 
-    x_cpu = x.detach().to(device="cpu", dtype=torch.float32)
-    if x_cpu.ndim != 2:
-        raise ValueError(f"x must be rank-2 [n_rows, n_features], got shape {tuple(x_cpu.shape)}")
-    n_rows = int(x_cpu.shape[0])
-    n_features = int(x_cpu.shape[1])
+    x_np = np.asarray(x, dtype=np.float32)
+    if x_np.ndim != 2:
+        raise ValueError(f"x must be rank-2 [n_rows, n_features], got shape {tuple(x_np.shape)}")
+    x_np = np.ascontiguousarray(x_np)
+    n_rows = int(x_np.shape[0])
+    n_features = int(x_np.shape[1])
     m_try = _resolve_max_features(max_features, n_features, task)
 
     if task == "classification":
-        y_raw = y.detach().to(device="cpu", dtype=torch.int64).view(-1)
-        unique_labels, y_dense = torch.unique(y_raw, sorted=True, return_inverse=True)
-        n_classes = int(unique_labels.numel())
+        y_raw = np.asarray(y, dtype=np.int64).reshape(-1)
+        unique_labels, y_dense = np.unique(y_raw, return_inverse=True)
+        n_classes = int(unique_labels.size)
         class_count: int | None = n_classes
-        y_target = torch.nn.functional.one_hot(y_dense, num_classes=n_classes).to(torch.float32)
+        y_target = np.eye(n_classes, dtype=np.float32)[y_dense]
     elif task == "regression":
         class_count = None
-        y_target = y.detach().to(device="cpu", dtype=torch.float32)
+        y_target = np.asarray(y, dtype=np.float32)
         if y_target.ndim == 1:
-            y_target = y_target.unsqueeze(1)
+            y_target = y_target.reshape(-1, 1)
     else:
         raise ValueError(f"Unsupported task '{task}'.")
 
-    if int(y_target.shape[0]) != n_rows:
+    y_np = np.ascontiguousarray(y_target, dtype=np.float32)
+    if int(y_np.shape[0]) != n_rows:
         raise ValueError(
             "x/y row-count mismatch in filter: "
-            f"x has {n_rows} rows, y has {int(y_target.shape[0])} rows."
+            f"x has {n_rows} rows, y has {int(y_np.shape[0])} rows."
         )
 
     threshold_details = _resolve_threshold_diagnostics(
@@ -202,9 +204,6 @@ def apply_extra_trees_filter(
         class_count=class_count,
     )
     effective_threshold = float(threshold_details["threshold_effective"])
-
-    x_np = np.asarray(x_cpu.numpy(), dtype=np.float32)
-    y_np = np.asarray(y_target.numpy(), dtype=np.float32)
     max_leaf_nodes_model = int(max_leaf_nodes) if max_leaf_nodes is not None else None
     min_samples_split_override: int | None = None
     if max_leaf_nodes_model == 1:
@@ -277,3 +276,41 @@ def apply_extra_trees_filter(
         "n_jobs": int(n_jobs),
         **threshold_details,
     }
+
+
+def apply_extra_trees_filter(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    *,
+    task: str,
+    seed: int,
+    n_estimators: int = 25,
+    max_depth: int = 6,
+    min_samples_leaf: int = 1,
+    max_leaf_nodes: int | None = None,
+    max_features: str | int | float = "auto",
+    n_bootstrap: int = 200,
+    threshold: float = 0.95,
+    n_jobs: int = -1,
+) -> tuple[bool, dict[str, Any]]:
+    """Apply CPU ExtraTrees filtering with OOB bootstrap win-ratio scoring."""
+
+    x_np = np.asarray(x.detach().to(device="cpu", dtype=torch.float32).numpy(), dtype=np.float32)
+    if task == "classification":
+        y_np = np.asarray(y.detach().to(device="cpu", dtype=torch.int64).view(-1).numpy())
+    else:
+        y_np = np.asarray(y.detach().to(device="cpu", dtype=torch.float32).numpy())
+    return _apply_extra_trees_filter_numpy(
+        x_np,
+        y_np,
+        task=task,
+        seed=seed,
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        min_samples_leaf=min_samples_leaf,
+        max_leaf_nodes=max_leaf_nodes,
+        max_features=max_features,
+        n_bootstrap=n_bootstrap,
+        threshold=threshold,
+        n_jobs=n_jobs,
+    )

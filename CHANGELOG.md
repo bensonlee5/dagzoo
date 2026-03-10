@@ -10,6 +10,20 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.8.1] - 2026-03-10
+
+### Changed
+
+- Fixed deferred-filter packed-split replay so one Parquet record batch can
+  contain adjacent datasets with different feature widths without raising a
+  false ragged-shape error.
+- Benchmark preset results now replace the misleading
+  `accepted_datasets_measured` field with explicit filter-stage dataset-yield
+  telemetry: accepted count, rejected count, acceptance rate, and rejection
+  rate. CLI and markdown benchmark summaries now print the new dataset-level
+  filter accept/reject percentages alongside the existing attempt-level filter
+  rejection pressure metrics.
+
 ## [0.8.0] - 2026-03-10
 
 ### Removed

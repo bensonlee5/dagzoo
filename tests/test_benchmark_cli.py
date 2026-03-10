@@ -40,6 +40,11 @@ def test_benchmark_cli_writes_json(tmp_path) -> None:
     assert float(profile["generation_datasets_per_minute"]) >= 0.0
     assert float(profile["write_datasets_per_minute"]) >= 0.0
     assert profile["filter_datasets_per_minute"] is None
+    assert "accepted_datasets_measured" not in profile
+    assert profile["filter_accepted_datasets_measured"] == 0
+    assert profile["filter_rejected_datasets_measured"] == 0
+    assert profile["filter_acceptance_rate_dataset_level"] is None
+    assert profile["filter_rejection_rate_dataset_level"] is None
     assert profile["filter_rejection_rate_attempt_level"] is None
     assert profile["filter_retry_dataset_rate"] is None
     lineage_guardrails = profile["lineage_guardrails"]
@@ -488,6 +493,8 @@ def test_print_preset_result_line_includes_stage_and_filter_rejection_metrics(ca
             "generation_datasets_per_minute": 124.0,
             "write_datasets_per_minute": 80.0,
             "filter_datasets_per_minute": 60.0,
+            "filter_acceptance_rate_dataset_level": 0.75,
+            "filter_rejection_rate_dataset_level": 0.25,
             "filter_rejection_rate_attempt_level": 0.125,
             "filter_retry_dataset_rate": 0.25,
             "latency_p95_ms": 4.2,
@@ -498,6 +505,8 @@ def test_print_preset_result_line_includes_stage_and_filter_rejection_metrics(ca
     assert "write/min=80.00" in output
     assert "filter/min=60.00" in output
     assert "filter_reject_attempt_pct=12.50" in output
+    assert "filter_accept_dataset_pct=75.00" in output
+    assert "filter_reject_dataset_pct=25.00" in output
     assert "filter_retry_dataset_pct=25.00" in output
 
 

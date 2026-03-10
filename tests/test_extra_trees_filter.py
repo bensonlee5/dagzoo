@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from dagzoo.filtering import apply_extra_trees_filter
+from dagzoo.filtering.extra_trees_filter import _apply_extra_trees_filter_numpy
 
 
 def _make_regression_data(
@@ -76,6 +77,44 @@ def test_extra_trees_filter_is_deterministic_for_fixed_seed() -> None:
     assert details_a["n_valid_oob"] == details_b["n_valid_oob"]
     assert details_a["backend"] == "extra_trees_cpu"
     assert int(details_a["n_jobs"]) == -1
+
+
+@pytest.mark.parametrize("task", ["classification", "regression"])
+def test_extra_trees_filter_numpy_helper_matches_torch_wrapper(task: str) -> None:
+    if task == "classification":
+        x, y = _make_classification_data(seed=141)
+    else:
+        x, y = _make_regression_data(seed=141)
+
+    accepted_torch, details_torch = apply_extra_trees_filter(
+        x,
+        y,
+        task=task,
+        seed=123,
+        n_estimators=8,
+        max_depth=5,
+        min_samples_leaf=2,
+        n_bootstrap=24,
+        threshold=0.5,
+        n_jobs=1,
+    )
+    x_np = x.detach().cpu().numpy()
+    y_np = y.detach().cpu().numpy()
+    accepted_numpy, details_numpy = _apply_extra_trees_filter_numpy(
+        x_np,
+        y_np,
+        task=task,
+        seed=123,
+        n_estimators=8,
+        max_depth=5,
+        min_samples_leaf=2,
+        n_bootstrap=24,
+        threshold=0.5,
+        n_jobs=1,
+    )
+
+    assert accepted_numpy == accepted_torch
+    assert details_numpy == details_torch
 
 
 def test_extra_trees_filter_handles_non_divisible_bootstrap_chunks() -> None:

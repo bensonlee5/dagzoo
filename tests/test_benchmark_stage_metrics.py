@@ -123,14 +123,16 @@ def test_filter_stage_metric_replays_filter_and_reports_counts(
         replay_seeds.append(int(_kwargs["seed"]))
         return bool(int(_kwargs["seed"]) % 2), {"n_valid_oob": 128}
 
-    monkeypatch.setattr("dagzoo.bench.stage_metrics.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagzoo.bench.stage_metrics._apply_extra_trees_filter_numpy", _stub_filter)
     bundles = [
         _bundle(metadata={"seed": 11, "dataset_seed": 21}),
         _bundle(metadata={"seed": 12, "dataset_seed": 22}),
     ]
     measurement = measure_filter_stage_metrics(bundles, config=cfg)
     assert measurement.filter_attempts_total == 2
+    assert measurement.filter_accepted_datasets == 1
     assert measurement.filter_rejections_total == 1
+    assert measurement.filter_rejected_datasets == 1
     assert measurement.datasets_per_minute > 0.0
     assert replay_seeds == [21, 22]
     assert measure_filter_datasets_per_minute(bundles, config=cfg) > 0.0
@@ -147,11 +149,13 @@ def test_filter_stage_metric_returns_zero_when_disabled(
         calls["count"] += 1
         return True, {}
 
-    monkeypatch.setattr("dagzoo.bench.stage_metrics.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagzoo.bench.stage_metrics._apply_extra_trees_filter_numpy", _stub_filter)
     measurement = measure_filter_stage_metrics([_bundle(metadata={})], config=cfg)
     assert measurement.datasets_per_minute == 0.0
     assert measurement.filter_attempts_total == 0
+    assert measurement.filter_accepted_datasets == 0
     assert measurement.filter_rejections_total == 0
+    assert measurement.filter_rejected_datasets == 0
     assert calls["count"] == 0
 
 
@@ -167,7 +171,7 @@ def test_filter_stage_metric_uses_fallback_seed_when_missing(
         replay_seeds.append(int(_kwargs["seed"]))
         return True, {}
 
-    monkeypatch.setattr("dagzoo.bench.stage_metrics.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagzoo.bench.stage_metrics._apply_extra_trees_filter_numpy", _stub_filter)
     _ = measure_filter_stage_metrics(
         [
             _bundle(metadata={}),
@@ -189,7 +193,7 @@ def test_filter_stage_metric_falls_back_to_legacy_seed_when_dataset_seed_missing
         replay_seeds.append(int(_kwargs["seed"]))
         return True, {}
 
-    monkeypatch.setattr("dagzoo.bench.stage_metrics.apply_extra_trees_filter", _stub_filter)
+    monkeypatch.setattr("dagzoo.bench.stage_metrics._apply_extra_trees_filter_numpy", _stub_filter)
     _ = measure_filter_stage_metrics(
         [
             _bundle(metadata={"seed": 41}),

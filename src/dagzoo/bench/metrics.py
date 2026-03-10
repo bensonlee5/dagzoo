@@ -20,6 +20,7 @@ HIGHER_IS_BETTER_METRICS = frozenset(
         "generation_datasets_per_minute",
         "write_datasets_per_minute",
         "filter_datasets_per_minute",
+        "filter_acceptance_rate_dataset_level",
     }
 )
 LOWER_IS_BETTER_METRICS = frozenset(
@@ -30,6 +31,7 @@ LOWER_IS_BETTER_METRICS = frozenset(
         "peak_rss_mb",
         "peak_cuda_allocated_mb",
         "peak_cuda_reserved_mb",
+        "filter_rejection_rate_dataset_level",
         "filter_rejection_rate_attempt_level",
         "filter_retry_dataset_rate",
         "retry_dataset_rate",

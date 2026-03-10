@@ -13,7 +13,7 @@ import time
 from typing import Any, TextIO
 
 from dagzoo.config import FilterConfig
-from dagzoo.filtering.extra_trees_filter import apply_extra_trees_filter
+from dagzoo.filtering.extra_trees_filter import _apply_extra_trees_filter_numpy
 from dagzoo.io.parquet_writer import (
     _PackedShardState,
     _close_packed_shard_handles,
@@ -26,7 +26,6 @@ from dagzoo.math_utils import sanitize_json as _sanitize_json
 from dagzoo.rng import SEED32_MAX, SEED32_MIN
 
 import numpy as np
-import torch
 
 
 MANIFEST_FILENAME = "filter_manifest.ndjson"
@@ -123,14 +122,24 @@ def _iter_metadata_records(path: Path) -> Iterator[dict[str, Any]]:
 def _build_packed_split_dataset(
     *,
     dataset_index: int,
-    x_rows: list[Any],
-    y_rows: list[Any],
+    x_chunks: list[np.ndarray],
+    y_chunks: list[np.ndarray],
     split_path: Path,
 ) -> _PackedSplitDataset:
     """Convert one accumulated packed split group into NumPy arrays."""
 
-    x_np = np.asarray(x_rows, dtype=np.float32)
-    y_np = np.asarray(y_rows)
+    if not x_chunks:
+        x_np = np.empty((0, 0), dtype=np.float32)
+    elif len(x_chunks) == 1:
+        x_np = np.asarray(x_chunks[0], dtype=np.float32, copy=False)
+    else:
+        x_np = np.concatenate(x_chunks, axis=0).astype(np.float32, copy=False)
+    if not y_chunks:
+        y_np = np.empty((0,), dtype=np.float32)
+    elif len(y_chunks) == 1:
+        y_np = np.asarray(y_chunks[0])
+    else:
+        y_np = np.concatenate(y_chunks, axis=0)
     if x_np.ndim != 2:
         raise ValueError(
             "Invalid packed feature shape while replaying deferred filter: "
@@ -139,6 +148,41 @@ def _build_packed_split_dataset(
     if y_np.ndim != 1:
         y_np = np.asarray(y_np).reshape(-1)
     return _PackedSplitDataset(dataset_index=dataset_index, x=x_np, y=y_np)
+
+
+def _packed_feature_column_to_numpy_matrix(
+    *,
+    feature_column: Any,
+    split_path: Path,
+    dataset_index: int,
+) -> np.ndarray:
+    """Convert one packed list column batch into a dense 2D NumPy matrix."""
+
+    offsets = np.asarray(feature_column.offsets.to_numpy(zero_copy_only=False), dtype=np.int64)
+    n_rows = max(0, int(offsets.shape[0] - 1))
+    if n_rows == 0:
+        return np.empty((0, 0), dtype=np.float32)
+
+    base_offset = int(offsets[0])
+    normalized_offsets = offsets - base_offset
+    row_widths = np.diff(normalized_offsets)
+    if row_widths.size == 0:
+        return np.empty((0, 0), dtype=np.float32)
+    expected_width = int(row_widths[0])
+    if np.any(row_widths != expected_width):
+        raise ValueError(
+            "Invalid packed feature shape while replaying deferred filter: "
+            f"split={split_path} dataset_index={dataset_index} shape=ragged"
+        )
+
+    total_values = int(normalized_offsets[-1])
+    values = np.asarray(
+        feature_column.values.slice(base_offset, total_values).to_numpy(zero_copy_only=False),
+        dtype=np.float32,
+    )
+    if expected_width == 0:
+        return np.empty((n_rows, 0), dtype=np.float32)
+    return values.reshape(n_rows, expected_width)
 
 
 def _iter_packed_split_datasets(split_path: Path) -> Iterator[_PackedSplitDataset]:
@@ -156,24 +200,29 @@ def _iter_packed_split_datasets(split_path: Path) -> Iterator[_PackedSplitDatase
 
     current_dataset_index: int | None = None
     expected_row_index = 0
-    x_rows: list[Any] = []
-    y_rows: list[Any] = []
+    x_chunks: list[np.ndarray] = []
+    y_chunks: list[np.ndarray] = []
 
     for batch in parquet_file.iter_batches(columns=["dataset_index", "row_index", "x", "y"]):
-        dataset_indices = batch.column(0).to_pylist()
-        row_indices = batch.column(1).to_pylist()
-        batch_x_rows = batch.column(2).to_pylist()
-        batch_y_rows = batch.column(3).to_pylist()
+        dataset_indices = np.asarray(batch.column(0).to_numpy(zero_copy_only=False), dtype=np.int64)
+        if dataset_indices.size == 0:
+            continue
+        row_indices = np.asarray(batch.column(1).to_numpy(zero_copy_only=False), dtype=np.int64)
+        feature_column = batch.column(2)
+        batch_y_rows = np.asarray(batch.column(3).to_numpy(zero_copy_only=False))
 
-        for dataset_index_raw, row_index_raw, x_row, y_row in zip(
-            dataset_indices,
-            row_indices,
-            batch_x_rows,
-            batch_y_rows,
-            strict=True,
-        ):
-            dataset_index = int(dataset_index_raw)
-            row_index = int(row_index_raw)
+        group_starts = np.concatenate(
+            (np.array([0], dtype=np.int64), np.flatnonzero(np.diff(dataset_indices) != 0) + 1)
+        )
+        group_ends = np.concatenate(
+            (group_starts[1:], np.array([dataset_indices.size], dtype=np.int64))
+        )
+
+        for start_raw, end_raw in zip(group_starts, group_ends, strict=True):
+            start = int(start_raw)
+            end = int(end_raw)
+            dataset_index = int(dataset_indices[start])
+            group_row_indices = row_indices[start:end]
 
             if current_dataset_index is None:
                 current_dataset_index = dataset_index
@@ -187,31 +236,49 @@ def _iter_packed_split_datasets(split_path: Path) -> Iterator[_PackedSplitDatase
             elif dataset_index != current_dataset_index:
                 yield _build_packed_split_dataset(
                     dataset_index=current_dataset_index,
-                    x_rows=x_rows,
-                    y_rows=y_rows,
+                    x_chunks=x_chunks,
+                    y_chunks=y_chunks,
                     split_path=split_path,
                 )
                 current_dataset_index = dataset_index
                 expected_row_index = 0
-                x_rows = []
-                y_rows = []
+                x_chunks = []
+                y_chunks = []
 
-            if row_index != expected_row_index:
+            expected_last_row_index = expected_row_index + int(group_row_indices.size) - 1
+            group_is_contiguous = bool(
+                group_row_indices.size == 0
+                or (
+                    int(group_row_indices[0]) == expected_row_index
+                    and int(group_row_indices[-1]) == expected_last_row_index
+                    and (
+                        group_row_indices.size == 1 or bool(np.all(np.diff(group_row_indices) == 1))
+                    )
+                )
+            )
+            if not group_is_contiguous:
+                actual_row_index = int(group_row_indices[0]) if group_row_indices.size > 0 else -1
                 raise ValueError(
                     "Packed split rows must have contiguous row_index values starting at 0: "
                     f"split={split_path} dataset_index={dataset_index} "
-                    f"expected_row_index={expected_row_index} got={row_index}"
+                    f"expected_row_index={expected_row_index} got={actual_row_index}"
                 )
 
-            x_rows.append(x_row)
-            y_rows.append(y_row)
-            expected_row_index += 1
+            group_x_rows = _packed_feature_column_to_numpy_matrix(
+                feature_column=feature_column.slice(start, end - start),
+                split_path=split_path,
+                dataset_index=dataset_index,
+            )
+
+            x_chunks.append(group_x_rows)
+            y_chunks.append(batch_y_rows[start:end])
+            expected_row_index += int(group_row_indices.size)
 
     if current_dataset_index is not None:
         yield _build_packed_split_dataset(
             dataset_index=current_dataset_index,
-            x_rows=x_rows,
-            y_rows=y_rows,
+            x_chunks=x_chunks,
+            y_chunks=y_chunks,
             split_path=split_path,
         )
 
@@ -320,13 +387,10 @@ def _filter_dataset(
     y_dtype = np.int64 if task == "classification" else np.float32
     y_all = y_all.astype(y_dtype, copy=False)
 
-    x_t = torch.from_numpy(x_all)
-    y_t = torch.from_numpy(y_all)
-
     start = time.perf_counter()
-    accepted, details = apply_extra_trees_filter(
-        x_t,
-        y_t,
+    accepted, details = _apply_extra_trees_filter_numpy(
+        x_all,
+        y_all,
         task=task,
         seed=seed,
         n_estimators=filter_cfg.n_estimators,

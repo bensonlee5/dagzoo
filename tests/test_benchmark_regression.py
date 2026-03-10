@@ -1,3 +1,5 @@
+import pytest
+
 from dagzoo.bench.baseline import (
     build_baseline_payload,
     compare_summary_to_baseline,
@@ -8,6 +10,12 @@ from dagzoo.bench.metrics import degradation_percent, percent_change
 def test_percent_change_and_degradation_direction() -> None:
     assert percent_change(90.0, 100.0) == -10.0
     assert degradation_percent("datasets_per_minute", 90.0, 100.0) == 10.0
+    assert degradation_percent("filter_acceptance_rate_dataset_level", 0.6, 0.8) == pytest.approx(
+        25.0
+    )
+    assert degradation_percent("filter_rejection_rate_dataset_level", 0.3, 0.2) == pytest.approx(
+        50.0
+    )
     assert degradation_percent("elapsed_seconds", 110.0, 100.0) == 10.0
 
 

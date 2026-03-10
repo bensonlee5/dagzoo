@@ -562,16 +562,31 @@ def run_preset_benchmark(
     filter_rejections_total = int(throughput_pressure_summary["filter_rejections_total"])
     filter_retry_dataset_count = int(throughput_pressure_summary["filter_retry_dataset_count"])
     filter_retry_dataset_denominator = int(throughput_pressure_summary["datasets_seen"])
+    filter_accepted_datasets_measured = 0
+    filter_rejected_datasets_measured = 0
     if filter_stage_measurement is not None:
         filter_attempts_total = int(filter_stage_measurement.filter_attempts_total)
         filter_rejections_total = int(filter_stage_measurement.filter_rejections_total)
         filter_retry_dataset_count = int(filter_stage_measurement.filter_rejections_total)
         filter_retry_dataset_denominator = int(stage_sample_datasets)
-
-    accepted_datasets_measured = int(throughput_pressure_summary["datasets_seen"])
+        filter_accepted_datasets_measured = int(filter_stage_measurement.filter_accepted_datasets)
+        filter_rejected_datasets_measured = int(filter_stage_measurement.filter_rejected_datasets)
     filter_rejection_rate_attempt_level = (
         float(filter_rejections_total) / float(filter_attempts_total)
         if filter_attempts_total > 0
+        else None
+    )
+    filter_dataset_yield_total = (
+        filter_accepted_datasets_measured + filter_rejected_datasets_measured
+    )
+    filter_acceptance_rate_dataset_level = (
+        float(filter_accepted_datasets_measured) / float(filter_dataset_yield_total)
+        if filter_dataset_yield_total > 0
+        else None
+    )
+    filter_rejection_rate_dataset_level = (
+        float(filter_rejected_datasets_measured) / float(filter_dataset_yield_total)
+        if filter_dataset_yield_total > 0
         else None
     )
     filter_retry_dataset_rate = (
@@ -605,13 +620,16 @@ def run_preset_benchmark(
     result["filter_datasets_per_minute"] = float(filter_dpm) if filter_dpm is not None else None
     result["stage_sample_datasets"] = int(stage_sample_datasets)
     result["filter_stage_enabled"] = filter_stage_enabled
-    result["accepted_datasets_measured"] = accepted_datasets_measured
     result["total_attempts"] = int(throughput_pressure_summary["attempts_total"])
     result["mean_attempts_per_dataset"] = mean_attempts_per_dataset
     result["retry_dataset_count"] = int(throughput_pressure_summary["retry_dataset_count"])
     result["retry_dataset_rate"] = throughput_pressure_summary["retry_dataset_rate"]
     result["filter_attempts_total"] = int(filter_attempts_total)
     result["filter_rejections_total"] = int(filter_rejections_total)
+    result["filter_accepted_datasets_measured"] = int(filter_accepted_datasets_measured)
+    result["filter_rejected_datasets_measured"] = int(filter_rejected_datasets_measured)
+    result["filter_acceptance_rate_dataset_level"] = filter_acceptance_rate_dataset_level
+    result["filter_rejection_rate_dataset_level"] = filter_rejection_rate_dataset_level
     result["filter_rejection_rate_attempt_level"] = filter_rejection_rate_attempt_level
     result["filter_retry_dataset_count"] = filter_retry_dataset_count
     result["filter_retry_dataset_rate"] = filter_retry_dataset_rate

@@ -934,11 +934,23 @@ def _print_preset_result_line(result: dict[str, Any]) -> None:
         else " filter/min=-"
     )
     filter_reject_ratio = result.get("filter_rejection_rate_attempt_level")
+    filter_accept_dataset_ratio = result.get("filter_acceptance_rate_dataset_level")
+    filter_reject_dataset_ratio = result.get("filter_rejection_rate_dataset_level")
     filter_retry_ratio = result.get("filter_retry_dataset_rate")
     filter_reject_hint = (
         f" filter_reject_attempt_pct={float(filter_reject_ratio) * 100.0:.2f}"
         if isinstance(filter_reject_ratio, (int, float))
         else " filter_reject_attempt_pct=-"
+    )
+    filter_accept_dataset_hint = (
+        f" filter_accept_dataset_pct={float(filter_accept_dataset_ratio) * 100.0:.2f}"
+        if isinstance(filter_accept_dataset_ratio, (int, float))
+        else " filter_accept_dataset_pct=-"
+    )
+    filter_reject_dataset_hint = (
+        f" filter_reject_dataset_pct={float(filter_reject_dataset_ratio) * 100.0:.2f}"
+        if isinstance(filter_reject_dataset_ratio, (int, float))
+        else " filter_reject_dataset_pct=-"
     )
     filter_retry_hint = (
         f" filter_retry_dataset_pct={float(filter_retry_ratio) * 100.0:.2f}"
@@ -959,7 +971,8 @@ def _print_preset_result_line(result: dict[str, Any]) -> None:
         f"backend={result.get('hardware_backend')} "
         f"datasets/min={float(result.get('datasets_per_minute', 0.0)):.2f} "
         f"{latency_hint}"
-        f"{stage_hint}{filter_stage_hint}{filter_reject_hint}{filter_retry_hint}"
+        f"{stage_hint}{filter_stage_hint}{filter_reject_hint}"
+        f"{filter_accept_dataset_hint}{filter_reject_dataset_hint}{filter_retry_hint}"
         f"{diagnostics_hint}{missingness_hint}{lineage_hint}{shift_hint}{noise_hint}"
     )
 

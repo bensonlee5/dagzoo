@@ -9,11 +9,10 @@ import time
 from typing import Any
 
 import numpy as np
-import torch
 
 from dagzoo.bench.constants import SECONDS_PER_MINUTE
 from dagzoo.config import GeneratorConfig
-from dagzoo.filtering import apply_extra_trees_filter
+from dagzoo.filtering.extra_trees_filter import _apply_extra_trees_filter_numpy
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 from dagzoo.math_utils import to_numpy as _to_numpy
 from dagzoo.rng import SEED32_MAX
@@ -41,7 +40,9 @@ class FilterStageMeasurement:
 
     datasets_per_minute: float
     filter_attempts_total: int
+    filter_accepted_datasets: int
     filter_rejections_total: int
+    filter_rejected_datasets: int
 
 
 def measure_write_datasets_per_minute(
@@ -98,10 +99,13 @@ def measure_filter_stage_metrics(
         return FilterStageMeasurement(
             datasets_per_minute=0.0,
             filter_attempts_total=0,
+            filter_accepted_datasets=0,
             filter_rejections_total=0,
+            filter_rejected_datasets=0,
         )
 
     attempts_total = 0
+    accepted_total = 0
     rejections_total = 0
     start = time.perf_counter()
     for idx, bundle in enumerate(bundles):
@@ -121,9 +125,9 @@ def measure_filter_stage_metrics(
             y_all = y_all.astype("float32", copy=False)
 
         attempts_total += 1
-        accepted, _details = apply_extra_trees_filter(
-            torch.from_numpy(x_all),
-            torch.from_numpy(y_all),
+        accepted, _details = _apply_extra_trees_filter_numpy(
+            x_all,
+            y_all,
             task=str(config.dataset.task),
             seed=_coerce_bundle_seed(bundle, fallback_seed=config.seed + idx),
             n_estimators=int(config.filter.n_estimators),
@@ -135,7 +139,9 @@ def measure_filter_stage_metrics(
             threshold=float(config.filter.threshold),
             n_jobs=int(config.filter.n_jobs),
         )
-        if not bool(accepted):
+        if bool(accepted):
+            accepted_total += 1
+        else:
             rejections_total += 1
 
     elapsed = max(0.0, time.perf_counter() - start)
@@ -143,7 +149,9 @@ def measure_filter_stage_metrics(
     return FilterStageMeasurement(
         datasets_per_minute=float(dpm),
         filter_attempts_total=int(attempts_total),
+        filter_accepted_datasets=int(accepted_total),
         filter_rejections_total=int(rejections_total),
+        filter_rejected_datasets=int(rejections_total),
     )
 
 

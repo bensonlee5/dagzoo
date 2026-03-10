@@ -183,13 +183,17 @@ def test_run_benchmark_suite_smoke_single_profile() -> None:
     assert result["write_datasets_per_minute"] >= 0.0
     assert result["filter_datasets_per_minute"] is None
     assert result["filter_stage_enabled"] is False
+    assert "accepted_datasets_measured" not in result
     assert result["filter_rejection_rate_attempt_level"] is None
+    assert result["filter_acceptance_rate_dataset_level"] is None
+    assert result["filter_rejection_rate_dataset_level"] is None
     assert result["filter_retry_dataset_rate"] is None
     assert result["filter_attempts_total"] == 0
     assert result["filter_rejections_total"] == 0
+    assert result["filter_accepted_datasets_measured"] == 0
+    assert result["filter_rejected_datasets_measured"] == 0
     assert result["stage_sample_datasets"] >= 1
-    assert result["accepted_datasets_measured"] >= 1
-    assert result["total_attempts"] >= result["accepted_datasets_measured"]
+    assert result["total_attempts"] >= result["stage_sample_datasets"]
     assert result["mean_attempts_per_dataset"] >= 1.0
     assert result["estimated_attempts_per_minute"] >= result["generation_datasets_per_minute"]
     assert result["latency_p95_ms"] >= 0
@@ -358,7 +362,9 @@ def test_run_benchmark_suite_emits_stage_and_filter_pressure_metrics(
             datasets_per_minute=float(len(bundles)) * 20.0
             + float(config.filter.n_estimators) * 0.0,
             filter_attempts_total=3,
+            filter_accepted_datasets=2,
             filter_rejections_total=1,
+            filter_rejected_datasets=1,
         ),
     )
     monkeypatch.setattr(
@@ -387,7 +393,7 @@ def test_run_benchmark_suite_emits_stage_and_filter_pressure_metrics(
     assert result["write_datasets_per_minute"] == pytest.approx(20.0)
     assert result["filter_datasets_per_minute"] == pytest.approx(40.0)
     assert result["filter_stage_enabled"] is True
-    assert result["accepted_datasets_measured"] == 2
+    assert "accepted_datasets_measured" not in result
     assert result["total_attempts"] == 3
     assert result["mean_attempts_per_dataset"] == pytest.approx(1.5)
     assert result["estimated_attempts_per_minute"] == pytest.approx(180.0)
@@ -395,6 +401,10 @@ def test_run_benchmark_suite_emits_stage_and_filter_pressure_metrics(
     assert result["retry_dataset_rate"] == pytest.approx(0.5)
     assert result["filter_attempts_total"] == 3
     assert result["filter_rejections_total"] == 1
+    assert result["filter_accepted_datasets_measured"] == 2
+    assert result["filter_rejected_datasets_measured"] == 1
+    assert result["filter_acceptance_rate_dataset_level"] == pytest.approx(2.0 / 3.0)
+    assert result["filter_rejection_rate_dataset_level"] == pytest.approx(1.0 / 3.0)
     assert result["filter_rejection_rate_attempt_level"] == pytest.approx(1.0 / 3.0)
     assert result["filter_retry_dataset_count"] == 1
     assert result["filter_retry_dataset_rate"] == pytest.approx(0.5)
@@ -548,7 +558,9 @@ def test_run_benchmark_suite_filter_enabled_uses_filter_disabled_generation_conf
         lambda bundles, *, config: SimpleNamespace(
             datasets_per_minute=float(len(bundles)) * 10.0 + float(config.filter.n_jobs) * 0.0,
             filter_attempts_total=int(len(bundles)),
+            filter_accepted_datasets=int(len(bundles)),
             filter_rejections_total=0,
+            filter_rejected_datasets=0,
         ),
     )
 
@@ -650,7 +662,9 @@ def test_run_benchmark_suite_filter_retry_rate_uses_stage_sample_denominator_whe
             datasets_per_minute=float(len(bundles)) * 20.0
             + float(config.filter.n_estimators) * 0.0,
             filter_attempts_total=int(len(bundles)),
+            filter_accepted_datasets=max(0, int(len(bundles)) - 1),
             filter_rejections_total=1,
+            filter_rejected_datasets=1,
         ),
     )
     monkeypatch.setattr(
@@ -675,10 +689,14 @@ def test_run_benchmark_suite_filter_retry_rate_uses_stage_sample_denominator_whe
     )
 
     result = summary["preset_results"][0]
-    assert result["accepted_datasets_measured"] == 4
+    assert "accepted_datasets_measured" not in result
     assert result["stage_sample_datasets"] == 2
     assert result["filter_attempts_total"] == 2
     assert result["filter_rejections_total"] == 1
+    assert result["filter_accepted_datasets_measured"] == 1
+    assert result["filter_rejected_datasets_measured"] == 1
+    assert result["filter_acceptance_rate_dataset_level"] == pytest.approx(0.5)
+    assert result["filter_rejection_rate_dataset_level"] == pytest.approx(0.5)
     assert result["filter_retry_dataset_count"] == 1
     assert result["filter_retry_dataset_rate"] == pytest.approx(0.5)
 
@@ -1610,6 +1628,10 @@ def test_write_suite_markdown_profile_table_includes_shift_and_noise_columns(
                 "peak_rss_mb": 10.0,
                 "reproducibility_match": True,
                 "reproducibility_workload_match": False,
+                "filter_acceptance_rate_dataset_level": 0.75,
+                "filter_rejection_rate_attempt_level": 0.25,
+                "filter_rejection_rate_dataset_level": 0.25,
+                "filter_retry_dataset_rate": 0.25,
                 "diagnostics_enabled": False,
                 "missingness_guardrails": {"enabled": False},
                 "lineage_guardrails": {"enabled": False},
@@ -1625,7 +1647,9 @@ def test_write_suite_markdown_profile_table_includes_shift_and_noise_columns(
     assert "| Noise |" in text
     assert "| Repro |" in text
     assert "| Workload |" in text
+    assert "Filter Accept % (dataset)" in text
     assert "Filter Reject % (attempt)" in text
+    assert "Filter Reject % (dataset)" in text
     assert "Filter Retry % (dataset)" in text
     assert "match" in text
     assert "mismatch" in text
