@@ -10,6 +10,9 @@ from dagzoo.bench.metrics import degradation_percent, percent_change
 def test_percent_change_and_degradation_direction() -> None:
     assert percent_change(90.0, 100.0) == -10.0
     assert degradation_percent("datasets_per_minute", 90.0, 100.0) == 10.0
+    assert degradation_percent("filter_accepted_datasets_per_minute", 60.0, 80.0) == pytest.approx(
+        25.0
+    )
     assert degradation_percent("filter_acceptance_rate_dataset_level", 0.6, 0.8) == pytest.approx(
         25.0
     )
@@ -53,6 +56,46 @@ def test_compare_summary_warn_and_fail() -> None:
     assert fail_result["issues"][0]["severity"] == "fail"
 
 
+def test_compare_summary_warns_on_filter_accepted_throughput_regression() -> None:
+    baseline_summary = {
+        "suite": "standard",
+        "preset_results": [
+            {
+                "preset_key": "cpu",
+                "filter_accepted_datasets_per_minute": 80.0,
+            }
+        ],
+    }
+    baseline = build_baseline_payload(baseline_summary)
+
+    warn_summary = {
+        "suite": "standard",
+        "preset_results": [
+            {
+                "preset_key": "cpu",
+                "filter_accepted_datasets_per_minute": 68.0,
+            }
+        ],
+    }
+    warn_result = compare_summary_to_baseline(
+        warn_summary,
+        baseline,
+        warn_threshold_pct=10.0,
+        fail_threshold_pct=20.0,
+    )
+    assert warn_result["status"] == "warn"
+    assert warn_result["issues"] == [
+        {
+            "preset": "cpu",
+            "metric": "filter_accepted_datasets_per_minute",
+            "current": 68.0,
+            "baseline": 80.0,
+            "degradation_pct": pytest.approx(15.0),
+            "severity": "warn",
+        }
+    ]
+
+
 def test_build_baseline_payload_defaults_include_stage_throughput_metrics() -> None:
     summary = {
         "suite": "standard",
@@ -63,6 +106,7 @@ def test_build_baseline_payload_defaults_include_stage_throughput_metrics() -> N
                 "generation_datasets_per_minute": 110.0,
                 "write_datasets_per_minute": 90.0,
                 "filter_datasets_per_minute": 80.0,
+                "filter_accepted_datasets_per_minute": 60.0,
             }
         ],
     }
@@ -72,5 +116,7 @@ def test_build_baseline_payload_defaults_include_stage_throughput_metrics() -> N
         "generation_datasets_per_minute",
         "write_datasets_per_minute",
         "filter_datasets_per_minute",
+        "filter_accepted_datasets_per_minute",
     ]
     assert payload["presets"]["cpu"]["generation_datasets_per_minute"] == 110.0
+    assert payload["presets"]["cpu"]["filter_accepted_datasets_per_minute"] == 60.0

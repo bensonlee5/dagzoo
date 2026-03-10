@@ -14,6 +14,7 @@ DEFAULT_GATING_METRICS = (
     "generation_datasets_per_minute",
     "write_datasets_per_minute",
     "filter_datasets_per_minute",
+    "filter_accepted_datasets_per_minute",
 )
 
 

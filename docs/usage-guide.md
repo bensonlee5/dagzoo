@@ -183,11 +183,22 @@ gating.
 
 ```bash
 dagzoo benchmark --suite smoke --preset cpu --out-dir benchmarks/results/smoke_cpu
+
+dagzoo benchmark \
+  --config configs/preset_filter_benchmark_smoke.yaml \
+  --preset custom \
+  --suite smoke \
+  --hardware-policy none \
+  --no-memory \
+  --out-dir benchmarks/results/smoke_filter
 ```
 
 `--device` is a single-preset override. When you run multiple `--preset`
 values in one command, set device selection in each preset/config instead of
 passing a shared CLI device override.
+
+For filter-enabled benchmark flows, inspect accepted-corpus throughput together
+with dataset-level accept/reject yield in the benchmark summary artifacts.
 
 Detailed guide: [Benchmark Workflows and Guardrails](features/benchmark-guardrails.md)
 

@@ -182,6 +182,7 @@ def test_run_benchmark_suite_smoke_single_profile() -> None:
     assert result["generation_datasets_per_minute"] == pytest.approx(result["datasets_per_minute"])
     assert result["write_datasets_per_minute"] >= 0.0
     assert result["filter_datasets_per_minute"] is None
+    assert result["filter_accepted_datasets_per_minute"] is None
     assert result["filter_stage_enabled"] is False
     assert "accepted_datasets_measured" not in result
     assert result["filter_rejection_rate_attempt_level"] is None
@@ -392,6 +393,7 @@ def test_run_benchmark_suite_emits_stage_and_filter_pressure_metrics(
     assert result["generation_datasets_per_minute"] == pytest.approx(120.0)
     assert result["write_datasets_per_minute"] == pytest.approx(20.0)
     assert result["filter_datasets_per_minute"] == pytest.approx(40.0)
+    assert result["filter_accepted_datasets_per_minute"] == pytest.approx(40.0 * (2.0 / 3.0))
     assert result["filter_stage_enabled"] is True
     assert "accepted_datasets_measured" not in result
     assert result["total_attempts"] == 3
@@ -693,6 +695,7 @@ def test_run_benchmark_suite_filter_retry_rate_uses_stage_sample_denominator_whe
     assert result["stage_sample_datasets"] == 2
     assert result["filter_attempts_total"] == 2
     assert result["filter_rejections_total"] == 1
+    assert result["filter_accepted_datasets_per_minute"] == pytest.approx(20.0)
     assert result["filter_accepted_datasets_measured"] == 1
     assert result["filter_rejected_datasets_measured"] == 1
     assert result["filter_acceptance_rate_dataset_level"] == pytest.approx(0.5)
@@ -1623,6 +1626,7 @@ def test_write_suite_markdown_profile_table_includes_shift_and_noise_columns(
                 "device": "cpu",
                 "hardware_backend": "cpu",
                 "datasets_per_minute": 120.0,
+                "filter_accepted_datasets_per_minute": 90.0,
                 "elapsed_seconds": 1.0,
                 "latency_p95_ms": 4.0,
                 "peak_rss_mb": 10.0,
@@ -1647,6 +1651,7 @@ def test_write_suite_markdown_profile_table_includes_shift_and_noise_columns(
     assert "| Noise |" in text
     assert "| Repro |" in text
     assert "| Workload |" in text
+    assert "Filter Accepted/min" in text
     assert "Filter Accept % (dataset)" in text
     assert "Filter Reject % (attempt)" in text
     assert "Filter Reject % (dataset)" in text
