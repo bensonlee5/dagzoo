@@ -69,6 +69,19 @@ def detect_changed_files(
                 continue
             changed_files.append(line[3:])
         return tuple(sorted(dict.fromkeys(changed_files)))
+    if source == "staged":
+        result = subprocess.run(
+            ("git", "diff", "--cached", "--name-only"),
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "git diff --cached failed.")
+        return tuple(sorted(dict.fromkeys(_normalize_files(result.stdout.splitlines()))))
+    if source != "base":
+        raise ValueError(f"Unsupported change source: {source!r}")
     if base is None:
         raise ValueError("base is required when source is not working-tree.")
     result = subprocess.run(

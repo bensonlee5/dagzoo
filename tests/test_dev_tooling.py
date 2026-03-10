@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -86,6 +88,40 @@ def test_impact_report_flags_execution_semantics_as_architecture_and_bench() -> 
     assert "dagzoo.bench" in report.module_summaries[0].downstream_packages
 
 
+def test_detect_changed_files_staged_uses_cached_diff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    impact_module = _import_dev_module("devlib.impact")
+    calls: list[tuple[str, ...]] = []
+
+    def _stub_run(
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        _ = cwd
+        _ = capture_output
+        _ = text
+        _ = check
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            "src/dagzoo/cli.py\nCHANGELOG.md\n",
+            "",
+        )
+
+    monkeypatch.setattr(impact_module.subprocess, "run", _stub_run)
+
+    changed_files = impact_module.detect_changed_files(source="staged")
+
+    assert changed_files == ("CHANGELOG.md", "src/dagzoo/cli.py")
+    assert calls == [("git", "diff", "--cached", "--name-only")]
+
+
 def test_release_contract_requires_version_and_changelog_for_release_risk() -> None:
     impact_module = _import_dev_module("devlib.impact")
     contract_module = _import_dev_module("devlib.contract")
@@ -96,6 +132,20 @@ def test_release_contract_requires_version_and_changelog_for_release_risk() -> N
     assert result.ok is False
     assert "pyproject.toml" in result.errors[0]
     assert "CHANGELOG.md" in result.errors[0]
+
+
+def test_release_contract_passes_with_release_risk_and_version_updates() -> None:
+    impact_module = _import_dev_module("devlib.impact")
+    contract_module = _import_dev_module("devlib.contract")
+
+    report = impact_module.build_impact_report(
+        ("src/dagzoo/cli.py", "pyproject.toml", "CHANGELOG.md")
+    )
+    result = contract_module.evaluate_release_contract(report)
+
+    assert result.ok is True
+    assert result.errors == ()
+    assert result.warnings == ()
 
 
 def test_release_contract_warns_for_internal_code_change() -> None:
@@ -203,3 +253,39 @@ def test_dev_cli_help_exposes_new_commands(capsys: pytest.CaptureFixture[str]) -
     assert "impact" in captured.out
     assert "contract" in captured.out
     assert "verify" in captured.out
+
+
+def test_dev_cli_contract_accepts_staged_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_dev_cli()
+    contract_module = _import_dev_module("devlib.contract")
+    captured: dict[str, object] = {}
+
+    def _stub_detect_changed_files(
+        *,
+        source: str = "working-tree",
+        base: str | None = None,
+        files: list[str] | None = None,
+    ) -> tuple[str, ...]:
+        captured["source"] = source
+        captured["base"] = base
+        captured["files"] = files
+        return ()
+
+    monkeypatch.setattr(module, "detect_changed_files", _stub_detect_changed_files)
+    monkeypatch.setattr(
+        module,
+        "build_impact_report",
+        lambda changed_files: SimpleNamespace(changed_files=changed_files, tags=()),
+    )
+    monkeypatch.setattr(
+        module,
+        "evaluate_release_contract",
+        lambda report, strict=False: contract_module.ContractResult(
+            ok=True, warnings=(), errors=()
+        ),
+    )
+
+    exit_code = module.main(["contract", "--source", "staged"])
+
+    assert exit_code == 0
+    assert captured == {"source": "staged", "base": None, "files": None}

@@ -61,7 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_change_source_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--source", choices=("working-tree", "base"), default="working-tree")
+    parser.add_argument(
+        "--source", choices=("working-tree", "staged", "base"), default="working-tree"
+    )
     parser.add_argument("--base")
     parser.add_argument("--files", nargs="*")
 
@@ -102,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "impact":
             changed_files = detect_changed_files(
-                source="working-tree" if args.source == "working-tree" else "base",
+                source=args.source,
                 base=args.base,
                 files=args.files,
             )
@@ -115,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "contract":
             changed_files = detect_changed_files(
-                source="working-tree" if args.source == "working-tree" else "base",
+                source=args.source,
                 base=args.base,
                 files=args.files,
             )
@@ -127,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "verify":
             plan = build_verify_plan(
                 mode=args.mode,
-                source="working-tree" if args.source == "working-tree" else "base",
+                source=args.source,
                 base=args.base,
                 files=args.files,
                 incremental=args.incremental,
