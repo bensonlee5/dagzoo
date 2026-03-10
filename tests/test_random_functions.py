@@ -1,13 +1,16 @@
 import pytest
 import torch
 
+from dagzoo.core.fixed_layout_plan_types import GaussianMatrixPlan, LinearFunctionPlan
 from dagzoo.core.execution_semantics import sample_function_family
 from dagzoo.functions.random_functions import (
     MechanismFamily,
     _sample_function_family,
     apply_random_function,
 )
+from dagzoo.rng import KeyedRng
 from conftest import make_generator as _make_generator
+import dagzoo.functions.random_functions as random_functions_mod
 
 
 def test_tree_family_survives_nan_feature() -> None:
@@ -56,6 +59,38 @@ def test_deterministic_with_shift_tilt_and_noise_multiplier() -> None:
         noise_sigma_multiplier=1.35,
     )
     torch.testing.assert_close(y1, y2)
+
+
+def test_apply_random_function_output_depends_on_generator_root_nonce(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roots = iter(
+        [
+            KeyedRng(seed=17, _ambient_nonce=(101, 102, 103)),
+            KeyedRng(seed=17, _ambient_nonce=(201, 202, 203)),
+        ]
+    )
+    monkeypatch.setattr(
+        random_functions_mod,
+        "keyed_rng_from_generator",
+        lambda *_args, **_kwargs: next(roots),
+    )
+    monkeypatch.setattr(
+        random_functions_mod,
+        "sample_function_plan_for_family",
+        lambda *_args, **_kwargs: LinearFunctionPlan(matrix=GaussianMatrixPlan()),
+    )
+
+    x = torch.randn(32, 4, generator=_make_generator(11))
+    first = apply_random_function(x.clone(), _make_generator(12), out_dim=3, function_type="linear")
+    second = apply_random_function(
+        x.clone(),
+        _make_generator(12),
+        out_dim=3,
+        function_type="linear",
+    )
+
+    assert not torch.equal(first, second)
 
 
 @pytest.mark.parametrize("family", ["linear", "quadratic", "discretization", "gp", "em", "product"])

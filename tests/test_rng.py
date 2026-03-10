@@ -3,11 +3,13 @@
 import pytest
 import torch
 
+import dagzoo.rng as rng_mod
 from dagzoo.rng import (
     KeyedRng,
     SEED32_MAX,
     SeedManager,
     derive_seed,
+    keyed_rng_from_generator,
     offset_seed32,
     validate_seed32,
 )
@@ -69,6 +71,31 @@ def test_keyed_rng_path_does_not_track_source_list_mutation() -> None:
 
 def test_keyed_rng_keyed_chaining_matches_flat_derivation() -> None:
     root = KeyedRng(seed=17)
+    assert root.keyed("dataset", 4).child_seed("plan") == root.child_seed("dataset", 4, "plan")
+
+
+def test_keyed_rng_from_generator_uses_ambient_nonce_in_child_seed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    words = iter(
+        [
+            torch.tensor([17, 101, 102, 103], dtype=torch.int64),
+            torch.tensor([17, 201, 202, 203], dtype=torch.int64),
+        ]
+    )
+    monkeypatch.setattr(rng_mod.torch, "randint", lambda *args, **kwargs: next(words))
+
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(99)
+    first = keyed_rng_from_generator(generator, "root")
+    second = keyed_rng_from_generator(generator, "root")
+
+    assert first.seed == second.seed == 17
+    assert first.child_seed("leaf") != second.child_seed("leaf")
+
+
+def test_generator_derived_keyed_rng_preserves_nonce_across_keyed_children() -> None:
+    root = KeyedRng(seed=17, _ambient_nonce=(101, 102, 103))
     assert root.keyed("dataset", 4).child_seed("plan") == root.child_seed("dataset", 4, "plan")
 
 
