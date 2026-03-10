@@ -280,9 +280,7 @@ def test_dev_cli_contract_accepts_staged_source(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         module,
         "evaluate_release_contract",
-        lambda report, strict=False: contract_module.ContractResult(
-            ok=True, warnings=(), errors=()
-        ),
+        lambda report, **_kw: contract_module.ContractResult(ok=True, warnings=(), errors=()),
     )
 
     exit_code = module.main(["contract", "--source", "staged"])
