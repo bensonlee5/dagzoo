@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -55,6 +55,10 @@ _REQUEST_MISSINGNESS_PROFILES = {
     MISSINGNESS_MECHANISM_MAR,
     MISSINGNESS_MECHANISM_MNAR,
 }
+_REQUEST_ROWS_PUBLIC_SHAPE_ERROR = (
+    "rows must use one of the public request-file encodings: "
+    "fixed integer, range string start..stop, or CSV choice string."
+)
 
 
 def _validate_non_empty_string(*, field_name: str, value: object) -> str:
@@ -106,6 +110,37 @@ def _require_request_field(data: dict[str, Any], field_name: str) -> Any:
     return data[field_name]
 
 
+def _validate_public_request_rows(value: object) -> DatasetRowsSpec:
+    """Validate rows using only the documented public request-file encodings."""
+
+    if isinstance(value, bool):
+        raise ValueError(_REQUEST_ROWS_PUBLIC_SHAPE_ERROR)
+    if isinstance(value, int | str):
+        rows = normalize_dataset_rows(value)
+        if rows is None:
+            raise ValueError(_REQUEST_ROWS_PUBLIC_SHAPE_ERROR)
+        return rows
+    raise ValueError(_REQUEST_ROWS_PUBLIC_SHAPE_ERROR)
+
+
+def _serialize_public_request_rows(rows: DatasetRowsSpec) -> int | str:
+    """Serialize a normalized rows spec to the public request-file wire shape."""
+
+    if rows.mode == "fixed":
+        if rows.value is None:
+            raise ValueError("rows fixed mode requires a value.")
+        return int(rows.value)
+    if rows.mode == "range":
+        if rows.start is None or rows.stop is None:
+            raise ValueError("rows range mode requires start/stop.")
+        return f"{int(rows.start)}..{int(rows.stop)}"
+    if rows.mode == "choices":
+        if not rows.choices:
+            raise ValueError("rows choices mode requires at least one choice.")
+        return ",".join(str(int(choice)) for choice in rows.choices)
+    raise ValueError(f"Unsupported request rows mode {rows.mode!r}.")
+
+
 @dataclass(slots=True)
 class RequestFileConfig:
     """Small public request-file schema for downstream corpus requests."""
@@ -113,7 +148,7 @@ class RequestFileConfig:
     version: str
     task: str
     dataset_count: int
-    rows: DatasetRowsSpec
+    rows: object
     profile: str
     output_root: str
     missingness_profile: str = MISSINGNESS_MECHANISM_NONE
@@ -134,10 +169,7 @@ class RequestFileConfig:
             field_name="dataset_count",
             value=self.dataset_count,
         )
-        rows = normalize_dataset_rows(self.rows)
-        if rows is None:
-            raise ValueError("rows must be set to a fixed int, range string, or CSV choices.")
-        self.rows = rows
+        self.rows = _validate_public_request_rows(self.rows)
         self.profile = _validate_choice(
             field_name="profile",
             value=self.profile,
@@ -181,7 +213,7 @@ class RequestFileConfig:
             version=cast(str, _require_request_field(data, "version")),
             task=cast(str, _require_request_field(data, "task")),
             dataset_count=cast(int, _require_request_field(data, "dataset_count")),
-            rows=cast(DatasetRowsSpec, _require_request_field(data, "rows")),
+            rows=_require_request_field(data, "rows"),
             profile=cast(str, _require_request_field(data, "profile")),
             output_root=cast(str, _require_request_field(data, "output_root")),
             missingness_profile=data.get("missingness_profile", MISSINGNESS_MECHANISM_NONE),
@@ -202,4 +234,19 @@ class RequestFileConfig:
     def to_dict(self) -> dict[str, Any]:
         """Serialize request config to a plain nested dictionary."""
 
-        return asdict(self)
+        rows = self.rows
+        if not isinstance(rows, DatasetRowsSpec):
+            raise ValueError("rows must be normalized before serialization.")
+
+        data: dict[str, Any] = {
+            "version": self.version,
+            "task": self.task,
+            "dataset_count": self.dataset_count,
+            "rows": _serialize_public_request_rows(rows),
+            "profile": self.profile,
+            "output_root": self.output_root,
+            "missingness_profile": self.missingness_profile,
+        }
+        if self.seed is not None:
+            data["seed"] = self.seed
+        return data

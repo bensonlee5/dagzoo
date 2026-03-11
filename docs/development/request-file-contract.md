@@ -22,10 +22,12 @@ Required fields:
 - `version`: exact string `v1`
 - `task`: `classification` or `regression`
 - `dataset_count`: positive integer
-- `rows`: total-row spec in one of the existing public forms:
+- `rows`: total-row spec in one of the three public v1 forms only:
   - fixed integer, for example `1024`
   - range string, for example `1024..4096`
   - CSV choice string, for example `1024,2048,4096`
+  - YAML list or mapping forms are not part of the request-file contract, even
+    though internal `GeneratorConfig` normalization accepts them
 - `profile`: stable public request profile; v1 supports `default` and `smoke`
 - `output_root`: non-empty output root string
 
@@ -34,6 +36,14 @@ Optional fields:
 - `missingness_profile`: `none`, `mcar`, `mar`, or `mnar`
   - default: `none`
 - `seed`: optional 32-bit integer for reproducible request-driven runs
+
+Round-trip serialization from `RequestFileConfig.to_dict()` emits the same
+public wire shape:
+
+- fixed rows serialize as an integer
+- range rows serialize as `start..stop`
+- choice rows serialize as a CSV string
+- unset `seed` is omitted instead of serialized as `null`
 
 ## Out Of Scope
 
@@ -144,4 +154,17 @@ profile: default
 output_root: requests/out
 missing_rate: 0.25
 missing_mechanism: mar
+```
+
+Internal-only rows mapping instead of a public v1 encoding:
+
+```yaml
+version: v1
+task: classification
+dataset_count: 2
+rows:
+  mode: fixed
+  value: 1024
+profile: default
+output_root: requests/out
 ```
