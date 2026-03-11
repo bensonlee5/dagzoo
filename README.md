@@ -113,6 +113,19 @@ Run deferred filtering on generated shards:
 dagzoo filter --in data/run1 --out data/run1_filter
 ```
 
+Run a downstream handoff workflow from a concise request file:
+
+```bash
+dagzoo request --request requests/tab_foundry_smoke.yaml --device cpu --hardware-policy none
+```
+
+`dagzoo request` writes one stable request-run root with:
+
+- `handoff_manifest.json` as the downstream machine-readable entrypoint
+- `generated/` for raw shard outputs plus effective-config artifacts
+- `filter/` for deferred-filter artifacts
+- `curated/` for accepted-only shards
+
 Run a smoke benchmark:
 
 ```bash
@@ -157,6 +170,7 @@ Start here for end-user workflows and contracts:
 - [Transforms (Math Reference)](https://bensonlee5.github.io/dagzoo/docs/transforms/): Formal transform math, notation, and operator definitions.
 - [Usage Guide](https://bensonlee5.github.io/dagzoo/docs/usage-guide/): Primary workflow hub.
 - [Output Format](https://bensonlee5.github.io/dagzoo/docs/output-format/): Output schema and artifacts.
+- [Request File Contract](https://bensonlee5.github.io/dagzoo/docs/development/request-file-contract/): Public request schema and one-way handoff contract for downstream consumers.
 - [Feature Guides](https://bensonlee5.github.io/dagzoo/docs/features/): Diagnostics, missingness, many-class, shift, noise, and benchmark guardrails.
 
 Contributor-facing structure docs:
