@@ -43,14 +43,14 @@ LEGACY_PATH_DENYLIST = frozenset(
     }
 )
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]\n]*\]\(([^)\n]+)\)")
+URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 
 def _iter_markdown_files(root: Path) -> Iterable[Path]:
     if root.is_file():
         if root.suffix.lower() == ".md":
             yield root
-        return
-    if not root.exists():
         return
     for path in root.rglob("*.md"):
         if path.is_file():
@@ -70,6 +70,20 @@ def _iter_inline_code_spans(path: Path) -> Iterable[tuple[int, str]]:
             yield lineno, match.group(1).strip()
 
 
+def _iter_markdown_link_targets(path: Path) -> Iterable[tuple[int, str]]:
+    in_fence = False
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        line_without_code = INLINE_CODE_RE.sub("", line)
+        for match in MARKDOWN_LINK_RE.finditer(line_without_code):
+            yield lineno, match.group(1).strip()
+
+
 def _is_repo_path(candidate: str) -> bool:
     return candidate in REPO_PATH_EXACT or candidate.startswith(REPO_PATH_PREFIXES)
 
@@ -86,10 +100,43 @@ def _normalize_repo_path_candidate(candidate: str) -> str | None:
     return token
 
 
+def _normalize_markdown_link_candidate(candidate: str, *, source_path: Path) -> str | None:
+    stripped = candidate.strip()
+    if not stripped:
+        return None
+    if stripped.startswith("<") and stripped.endswith(">"):
+        stripped = stripped[1:-1].strip()
+    if not stripped:
+        return None
+    if URI_SCHEME_RE.match(stripped):
+        return None
+    if stripped.startswith(("#", "/")):
+        return None
+
+    link_target = stripped.split(maxsplit=1)[0]
+    path_only = re.split(r"[?#]", link_target, maxsplit=1)[0]
+    if not path_only or any(char in path_only for char in "*?[]{}"):
+        return None
+
+    resolved = (source_path.parent / path_only).resolve(strict=False)
+    if not resolved.is_relative_to(REPO_ROOT):
+        return None
+    return resolved.relative_to(REPO_ROOT).as_posix()
+
+
 def _scan_file(path: Path) -> list[tuple[int, str]]:
     errors: list[tuple[int, str]] = []
     for lineno, candidate in _iter_inline_code_spans(path):
         normalized = _normalize_repo_path_candidate(candidate)
+        if normalized is None or not _is_repo_path(normalized):
+            continue
+        if normalized in LEGACY_PATH_DENYLIST:
+            errors.append((lineno, f"{normalized} (legacy path)"))
+            continue
+        if not (REPO_ROOT / normalized).exists():
+            errors.append((lineno, f"{normalized} (missing path)"))
+    for lineno, candidate in _iter_markdown_link_targets(path):
+        normalized = _normalize_markdown_link_candidate(candidate, source_path=path)
         if normalized is None or not _is_repo_path(normalized):
             continue
         if normalized in LEGACY_PATH_DENYLIST:
@@ -113,17 +160,26 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    missing_roots: list[str] = []
     all_errors: list[tuple[Path, int, str]] = []
     for root_rel in args.roots:
         root = REPO_ROOT / root_rel
+        if not root.exists():
+            missing_roots.append(root_rel)
+            continue
         for path in _iter_markdown_files(root):
             for lineno, target in _scan_file(path):
                 all_errors.append((path, lineno, target))
 
-    if all_errors:
-        print("Broken repo path references found:")
-        for path, lineno, target in all_errors:
-            print(f"- {path.relative_to(REPO_ROOT)}:{lineno} -> {target}")
+    if missing_roots or all_errors:
+        if missing_roots:
+            print("Missing Markdown scan roots:")
+            for root_rel in missing_roots:
+                print(f"- {root_rel}")
+        if all_errors:
+            print("Broken repo path references found:")
+            for path, lineno, target in all_errors:
+                print(f"- {path.relative_to(REPO_ROOT)}:{lineno} -> {target}")
         return 1
 
     print("Repo path check passed.")

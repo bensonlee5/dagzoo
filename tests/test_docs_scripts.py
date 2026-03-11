@@ -87,24 +87,38 @@ def test_check_repo_paths_passes_for_existing_repo_paths(
     capsys,
 ) -> None:
     module = load_script_module("check_repo_paths", "scripts/docs/check_repo_paths.py")
-    readme = tmp_path / "README.md"
     (tmp_path / "src" / "dagzoo").mkdir(parents=True)
     (tmp_path / "src" / "dagzoo" / "__init__.py").write_text("", encoding="utf-8")
-    readme.write_text(
-        "Use `src/dagzoo/__init__.py` or `scripts/tool.py [--check]`, and allow `configs/*.yaml`.\n",
-        encoding="utf-8",
-    )
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "tool.py").write_text("", encoding="utf-8")
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "default.yaml").write_text("", encoding="utf-8")
+    (tmp_path / "docs" / "features").mkdir(parents=True)
+    (tmp_path / "docs" / "features" / "diagnostics.md").write_text(
+        "# Diagnostics\n", encoding="utf-8"
+    )
+    usage_guide = tmp_path / "docs" / "usage-guide.md"
+    usage_guide.write_text(
+        "\n".join(
+            [
+                "Use `src/dagzoo/__init__.py` or `scripts/tool.py [--check]`, and allow `configs/*.yaml`.",
+                "See [Diagnostics](features/diagnostics.md) and [Tool](../scripts/tool.py#usage).",
+                'Config link: [default](../configs/default.yaml "default config").',
+                "Ignore [external](https://example.com), [anchor](#overview), and [site](/dagzoo/docs/how-it-works/).",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
 
-    code = module.main(["README.md"])
+    code = module.main(["docs"])
 
     assert code == 0
     assert "Repo path check passed." in capsys.readouterr().out
 
 
-def test_check_repo_paths_rejects_missing_and_legacy_paths(
+def test_check_repo_paths_rejects_missing_and_legacy_markdown_links(
     tmp_path,
     monkeypatch,
     capsys,
@@ -112,7 +126,7 @@ def test_check_repo_paths_rejects_missing_and_legacy_paths(
     module = load_script_module("check_repo_paths", "scripts/docs/check_repo_paths.py")
     readme = tmp_path / "README.md"
     readme.write_text(
-        "Legacy `src/dagzoo/cli.py` and missing `src/dagzoo/does_not_exist.py`.\n",
+        "Legacy [CLI](src/dagzoo/cli.py) and missing [Doc](docs/does_not_exist.md).\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
@@ -122,4 +136,21 @@ def test_check_repo_paths_rejects_missing_and_legacy_paths(
 
     assert code == 1
     assert "src/dagzoo/cli.py (legacy path)" in output
-    assert "src/dagzoo/does_not_exist.py (missing path)" in output
+    assert "docs/does_not_exist.md (missing path)" in output
+
+
+def test_check_repo_paths_rejects_missing_scan_root(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    module = load_script_module("check_repo_paths", "scripts/docs/check_repo_paths.py")
+    (tmp_path / "README.md").write_text("# Repo\n", encoding="utf-8")
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+
+    code = module.main(["README.md", "docs"])
+    output = capsys.readouterr().out
+
+    assert code == 1
+    assert "Missing Markdown scan roots:" in output
+    assert "- docs" in output
