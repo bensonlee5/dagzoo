@@ -95,6 +95,7 @@ def test_request_cli_prints_request_execution_summary(
     class _Result:
         effective_config_path = Path("effective_config.yaml")
         effective_config_trace_path = Path("effective_config_trace.yaml")
+        handoff_manifest_path = Path("handoff_manifest.json")
         generated_dir = Path("generated")
         generated_datasets = 2
         filter_result = _FilterResult()
@@ -123,6 +124,7 @@ def test_request_cli_prints_request_execution_summary(
     assert code == 0
     captured = capsys.readouterr()
     assert "Wrote effective config:" in captured.out
+    assert "Wrote handoff manifest:" in captured.out
     assert "Wrote filter manifest:" in captured.out
     assert "Deferred filter summary:" in captured.out
     assert "Wrote curated accepted-only shards:" in captured.out

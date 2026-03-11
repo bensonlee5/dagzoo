@@ -60,6 +60,70 @@ Default: 128 datasets per shard.
 
 ______________________________________________________________________
 
+## Request-run layout (`dagzoo request`)
+
+Request-driven runs use `output_root` as a stable handoff root:
+
+```
+output_root/
+  handoff_manifest.json
+  generated/
+    shard_00000/
+    effective_config.yaml
+    effective_config_trace.yaml
+  filter/
+    filter_manifest.ndjson
+    filter_summary.json
+  curated/
+    shard_00000/
+```
+
+`generated/`, `filter/`, and `curated/` reuse the same shard and summary
+contracts documented on this page. `handoff_manifest.json` is the downstream
+entrypoint for consumers such as `tab-foundry`.
+
+### Request handoff manifest JSON
+
+`handoff_manifest.json` uses this versioned top-level contract:
+
+| Key                   | Type   | Description                                                                       |
+| --------------------- | ------ | --------------------------------------------------------------------------------- |
+| `schema_name`         | str    | Exact string `dagzoo_request_handoff_manifest`                                    |
+| `schema_version`      | int    | Exact integer `1`                                                                 |
+| `request`             | object | Request-file echo with `path` and normalized public `payload`                     |
+| `artifacts`           | object | Absolute paths for the run root, generated output, filtered corpus, and summaries |
+| `summary`             | object | Generated / accepted / rejected counts plus acceptance rate                       |
+| `throughput`          | object | Generation-stage and filter-stage elapsed time plus datasets-per-minute context   |
+| `hardware`            | object | Requested/resolved device context plus applied hardware policy                    |
+| `diversity_artifacts` | object | Nullable paths for request-associated diversity report artifacts                  |
+
+Current `artifacts` keys:
+
+- `run_root`
+- `generated_dir`
+- `filter_dir`
+- `filtered_corpus_dir`
+- `effective_config_path`
+- `effective_config_trace_path`
+- `filter_manifest_path`
+- `filter_summary_path`
+
+Current `diversity_artifacts` keys:
+
+- `summary_json_path`
+- `summary_md_path`
+
+`throughput.generation_stage` and `throughput.filter_stage` report request-run
+wall-clock stage timing from the `dagzoo request` workflow. `filter_summary.json`
+remains the underlying deferred-filter artifact and retains its own timing
+semantics.
+
+`dagzoo request` does not run a diversity audit automatically, so the
+`diversity_artifacts` values are currently `null` unless a separate workflow
+persists request-associated diversity outputs alongside the run.
+
+______________________________________________________________________
+
 ## Parquet column schema
 
 Shard-level `train.parquet` and `test.parquet` both use packed row-wise

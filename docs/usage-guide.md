@@ -214,6 +214,49 @@ accepted-throughput and diversity-shift comparisons.
 
 ______________________________________________________________________
 
+## 11. Request-file handoff workflows
+
+Use `dagzoo request` when a downstream repo such as `tab-foundry` needs a small
+request-file contract instead of the full internal config surface.
+
+Example request file:
+
+```yaml
+version: v1
+task: classification
+dataset_count: 2
+rows: 1024
+profile: smoke
+output_root: requests/tab_foundry_smoke
+seed: 7
+```
+
+Run the one-way handoff workflow:
+
+```bash
+dagzoo request --request requests/tab_foundry_smoke.yaml --device cpu --hardware-policy none
+```
+
+That command writes:
+
+- `requests/tab_foundry_smoke/handoff_manifest.json`
+- `requests/tab_foundry_smoke/generated/`
+- `requests/tab_foundry_smoke/filter/`
+- `requests/tab_foundry_smoke/curated/`
+
+Downstream consumption should start from `handoff_manifest.json`. The manifest
+surfaces the filtered corpus path, effective-config artifacts, filter summary,
+and accepted/rejected counts in one versioned JSON file:
+
+```bash
+./.venv/bin/python -c "import json; from pathlib import Path; payload=json.loads(Path('requests/tab_foundry_smoke/handoff_manifest.json').read_text()); print(payload['artifacts']['filtered_corpus_dir']); print(payload['summary']['accepted_datasets'])"
+```
+
+Closed-loop feedback from downstream predictions is still out of scope for this
+workflow.
+
+______________________________________________________________________
+
 ## Related documents
 
 - Feature deep dives:
@@ -223,6 +266,7 @@ ______________________________________________________________________
   [shift](features/shift.md),
   [noise](features/noise.md),
   [benchmark guardrails](features/benchmark-guardrails.md)
+- Request-file contract: [development/request-file-contract.md](development/request-file-contract.md)
 - Output contract: [output-format.md](output-format.md)
 - Config precedence and trace artifacts: [development/config-resolution.md](development/config-resolution.md)
 - System guide and terminology: [how-it-works.md](how-it-works.md)

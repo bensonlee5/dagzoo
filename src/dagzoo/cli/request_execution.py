@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 
 from dagzoo.config import REQUEST_PROFILE_SMOKE, RequestFileConfig, clone_generator_config
 from dagzoo.core.config_resolution import (
@@ -13,6 +14,10 @@ from dagzoo.core.config_resolution import (
     serialize_resolution_events,
 )
 from dagzoo.core.fixed_layout.runtime import realize_generation_config_for_run
+from dagzoo.core.request_handoff import (
+    REQUEST_HANDOFF_MANIFEST_FILENAME,
+    write_request_handoff_manifest,
+)
 from dagzoo.filtering import DeferredFilterRunResult
 from dagzoo.filtering.deferred_filter import MANIFEST_FILENAME, SUMMARY_FILENAME
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
@@ -37,6 +42,7 @@ class RequestRunResult:
     curated_dir: Path
     effective_config_path: Path
     effective_config_trace_path: Path
+    handoff_manifest_path: Path
     generated_datasets: int
     filter_result: DeferredFilterRunResult
 
@@ -80,6 +86,13 @@ def _ensure_request_run_output_safe(run_root: Path) -> tuple[Path, Path, Path]:
             f"{curated_dir}. Remove existing shard_* folders or choose a new output_root."
         )
 
+    handoff_manifest_path = run_root / REQUEST_HANDOFF_MANIFEST_FILENAME
+    if handoff_manifest_path.exists():
+        raise RuntimeError(
+            "Request output_root already contains a prior handoff manifest: "
+            f"{handoff_manifest_path}. Remove the existing manifest or choose a new output_root."
+        )
+
     return generated_dir, filter_dir, curated_dir
 
 
@@ -119,7 +132,7 @@ def run_request_execution(
         )
 
     seed = pre_realization_config.seed
-    config, run_seed, requested_device, _resolved_device = realize_generation_config_for_run(
+    config, run_seed, requested_device, resolved_device = realize_generation_config_for_run(
         pre_realization_config,
         seed=seed,
         device=resolved.requested_device,
@@ -156,6 +169,7 @@ def run_request_execution(
         f"peak_flops={resolved.hardware.peak_flops:.3e} tier={resolved.hardware.tier} "
         f"hardware_policy={hardware_policy}"
     )
+    generation_started_at = perf_counter()
     stream = cli_api.generate_batch_iter(
         config,
         num_datasets=request_file.dataset_count,
@@ -168,11 +182,38 @@ def run_request_execution(
         shard_size=config.output.shard_size,
         compression=config.output.compression,
     )
+    generation_elapsed_seconds = perf_counter() - generation_started_at
+    filter_started_at = perf_counter()
     filter_result = cli_api.run_deferred_filter(
         in_dir=generated_dir,
         out_dir=filter_dir,
         curated_out_dir=curated_dir,
         n_jobs_override=n_jobs_override,
+    )
+    filter_elapsed_seconds = perf_counter() - filter_started_at
+    handoff_manifest_path = write_request_handoff_manifest(
+        request_path=request_path,
+        request=request_file,
+        run_root=run_root,
+        generated_dir=generated_dir,
+        filter_dir=filter_dir,
+        filtered_corpus_dir=curated_dir,
+        effective_config_path=effective_config_path,
+        effective_config_trace_path=effective_config_trace_path,
+        filter_manifest_path=filter_result.manifest_path,
+        filter_summary_path=filter_result.summary_path,
+        generated_datasets=int(written),
+        generation_elapsed_seconds=float(generation_elapsed_seconds),
+        filter_total_datasets=int(filter_result.total_datasets),
+        filter_accepted_datasets=int(filter_result.accepted_datasets),
+        filter_rejected_datasets=int(filter_result.rejected_datasets),
+        filter_elapsed_seconds=float(filter_elapsed_seconds),
+        requested_device=str(resolved.requested_device),
+        resolved_device=str(resolved_device),
+        hardware_backend=str(resolved.hardware.backend),
+        hardware_device_name=str(resolved.hardware.device_name),
+        hardware_tier=str(resolved.hardware.tier),
+        hardware_policy=str(hardware_policy),
     )
 
     return RequestRunResult(
@@ -183,6 +224,7 @@ def run_request_execution(
         curated_dir=curated_dir,
         effective_config_path=effective_config_path,
         effective_config_trace_path=effective_config_trace_path,
+        handoff_manifest_path=handoff_manifest_path,
         generated_datasets=int(written),
         filter_result=filter_result,
     )

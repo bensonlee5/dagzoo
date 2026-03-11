@@ -29,6 +29,7 @@ def run_request_command(args: argparse.Namespace) -> int:
 
     print(f"Wrote effective config: {result.effective_config_path}")
     print(f"Wrote effective config trace: {result.effective_config_trace_path}")
+    print(f"Wrote handoff manifest: {result.handoff_manifest_path}")
     print(f"Wrote {result.generated_datasets} datasets to: {result.generated_dir}")
     print(f"Wrote filter manifest: {result.filter_result.manifest_path}")
     print(f"Wrote filter summary: {result.filter_result.summary_path}")

@@ -11,6 +11,7 @@ from typing import Any, TextIO
 
 import numpy as np
 
+from dagzoo.core.staged_artifacts import staged_output_path as _staged_output_path
 from dagzoo.io.parquet_writer import (
     _close_packed_shard_handles,
     _ensure_metadata_file_open,
@@ -60,34 +61,6 @@ def _write_ndjson_record(handle: TextIO, record: Mapping[str, Any]) -> None:
         )
     )
     handle.write("\n")
-
-
-def _staged_output_path(*, parent_dir: Path, final_name: str, staging_token: str) -> Path:
-    """Return one hidden temp path used for deferred-filter staging."""
-
-    return parent_dir / f".{final_name}.{staging_token}.tmp"
-
-
-def _cleanup_path(path: Path | None) -> None:
-    """Best-effort cleanup for one staged or promoted artifact path."""
-
-    if path is None or not path.exists():
-        return
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-        return
-    path.unlink(missing_ok=True)
-
-
-def _promote_staged_path(*, staged_path: Path, final_path: Path) -> None:
-    """Promote one staged file or directory into its final visible location."""
-
-    if final_path.exists():
-        raise RuntimeError(
-            "Deferred filter promotion target already exists: "
-            f"{final_path}. Remove the existing artifact and retry."
-        )
-    staged_path.replace(final_path)
 
 
 def _create_curated_shard_writer(

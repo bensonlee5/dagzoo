@@ -5,9 +5,8 @@ requests. This contract is intentionally smaller than `GeneratorConfig` and is
 meant for cross-repo callers such as `tab-foundry`.
 
 `BL-145` adds request execution through `dagzoo request --request <path>`.
-Request runs now execute through the canonical `generate -> deferred filter`
-flow. Handoff manifests and the documented end-to-end `dagzoo -> tab-foundry`
-workflow still land in `BL-146` and `BL-147`.
+`BL-146` layers a versioned handoff manifest on top of that run layout, and
+`BL-147` documents the end-to-end `dagzoo -> tab-foundry` smoke workflow.
 
 ## v1 goals
 
@@ -53,16 +52,42 @@ public wire shape:
 ## Execution Layout
 
 `dagzoo request --request <path>` treats `output_root` as the request-run root
-and writes these subdirectories:
+and writes these artifacts:
+
+- `handoff_manifest.json`: versioned machine-readable handoff manifest for
+  downstream consumers
 
 - `generated/`: raw generated shard outputs plus
   `effective_config.yaml` and `effective_config_trace.yaml`
+
 - `filter/`: deferred-filter artifacts
   (`filter_manifest.ndjson` and `filter_summary.json`)
+
 - `curated/`: accepted-only curated shard outputs
 
-This PR does not add the downstream handoff manifest yet; later work will layer
-that on top of the same request-run root.
+## Handoff Manifest
+
+`handoff_manifest.json` is the stable downstream entrypoint for request-driven
+corpus handoff. It is a JSON document with:
+
+- `schema_name: dagzoo_request_handoff_manifest`
+- `schema_version: 1`
+- `request`: request-file echo (`path` plus normalized public `payload`)
+- `artifacts`: absolute paths for the request-run root, generated output,
+  filtered corpus, filter summary/manifest, and effective-config artifacts
+- `summary`: generated / accepted / rejected dataset counts plus acceptance rate
+- `throughput`: generation-stage and filter-stage elapsed time plus
+  datasets-per-minute context
+- `hardware`: requested/resolved device context and the applied hardware policy
+- `diversity_artifacts`: nullable paths for request-associated diversity reports
+
+The manifest `throughput` block uses request-run wall-clock stage timing.
+`filter/filter_summary.json` remains the underlying deferred-filter artifact and
+keeps its own timing semantics.
+
+`dagzoo request` does not run `dagzoo diversity-audit` implicitly, so the
+`diversity_artifacts` paths are currently `null` unless a separate workflow
+stores request-associated diversity reports alongside the run.
 
 ## Out Of Scope
 
@@ -73,12 +98,12 @@ controls. In particular, v1 does not allow:
 - `n_train` or `n_test`
 - direct missingness tuning fields such as `missing_rate` or MAR/MNAR logit knobs
 - repo-local preset/config file references
-- handoff-manifest semantics
+- closed-loop feedback or downstream prediction ingestion semantics
 
 ## Mapping Intent
 
-Later RD-016 work will resolve this request contract onto canonical
-`generate -> filter` runs.
+RD-016 resolves this request contract onto canonical `generate -> filter` runs
+plus one machine-readable handoff manifest.
 
 - `profile` will map to a stable internal config choice without exposing config
   file names as the public contract.

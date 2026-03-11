@@ -483,6 +483,7 @@ def test_request_cli_invokes_request_runner(tmp_path, monkeypatch: pytest.Monkey
     class _Result:
         effective_config_path = Path("effective_config.yaml")
         effective_config_trace_path = Path("effective_config_trace.yaml")
+        handoff_manifest_path = Path("handoff_manifest.json")
         generated_dir = Path("generated")
         generated_datasets = 2
         filter_result = _FilterResult()
