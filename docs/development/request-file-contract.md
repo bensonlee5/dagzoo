@@ -1,0 +1,147 @@
+# Request File Contract
+
+`BL-144` defines the public v1 request-file contract for downstream corpus
+requests. This contract is intentionally smaller than `GeneratorConfig` and is
+meant for cross-repo callers such as `tab-foundry`.
+
+This document defines the request shape only. It does not yet add request
+execution, handoff manifests, or the end-to-end `dagzoo -> tab-foundry`
+workflow. Those land in `BL-145`, `BL-146`, and `BL-147`.
+
+## v1 goals
+
+- keep the public field set small
+- expose generation intent, not internal engine wiring
+- preserve a stable public profile vocabulary instead of repo-local config names
+- expose missingness only as a named selector in v1
+
+## v1 schema
+
+Required fields:
+
+- `version`: exact string `v1`
+- `task`: `classification` or `regression`
+- `dataset_count`: positive integer
+- `rows`: total-row spec in one of the existing public forms:
+  - fixed integer, for example `1024`
+  - range string, for example `1024..4096`
+  - CSV choice string, for example `1024,2048,4096`
+- `profile`: stable public request profile; v1 supports `default` and `smoke`
+- `output_root`: non-empty output root string
+
+Optional fields:
+
+- `missingness_profile`: `none`, `mcar`, `mar`, or `mnar`
+  - default: `none`
+- `seed`: optional 32-bit integer for reproducible request-driven runs
+
+## Out Of Scope
+
+The request file must not expose raw internal config sections or split-level row
+controls. In particular, v1 does not allow:
+
+- `runtime`, `filter`, `graph`, `mechanism`, `noise`, `shift`, `diagnostics`, `benchmark`, `output`, or nested `dataset` sections
+- `n_train` or `n_test`
+- direct missingness tuning fields such as `missing_rate` or MAR/MNAR logit knobs
+- repo-local preset/config file references
+- request execution or handoff-manifest semantics
+
+## Mapping Intent
+
+Later RD-016 work will resolve this request contract onto canonical
+`generate -> filter` runs.
+
+- `profile` will map to a stable internal config choice without exposing config
+  file names as the public contract.
+- `missingness_profile` will map to canonical missingness behavior without
+  exposing full internal missingness tuning in v1.
+- `rows` remains the only public row-shape control.
+
+## Valid Examples
+
+Minimal classification request:
+
+```yaml
+version: v1
+task: classification
+dataset_count: 25
+rows: 1024
+profile: default
+output_root: requests/corpus_default
+```
+
+Smoke regression request with range rows and explicit missingness:
+
+```yaml
+version: v1
+task: regression
+dataset_count: 3
+rows: 1024..4096
+profile: smoke
+missingness_profile: mcar
+output_root: requests/regression_smoke
+seed: 42
+```
+
+Choice-based row request:
+
+```yaml
+version: v1
+task: classification
+dataset_count: 8
+rows: 1024,2048,4096
+profile: default
+missingness_profile: mar
+output_root: requests/profile_matrix
+```
+
+## Invalid Examples
+
+Unknown version:
+
+```yaml
+version: v2
+task: classification
+dataset_count: 1
+rows: 1024
+profile: default
+output_root: requests/out
+```
+
+Internal config leakage:
+
+```yaml
+version: v1
+task: classification
+dataset_count: 1
+rows: 1024
+profile: default
+output_root: requests/out
+runtime:
+  device: cpu
+```
+
+Split-level row controls instead of `rows`:
+
+```yaml
+version: v1
+task: classification
+dataset_count: 1
+profile: default
+output_root: requests/out
+n_train: 768
+n_test: 256
+```
+
+Direct missingness tuning instead of the named selector:
+
+```yaml
+version: v1
+task: classification
+dataset_count: 1
+rows: 1024
+profile: default
+output_root: requests/out
+missing_rate: 0.25
+missing_mechanism: mar
+```
