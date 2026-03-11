@@ -187,6 +187,46 @@ def test_resolve_request_config_preserves_smoke_caps_under_cuda_policy(
     assert resolved.config.runtime.fixed_layout_target_cells == 160_000_000
 
 
+def test_resolve_request_config_reapplies_non_smoke_rows_after_cuda_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("dagzoo.core.config_resolution.detect_hardware", _mock_cuda_h100)
+    request = RequestFileConfig.from_dict(
+        _request_payload(
+            profile=REQUEST_PROFILE_DEFAULT,
+            rows="2000..60000",
+        )
+    )
+
+    resolved = resolve_request_config(
+        request=request,
+        device_override="cuda",
+        hardware_policy="cuda_tiered_v1",
+    )
+
+    assert resolved.requested_device == "cuda"
+    assert resolved.config.dataset.n_test == 1024
+    assert resolved.config.dataset.rows is not None
+    assert resolved.config.dataset.rows.mode == "range"
+    assert resolved.config.dataset.rows.start == 2000
+    assert resolved.config.dataset.rows.stop == 60000
+
+    trace = serialize_resolution_events(resolved.trace_events)
+    assert any(
+        event["path"] == "dataset.rows"
+        and event["source"] == "request.rows"
+        and event["new_value"]
+        == {
+            "mode": "range",
+            "value": None,
+            "start": 2000,
+            "stop": 60000,
+            "choices": [],
+        }
+        for event in trace
+    )
+
+
 def test_resolve_request_config_applies_missingness_profile_without_task_leakage() -> None:
     request = RequestFileConfig.from_dict(
         _request_payload(

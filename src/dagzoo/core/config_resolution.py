@@ -270,7 +270,8 @@ def _apply_default_cuda_fixed_layout_target_floor(
 def _apply_rows_override(
     config: GeneratorConfig,
     *,
-    rows: str | None,
+    rows: object | None,
+    source: str,
     events: list[ResolutionEvent],
 ) -> None:
     """Apply generate rows override."""
@@ -281,7 +282,7 @@ def _apply_rows_override(
         config,
         path="dataset.rows",
         value=rows,
-        source="cli.rows",
+        source=source,
         events=events,
     )
 
@@ -421,7 +422,8 @@ def resolve_generate_config(
     config: GeneratorConfig,
     *,
     device_override: str | None,
-    rows: str | None,
+    rows: object | None,
+    rows_source: str = "cli.rows",
     hardware_policy: str,
     missing_rate: float | None,
     missing_mechanism: str | None,
@@ -471,6 +473,7 @@ def resolve_generate_config(
     _apply_rows_override(
         resolved,
         rows=rows,
+        source=rows_source,
         events=trace_events,
     )
 
@@ -512,6 +515,8 @@ def resolve_request_config(
 
     base_config = load_packaged_generator_config(_REQUEST_BASE_CONFIG_RESOURCE)
     trace_events: list[ResolutionEvent] = []
+    rows_override: object | None = request.rows
+    rows_source = "request.rows"
 
     smoke_profile: RequestSmokeProfile | None = None
     if request.profile == REQUEST_PROFILE_SMOKE:
@@ -528,6 +533,7 @@ def resolve_request_config(
             smoke_profile=smoke_profile,
             events=trace_events,
         )
+        rows_override = None
 
     _set_config_path(
         base_config,
@@ -544,13 +550,14 @@ def resolve_request_config(
             source="request.seed",
             events=trace_events,
         )
-    _set_config_path(
-        base_config,
-        path="dataset.rows",
-        value=request.rows,
-        source="request.rows",
-        events=trace_events,
-    )
+    if smoke_profile is not None:
+        _set_config_path(
+            base_config,
+            path="dataset.rows",
+            value=request.rows,
+            source="request.rows",
+            events=trace_events,
+        )
     _apply_request_missingness_profile(
         base_config,
         missingness_profile=request.missingness_profile,
@@ -582,7 +589,8 @@ def resolve_request_config(
     resolved = resolve_generate_config(
         base_config,
         device_override=device_override,
-        rows=None,
+        rows=rows_override,
+        rows_source=rows_source,
         hardware_policy=hardware_policy,
         missing_rate=None,
         missing_mechanism=None,

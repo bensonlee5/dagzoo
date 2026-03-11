@@ -4,6 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dagzoo"
+# Keep BL-145 request follow-up fixes on the unreleased 0.9.3 line.
 version = "0.9.3"
 description = "High-performance synthetic tabular data generator"
 readme = "README.md"

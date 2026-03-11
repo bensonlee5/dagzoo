@@ -36,6 +36,9 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
 - `dagzoo request` now preserves the smoke profile envelope under CUDA hardware
   policies by reapplying the smoke caps before request config validation and by
   capping smoke rows before one-time run realization.
+- Non-smoke `dagzoo request` runs now reapply request-owned `rows` specs after
+  hardware-policy transforms, so supported CUDA policies preserve the same row
+  precedence as `dagzoo generate --rows`.
 - `dagzoo request` now converts malformed request YAML into the normal
   argparse-style usage error path instead of printing a traceback.
 
