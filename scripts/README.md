@@ -36,7 +36,7 @@ directly.
 - `scripts/fetch-additional-references.sh`
   - Downloads a curated hardcoded list of additional arXiv papers used for local reference refreshes.
 - `scripts/effective_diversity_audit.py`
-  - Convenience wrapper that forwards to `dagzoo diversity-audit`; the packaged CLI is the canonical interface.
+  - Convenience wrapper that forwards to the rewritten baseline-vs-variant `dagzoo diversity-audit`; the packaged CLI is the canonical interface.
 - `scripts/benchmark-suite.sh [suite] [preset] [out_dir] [diagnostics] [diagnostics_out_dir]`
   - Runs `dagzoo benchmark` with suite/preset selection and optional diagnostics.
 - `scripts/benchmark-smoke.sh [preset] [diagnostics] [diagnostics_out_dir]`

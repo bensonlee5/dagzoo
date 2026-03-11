@@ -29,13 +29,24 @@ def test_effective_diversity_script_delegates_to_cli(monkeypatch) -> None:
 
     monkeypatch.setattr(module, "cli_main", _stub_cli_main)
 
-    code = module.main(["--phase", "local", "--out-dir", "tmp/out"])
+    code = module.main(
+        [
+            "--baseline-config",
+            "configs/default.yaml",
+            "--variant-config",
+            "configs/preset_shift_benchmark_smoke.yaml",
+            "--out-dir",
+            "tmp/out",
+        ]
+    )
 
     assert code == 7
     assert captured["argv"] == [
         "diversity-audit",
-        "--phase",
-        "local",
+        "--baseline-config",
+        "configs/default.yaml",
+        "--variant-config",
+        "configs/preset_shift_benchmark_smoke.yaml",
         "--out-dir",
         "tmp/out",
     ]

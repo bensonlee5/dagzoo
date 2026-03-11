@@ -2,273 +2,319 @@ import copy
 import json
 
 import pytest
-import torch
+import yaml
 
+from dagzoo.bench.corpus_probe import CorpusProbeResult
 from dagzoo.config import GeneratorConfig
-from dagzoo.core.fixed_layout_plan_types import NeuralNetFunctionPlan, ProductFunctionPlan
-import dagzoo.core.execution_semantics as execution_semantics_mod
 from dagzoo.diagnostics.effective_diversity import (
-    AblationArm,
-    _runtime_override_context,
-    build_effective_diversity_baseline_payload,
-    compare_scale_report_to_baseline,
-    generate_effective_diversity_report,
-    generate_effective_diversity_scale_report,
+    CORE_DIVERSITY_METRICS,
+    compare_coverage_summaries,
+    run_effective_diversity_audit,
     write_effective_diversity_artifacts,
 )
-from dagzoo.functions.activations import fixed_activation_names
+from dagzoo.diagnostics.effective_diversity.compare import summarize_comparison_status
 
 
-def _find_pair(pairs: list[dict[str, object]], left: str, right: str) -> dict[str, object]:
-    target = tuple(sorted((left, right)))
-    for pair in pairs:
-        current = tuple(sorted((str(pair["left"]), str(pair["right"]))))
-        if current == target:
-            return pair
-    raise AssertionError(f"Pair not found: {left!r}, {right!r}")
-
-
-def test_effective_diversity_report_is_deterministic() -> None:
-    report_a = generate_effective_diversity_report(
-        seed=1234,
-        n_seeds=3,
-        n_rows=256,
-        n_cols=8,
-        out_dim=8,
-        nn_degenerate_trials=2_000,
-    )
-    report_b = generate_effective_diversity_report(
-        seed=1234,
-        n_seeds=3,
-        n_rows=256,
-        n_cols=8,
-        out_dim=8,
-        nn_degenerate_trials=2_000,
-    )
-
-    assert report_a["schema_name"] == "dagzoo_effective_diversity_audit"
-    assert report_a["schema_version"] == 2
-    assert sorted(report_a["tracks"].keys()) == ["activations", "aggregation", "function_families"]
-    assert report_a["config"]["runtime_activation_names"] == list(fixed_activation_names())
-    assert json.dumps(report_a, sort_keys=True) == json.dumps(report_b, sort_keys=True)
-
-
-def test_effective_diversity_registry_captures_claims_and_runtime_absence() -> None:
-    report = generate_effective_diversity_report(
-        seed=9,
-        n_seeds=4,
-        n_rows=384,
-        n_cols=10,
-        out_dim=10,
-        nn_degenerate_trials=12_000,
-    )
-
-    claim_ids = {str(item["claim_id"]) for item in report["hypothesis_registry"]}
-    expected_claim_ids = {
-        "sigmoid_vs_tanh",
-        "sign_vs_heaviside",
-        "softplus_vs_logsigmoid",
-        "relu6_vs_hardtanh",
-        "selu_vs_elu",
-        "linear_vs_nn",
-        "quadratic_vs_product",
-        "gp_vs_nn",
-        "em_vs_discretization",
-        "tree_vs_discretization",
-        "max_vs_logsumexp",
-        "rank_vs_argsort",
+def _coverage_summary(*, mean: float, p25: float, p50: float, p75: float) -> dict[str, object]:
+    metrics = {
+        metric: {
+            "mean": float(mean),
+            "quantiles": {
+                "p25": float(p25),
+                "p50": float(p50),
+                "p75": float(p75),
+            },
+        }
+        for metric in CORE_DIVERSITY_METRICS
     }
-    assert claim_ids == expected_claim_ids
-
-    sign_heaviside = next(
-        item for item in report["hypothesis_registry"] if item["claim_id"] == "sign_vs_heaviside"
-    )
-    assert sign_heaviside["status"] == "not_applicable_runtime_absent"
-
-    activation_pairs = report["tracks"]["activations"]["pairs"]
-    family_pairs = report["tracks"]["function_families"]["pairs"]
-
-    relu6_hardtanh = _find_pair(activation_pairs, "relu6", "hardtanh")
-    assert relu6_hardtanh["label"] != "exact_affine_equivalent"
-
-    nn_linear = _find_pair(family_pairs, "nn", "linear")
-    assert nn_linear["label"] != "exact_affine_equivalent"
-
-    nn_prob = report["hypothesis_checks"]["nn_linear_degenerate_probability"]
-    assert float(nn_prob["analytic"]) == pytest.approx(1.0 / 12.0)
-    assert float(nn_prob["empirical"]) == pytest.approx(1.0 / 12.0, abs=0.02)
+    return {
+        "num_datasets": 4,
+        "metrics": metrics,
+    }
 
 
-def test_runtime_override_context_remaps_product_subfamilies() -> None:
-    generator = torch.Generator(device="cpu").manual_seed(0)
-    arm = AblationArm(arm_id="fam_linear_to_nn", description="x", family_map={"linear": "nn"})
-
-    with _runtime_override_context(arm):
-        plan = execution_semantics_mod.sample_function_plan_for_family(
-            generator,
-            family="product",
-            out_dim=4,
-            mechanism_logit_tilt=0.0,
-            function_family_mix={"linear": 1.0, "product": 1.0},
-        )
-
-    assert isinstance(plan, ProductFunctionPlan)
-    assert isinstance(plan.lhs, NeuralNetFunctionPlan)
-    assert isinstance(plan.rhs, NeuralNetFunctionPlan)
-
-
-def test_effective_diversity_scale_report_smoke_and_baseline_regression() -> None:
-    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
-    cfg.runtime.device = "cpu"
-    cfg.dataset.n_train = 24
-    cfg.dataset.n_test = 12
-    cfg.dataset.n_features_min = 8
-    cfg.dataset.n_features_max = 8
-    cfg.graph.n_nodes_min = 4
-    cfg.graph.n_nodes_max = 6
-
-    scale_report = generate_effective_diversity_scale_report(
-        base_config=cfg,
-        arm_set="high_confidence",
+def _probe_result(
+    *,
+    label: str,
+    config_path: str,
+    coverage_summary: dict[str, object],
+    datasets_per_minute: float = 100.0,
+    filter_accepted_datasets_per_minute: float | None = None,
+) -> CorpusProbeResult:
+    return CorpusProbeResult(
+        label=label,
+        config_path=config_path,
         suite="smoke",
-        num_datasets_per_arm=2,
-        seed=77,
-        meaningful_threshold_pct=5.0,
+        num_datasets=4,
+        warmup_datasets=0,
+        requested_device="cpu",
+        resolved_device="cpu",
+        resolved_config={"runtime": {"device": "cpu"}},
+        datasets_per_minute=float(datasets_per_minute),
+        filter_datasets_per_minute=None,
+        filter_accepted_datasets_per_minute=filter_accepted_datasets_per_minute,
+        filter_accepted_datasets_measured=0,
+        filter_rejected_datasets_measured=0,
+        filter_acceptance_rate_dataset_level=None,
+        filter_rejection_rate_dataset_level=None,
+        coverage_summary=coverage_summary,
+        filter_summary=None,
     )
 
-    assert scale_report["schema_name"] == "dagzoo_effective_diversity_scale_impact"
-    assert scale_report["baseline"]["status"] == "executed"
-    assert len(scale_report["comparisons"]) == len(scale_report["arms"])
-    assert scale_report["summary"]["num_arms_total"] == len(scale_report["arms"])
 
-    skipped = [item for item in scale_report["comparisons"] if item["status"] == "skipped"]
-    assert any(item["arm_id"] == "act_sign_to_heaviside" for item in skipped)
-
-    evaluated = [item for item in scale_report["comparisons"] if item["status"] == "evaluated"]
-    assert evaluated
-    assert all(item["composite_shift_pct"] is not None for item in evaluated)
-    evaluated_arm_ids = {str(item["arm_id"]) for item in evaluated}
-    assert "combined_high_confidence" in evaluated_arm_ids
-
-    baseline_payload = build_effective_diversity_baseline_payload(scale_report)
-    same_regression = compare_scale_report_to_baseline(
-        scale_report,
-        baseline_payload,
+def test_compare_coverage_summaries_classifies_shift_severity() -> None:
+    baseline = _coverage_summary(mean=1.0, p25=0.8, p50=1.0, p75=1.2)
+    same = compare_coverage_summaries(
+        baseline_summary=baseline,
+        variant_summary=baseline,
         warn_threshold_pct=2.5,
         fail_threshold_pct=5.0,
     )
-    assert same_regression["status"] == "pass"
-    assert same_regression["issues"] == []
-    assert same_regression["compatibility_issues"] == []
-    assert same_regression["delta_issues"] == []
+    assert same["diversity_status"] == "pass"
+    assert same["diversity_composite_shift_pct"] == pytest.approx(0.0)
 
-    mutated = copy.deepcopy(scale_report)
-    for comparison in mutated["comparisons"]:
-        if comparison.get("status") == "evaluated":
-            comparison["composite_shift_pct"] = float(comparison["composite_shift_pct"]) + 8.0
-            break
-
-    regressed = compare_scale_report_to_baseline(
-        mutated,
-        baseline_payload,
+    shifted = compare_coverage_summaries(
+        baseline_summary=baseline,
+        variant_summary=_coverage_summary(mean=1.6, p25=1.4, p50=1.5, p75=1.8),
         warn_threshold_pct=2.5,
         fail_threshold_pct=5.0,
     )
-    assert regressed["status"] in {"warn", "fail"}
-    assert regressed["issues"]
-    assert regressed["compatibility_issues"] == []
+    assert shifted["diversity_status"] == "fail"
+    assert shifted["diversity_composite_shift_pct"] is not None
+    assert shifted["diversity_metric_shift_pct"]
 
 
-def test_compare_scale_report_to_baseline_fails_on_metadata_mismatch() -> None:
-    scale_report = {
-        "config": {
-            "suite": "smoke",
-            "arm_set": "high_confidence",
-            "seed": 123,
-            "num_datasets_per_arm": 2,
-            "meaningful_threshold_pct": 5.0,
-            "device": "cpu",
-            "runtime_activation_names": ["relu", "tanh"],
-            "base_config": {"dataset": {"n_train": 24}},
-        },
-        "comparisons": [
-            {
-                "arm_id": "fam_linear_to_nn",
-                "status": "evaluated",
-                "composite_shift_pct": 1.25,
-            }
-        ],
-    }
-    baseline_payload = build_effective_diversity_baseline_payload(scale_report)
-    baseline_payload["suite"] = "standard"
-    baseline_payload["config_fingerprint"] = "badfingerprint"
-
-    regression = compare_scale_report_to_baseline(
-        scale_report,
-        baseline_payload,
-        warn_threshold_pct=2.5,
-        fail_threshold_pct=5.0,
+def test_run_effective_diversity_audit_aggregates_variant_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline_result = _probe_result(
+        label="baseline",
+        config_path="configs/base.yaml",
+        coverage_summary=_coverage_summary(mean=1.0, p25=0.8, p50=1.0, p75=1.2),
+        datasets_per_minute=120.0,
+        filter_accepted_datasets_per_minute=60.0,
     )
+    first_variant = _probe_result(
+        label="variant",
+        config_path="configs/variant.yaml",
+        coverage_summary=_coverage_summary(mean=1.01, p25=0.81, p50=1.0, p75=1.19),
+        datasets_per_minute=118.0,
+        filter_accepted_datasets_per_minute=58.0,
+    )
+    second_variant = _probe_result(
+        label="variant_2",
+        config_path="configs/variant.yaml",
+        coverage_summary=_coverage_summary(mean=1.6, p25=1.4, p50=1.5, p75=1.8),
+        datasets_per_minute=90.0,
+        filter_accepted_datasets_per_minute=30.0,
+    )
+    stub_results = [baseline_result, first_variant, second_variant]
 
-    assert regression["status"] == "fail"
-    assert regression["delta_issues"] == []
-    codes = {str(issue.get("code")) for issue in regression["compatibility_issues"]}
-    assert "suite_mismatch" in codes
-    assert "config_fingerprint_mismatch" in codes
+    def _stub_run_corpus_probe(*_args, **_kwargs):
+        return stub_results.pop(0)
 
-
-def test_compare_scale_report_to_baseline_fails_on_missing_evaluated_arm() -> None:
-    scale_report = {
-        "config": {
-            "suite": "smoke",
-            "arm_set": "high_confidence",
-            "seed": 123,
-            "num_datasets_per_arm": 2,
-            "meaningful_threshold_pct": 5.0,
-            "device": "cpu",
-            "runtime_activation_names": ["relu", "tanh"],
-            "base_config": {"dataset": {"n_train": 24}},
-        },
-        "comparisons": [
-            {
-                "arm_id": "fam_linear_to_nn",
-                "status": "evaluated",
-                "composite_shift_pct": 1.25,
-            }
-        ],
-    }
-    baseline_payload = build_effective_diversity_baseline_payload(scale_report)
-    baseline_payload["arms"] = {}
-
-    regression = compare_scale_report_to_baseline(
-        scale_report,
-        baseline_payload,
+    monkeypatch.setattr(
+        "dagzoo.diagnostics.effective_diversity.runner.run_corpus_probe",
+        _stub_run_corpus_probe,
+    )
+    base_config = GeneratorConfig.from_yaml("configs/default.yaml")
+    report = run_effective_diversity_audit(
+        baseline_config=base_config,
+        baseline_config_path="configs/base.yaml",
+        variant_configs=[copy.deepcopy(base_config), copy.deepcopy(base_config)],
+        variant_config_paths=["configs/variant.yaml", "configs/variant.yaml"],
+        suite="smoke",
+        num_datasets=4,
+        warmup=0,
+        device="cpu",
         warn_threshold_pct=2.5,
         fail_threshold_pct=5.0,
     )
 
-    assert regression["status"] == "fail"
-    assert regression["delta_issues"] == []
-    issue_codes = {str(issue.get("code")) for issue in regression["compatibility_issues"]}
-    assert "missing_baseline_arm" in issue_codes
+    assert report["schema_name"] == "dagzoo_diversity_audit_report"
+    assert report["schema_version"] == 1
+    assert report["summary"]["overall_status"] == "fail"
+    assert report["summary"]["probe_num_datasets"] == 4
+    assert report["summary"]["probe_warmup_datasets"] == 0
+    assert report["summary"]["status_counts"]["pass"] == 1
+    assert report["summary"]["status_counts"]["fail"] == 1
+    assert [item["label"] for item in report["variants"]] == ["variant", "variant_2"]
+    assert report["comparisons"][1][
+        "filter_accepted_datasets_per_minute_delta_pct"
+    ] == pytest.approx(-50.0)
 
 
 def test_effective_diversity_artifact_writer(tmp_path) -> None:
-    report = generate_effective_diversity_report(
-        seed=77,
-        n_seeds=2,
-        n_rows=128,
-        n_cols=6,
-        out_dim=6,
-        nn_degenerate_trials=1_000,
+    report = {
+        "schema_name": "dagzoo_diversity_audit_report",
+        "schema_version": 1,
+        "baseline": {
+            "label": "baseline",
+            "config_path": "configs/base.yaml",
+            "datasets_per_minute": 123.0,
+            "filter_accepted_datasets_per_minute": 45.0,
+            "filter_acceptance_rate_dataset_level": 0.5,
+        },
+        "variants": [{"label": "variant"}],
+        "comparisons": [
+            {
+                "variant_label": "variant",
+                "diversity_status": "warn",
+                "diversity_composite_shift_pct": 3.2,
+                "datasets_per_minute_delta_pct": -1.5,
+                "filter_accepted_datasets_per_minute_delta_pct": -4.0,
+            }
+        ],
+        "summary": {
+            "overall_status": "warn",
+            "warn_threshold_pct": 2.5,
+            "fail_threshold_pct": 5.0,
+            "num_variants": 1,
+            "probe_num_datasets": 25,
+            "probe_warmup_datasets": 5,
+        },
+    }
+
+    artifact_paths = write_effective_diversity_artifacts(report, out_dir=tmp_path)
+    payload = json.loads(artifact_paths["summary_json"].read_text(encoding="utf-8"))
+    markdown = artifact_paths["summary_md"].read_text(encoding="utf-8")
+
+    assert payload["schema_name"] == "dagzoo_diversity_audit_report"
+    assert "summary.json` / `summary.md` are the canonical persisted artifacts" in markdown
+    assert "Probe num datasets" in markdown
+
+
+def test_run_effective_diversity_audit_smoke_filter_disabled(tmp_path) -> None:
+    baseline = GeneratorConfig.from_yaml("configs/default.yaml")
+    baseline.runtime.device = "cpu"
+    baseline.filter.enabled = False
+    baseline.dataset.n_train = 24
+    baseline.dataset.n_test = 12
+    baseline.dataset.n_features_min = 8
+    baseline.dataset.n_features_max = 8
+    baseline.graph.n_nodes_min = 4
+    baseline.graph.n_nodes_max = 5
+
+    variant = copy.deepcopy(baseline)
+    variant.graph.n_nodes_min = 6
+    variant.graph.n_nodes_max = 7
+
+    baseline_path = tmp_path / "baseline.yaml"
+    variant_path = tmp_path / "variant.yaml"
+    baseline_path.write_text(yaml.safe_dump(baseline.to_dict()), encoding="utf-8")
+    variant_path.write_text(yaml.safe_dump(variant.to_dict()), encoding="utf-8")
+
+    report = run_effective_diversity_audit(
+        baseline_config=baseline,
+        baseline_config_path=str(baseline_path),
+        variant_configs=[variant],
+        variant_config_paths=[str(variant_path)],
+        suite="smoke",
+        num_datasets=2,
+        warmup=0,
+        device="cpu",
+        warn_threshold_pct=2.5,
+        fail_threshold_pct=5.0,
     )
-    json_path, md_path = write_effective_diversity_artifacts(report, out_dir=tmp_path)
 
-    assert json_path.exists()
-    assert md_path.exists()
+    assert report["schema_name"] == "dagzoo_diversity_audit_report"
+    assert report["baseline"]["filter_summary"] is None
+    assert report["baseline"]["filter_datasets_per_minute"] is None
+    assert report["baseline"]["coverage_summary"]["num_datasets"] == 2
+    assert report["comparisons"][0]["diversity_status"] in {"pass", "warn", "fail"}
 
-    payload = json.loads(json_path.read_text(encoding="utf-8"))
-    assert payload["schema_name"] == "dagzoo_effective_diversity_audit"
-    assert "No generator behavior/config/schema was changed by this audit." in md_path.read_text(
-        encoding="utf-8"
+
+def test_run_effective_diversity_audit_uses_shared_probe_counts_from_baseline_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline_config = GeneratorConfig.from_yaml("configs/default.yaml")
+    variant_config = GeneratorConfig.from_yaml("configs/preset_shift_benchmark_smoke.yaml")
+    observed_counts: list[tuple[int, int]] = []
+
+    def _stub_run_corpus_probe(*_args, **kwargs):
+        observed_counts.append((int(kwargs["num_datasets"]), int(kwargs["warmup"])))
+        return _probe_result(
+            label=str(kwargs["label"]),
+            config_path=str(kwargs["config_path"]),
+            coverage_summary=_coverage_summary(mean=1.0, p25=0.8, p50=1.0, p75=1.2),
+        )
+
+    monkeypatch.setattr(
+        "dagzoo.diagnostics.effective_diversity.runner.run_corpus_probe",
+        _stub_run_corpus_probe,
+    )
+    report = run_effective_diversity_audit(
+        baseline_config=baseline_config,
+        baseline_config_path="configs/default.yaml",
+        variant_configs=[variant_config],
+        variant_config_paths=["configs/preset_shift_benchmark_smoke.yaml"],
+        suite="smoke",
+        num_datasets=None,
+        warmup=None,
+        device="cpu",
+        warn_threshold_pct=2.5,
+        fail_threshold_pct=5.0,
+    )
+
+    assert observed_counts == [(25, 5), (25, 5)]
+    assert report["summary"]["probe_num_datasets"] == 25
+    assert report["summary"]["probe_warmup_datasets"] == 5
+
+
+def test_run_effective_diversity_audit_marks_insufficient_metrics_as_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline_result = _probe_result(
+        label="baseline",
+        config_path="configs/base.yaml",
+        coverage_summary=_coverage_summary(mean=1.0, p25=0.8, p50=1.0, p75=1.2),
+    )
+    pass_variant = _probe_result(
+        label="variant",
+        config_path="configs/variant_a.yaml",
+        coverage_summary=_coverage_summary(mean=1.0, p25=0.8, p50=1.0, p75=1.2),
+    )
+    insufficient_variant = _probe_result(
+        label="variant_2",
+        config_path="configs/variant_b.yaml",
+        coverage_summary={"num_datasets": 0, "metrics": {}},
+    )
+    stub_results = [baseline_result, pass_variant, insufficient_variant]
+
+    monkeypatch.setattr(
+        "dagzoo.diagnostics.effective_diversity.runner.run_corpus_probe",
+        lambda *_args, **_kwargs: stub_results.pop(0),
+    )
+    base_config = GeneratorConfig.from_yaml("configs/default.yaml")
+    report = run_effective_diversity_audit(
+        baseline_config=base_config,
+        baseline_config_path="configs/base.yaml",
+        variant_configs=[copy.deepcopy(base_config), copy.deepcopy(base_config)],
+        variant_config_paths=["configs/variant_a.yaml", "configs/variant_b.yaml"],
+        suite="smoke",
+        num_datasets=4,
+        warmup=0,
+        device="cpu",
+        warn_threshold_pct=2.5,
+        fail_threshold_pct=5.0,
+    )
+
+    assert report["summary"]["overall_status"] == "insufficient_metrics"
+    assert report["summary"]["status_counts"]["pass"] == 1
+    assert report["summary"]["status_counts"]["insufficient_metrics"] == 1
+
+
+def test_summarize_comparison_status_prioritizes_incomplete_runs() -> None:
+    assert summarize_comparison_status([{"diversity_status": "pass"}]) == "pass"
+    assert (
+        summarize_comparison_status(
+            [{"diversity_status": "pass"}, {"diversity_status": "insufficient_metrics"}]
+        )
+        == "insufficient_metrics"
+    )
+    assert (
+        summarize_comparison_status(
+            [{"diversity_status": "warn"}, {"diversity_status": "insufficient_metrics"}]
+        )
+        == "insufficient_metrics"
     )

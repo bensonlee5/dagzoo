@@ -10,6 +10,34 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.9.0] - 2026-03-10
+
+### Removed
+
+- Replaced the legacy `dagzoo diversity-audit` local/equivalence and arm-set
+  workflow. The command no longer accepts `--config`, `--phase`, `--arm-set`,
+  `--num-datasets-per-arm`, `--seed`, `--n-seeds`, `--n-rows`, `--n-cols`,
+  `--out-dim`, `--nn-degenerate-trials`, `--exact-affine-rmse`,
+  `--near-cosine`, `--near-affine-rmse`, `--meaningful-threshold-pct`,
+  `--baseline`, or `--save-baseline`.
+- Removed legacy diversity-audit artifacts such as `run_summary.json` and
+  `equivalence_report.json`; the rewritten audit now persists only
+  `summary.json` and `summary.md`.
+
+### Changed
+
+- Rewrote `dagzoo diversity-audit` as a baseline-vs-variant accepted-corpus
+  comparison workflow driven by `--baseline-config` plus one or more
+  `--variant-config` values.
+- Replaced the monolithic effective-diversity implementation with a package
+  built around shared corpus probes, accepted-corpus coverage summaries, and
+  per-variant diversity shift scoring.
+- Diversity-audit now resolves one shared probe size from the baseline config
+  for the whole run, replays the measured corpus in a second streaming pass
+  instead of buffering full corpora in memory, and treats
+  `insufficient_metrics` as a non-passing audit result for
+  `--fail-on-regression`.
+
 ## [0.8.2] - 2026-03-10
 
 ### Changed

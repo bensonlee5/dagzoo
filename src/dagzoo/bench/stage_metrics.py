@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 import tempfile
 import time
@@ -14,6 +14,7 @@ from dagzoo.bench.constants import SECONDS_PER_MINUTE
 from dagzoo.config import GeneratorConfig
 from dagzoo.filtering.extra_trees_filter import _apply_extra_trees_filter_numpy
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
+from dagzoo.math_utils import coerce_optional_finite_float as _coerce_optional_finite_float
 from dagzoo.math_utils import to_numpy as _to_numpy
 from dagzoo.rng import SEED32_MAX
 from dagzoo.types import DatasetBundle
@@ -43,6 +44,13 @@ class FilterStageMeasurement:
     filter_accepted_datasets: int
     filter_rejections_total: int
     filter_rejected_datasets: int
+    accepted_true_fraction: float | None = None
+    wins_ratio_mean: float | None = None
+    threshold_effective_mean: float | None = None
+    threshold_delta_mean: float | None = None
+    n_valid_oob_mean: float | None = None
+    reason_counts: dict[str, int] = field(default_factory=dict)
+    accepted_bundles: list[DatasetBundle] = field(default_factory=list)
 
 
 def measure_write_datasets_per_minute(
@@ -88,14 +96,23 @@ def _coerce_bundle_seed(bundle: DatasetBundle, *, fallback_seed: int) -> int:
     return int(fallback_seed % (SEED32_MAX + 1))
 
 
-def measure_filter_stage_metrics(
-    bundles: Sequence[DatasetBundle],
+def _mean_or_none(values: list[float]) -> float | None:
+    """Return the mean of collected values or ``None`` when empty."""
+
+    if not values:
+        return None
+    return float(sum(values) / len(values))
+
+
+def replay_filter_stage_metrics(
+    bundles: Iterable[DatasetBundle],
     *,
     config: GeneratorConfig,
+    on_accepted_bundle: Callable[[DatasetBundle], None] | None = None,
 ) -> FilterStageMeasurement:
-    """Replay deferred filter stage over sampled bundles and return throughput + outcomes."""
+    """Replay deferred filter stage over a bundle stream and return throughput + outcomes."""
 
-    if not bundles or not bool(config.filter.enabled):
+    if not bool(config.filter.enabled):
         return FilterStageMeasurement(
             datasets_per_minute=0.0,
             filter_attempts_total=0,
@@ -107,7 +124,13 @@ def measure_filter_stage_metrics(
     attempts_total = 0
     accepted_total = 0
     rejections_total = 0
+    wins_ratio_values: list[float] = []
+    threshold_effective_values: list[float] = []
+    threshold_delta_values: list[float] = []
+    n_valid_oob_values: list[float] = []
+    reason_counts: dict[str, int] = {}
     start = time.perf_counter()
+    callback_elapsed = 0.0
     for idx, bundle in enumerate(bundles):
         x_train = _to_numpy(bundle.X_train).astype("float32", copy=False)
         x_test = _to_numpy(bundle.X_test).astype("float32", copy=False)
@@ -141,10 +164,29 @@ def measure_filter_stage_metrics(
         )
         if bool(accepted):
             accepted_total += 1
+            if on_accepted_bundle is not None:
+                callback_start = time.perf_counter()
+                on_accepted_bundle(bundle)
+                callback_elapsed += max(0.0, time.perf_counter() - callback_start)
         else:
             rejections_total += 1
+        wins_ratio = _coerce_optional_finite_float(_details.get("wins_ratio"))
+        if wins_ratio is not None:
+            wins_ratio_values.append(float(wins_ratio))
+        threshold_effective = _coerce_optional_finite_float(_details.get("threshold_effective"))
+        if threshold_effective is not None:
+            threshold_effective_values.append(float(threshold_effective))
+        threshold_delta = _coerce_optional_finite_float(_details.get("threshold_delta"))
+        if threshold_delta is not None:
+            threshold_delta_values.append(float(threshold_delta))
+        n_valid_oob = _coerce_optional_finite_float(_details.get("n_valid_oob"))
+        if n_valid_oob is not None:
+            n_valid_oob_values.append(float(n_valid_oob))
+        reason = _details.get("reason")
+        if isinstance(reason, str) and reason:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
 
-    elapsed = max(0.0, time.perf_counter() - start)
+    elapsed = max(0.0, time.perf_counter() - start - callback_elapsed)
     dpm = ((float(attempts_total) / elapsed) * SECONDS_PER_MINUTE) if elapsed > 0.0 else 0.0
     return FilterStageMeasurement(
         datasets_per_minute=float(dpm),
@@ -152,7 +194,34 @@ def measure_filter_stage_metrics(
         filter_accepted_datasets=int(accepted_total),
         filter_rejections_total=int(rejections_total),
         filter_rejected_datasets=int(rejections_total),
+        accepted_true_fraction=(
+            float(accepted_total) / float(attempts_total) if attempts_total > 0 else None
+        ),
+        wins_ratio_mean=_mean_or_none(wins_ratio_values),
+        threshold_effective_mean=_mean_or_none(threshold_effective_values),
+        threshold_delta_mean=_mean_or_none(threshold_delta_values),
+        n_valid_oob_mean=_mean_or_none(n_valid_oob_values),
+        reason_counts=dict(sorted(reason_counts.items())),
     )
+
+
+def measure_filter_stage_metrics(
+    bundles: Sequence[DatasetBundle],
+    *,
+    config: GeneratorConfig,
+    collect_accepted_bundles: bool = False,
+) -> FilterStageMeasurement:
+    """Replay deferred filter stage over sampled bundles and return throughput + outcomes."""
+
+    accepted_bundles: list[DatasetBundle] = []
+    measurement = replay_filter_stage_metrics(
+        bundles,
+        config=config,
+        on_accepted_bundle=accepted_bundles.append if collect_accepted_bundles else None,
+    )
+    if collect_accepted_bundles:
+        measurement.accepted_bundles = accepted_bundles
+    return measurement
 
 
 def measure_filter_datasets_per_minute(

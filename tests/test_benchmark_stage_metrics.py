@@ -7,6 +7,7 @@ from dagzoo.bench.stage_metrics import (
     measure_filter_datasets_per_minute,
     measure_filter_stage_metrics,
     measure_write_datasets_per_minute,
+    replay_filter_stage_metrics,
 )
 from dagzoo.config import GeneratorConfig
 from dagzoo.types import DatasetBundle
@@ -202,3 +203,57 @@ def test_filter_stage_metric_falls_back_to_legacy_seed_when_dataset_seed_missing
         config=cfg,
     )
     assert replay_seeds == [41, 42]
+
+
+def test_replay_filter_stage_metrics_streams_and_invokes_accept_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig()
+    cfg.filter.enabled = True
+    accepted_markers: list[int] = []
+
+    def _stub_filter(*_args, **kwargs):
+        accepted = int(kwargs["seed"]) % 2 == 0
+        details = {"reason": "insufficient_oob_predictions"} if not accepted else {}
+        return accepted, details
+
+    monkeypatch.setattr("dagzoo.bench.stage_metrics._apply_extra_trees_filter_numpy", _stub_filter)
+    measurement = replay_filter_stage_metrics(
+        (_bundle(metadata={"dataset_seed": seed}) for seed in (10, 11, 12)),
+        config=cfg,
+        on_accepted_bundle=lambda bundle: accepted_markers.append(
+            int(bundle.metadata["dataset_seed"])
+        ),
+    )
+
+    assert measurement.filter_attempts_total == 3
+    assert measurement.filter_accepted_datasets == 2
+    assert measurement.filter_rejected_datasets == 1
+    assert measurement.reason_counts == {"insufficient_oob_predictions": 1}
+    assert accepted_markers == [10, 12]
+
+
+def test_replay_filter_stage_metrics_excludes_accept_callback_time_from_throughput(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig()
+    cfg.filter.enabled = True
+
+    def _stub_filter(*_args, **_kwargs):
+        return True, {}
+
+    perf_counter_values = iter((0.0, 1.0, 6.0, 8.0))
+
+    monkeypatch.setattr("dagzoo.bench.stage_metrics._apply_extra_trees_filter_numpy", _stub_filter)
+    monkeypatch.setattr(
+        "dagzoo.bench.stage_metrics.time.perf_counter",
+        lambda: next(perf_counter_values),
+    )
+
+    measurement = replay_filter_stage_metrics(
+        [_bundle(metadata={"dataset_seed": 10})],
+        config=cfg,
+        on_accepted_bundle=lambda _bundle: None,
+    )
+
+    assert measurement.datasets_per_minute == pytest.approx(20.0)
