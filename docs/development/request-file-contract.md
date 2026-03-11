@@ -24,6 +24,7 @@ Required fields:
 - `dataset_count`: positive integer
 - `rows`: total-row spec in one of the three public v1 forms only:
   - fixed integer, for example `1024`
+    - quoted numeric strings such as `"1024"` are invalid; fixed rows must be encoded as an integer
   - range string, for example `1024..4096`
   - CSV choice string, for example `1024,2048,4096`
   - YAML list or mapping forms are not part of the request-file contract, even
@@ -165,6 +166,17 @@ dataset_count: 2
 rows:
   mode: fixed
   value: 1024
+profile: default
+output_root: requests/out
+```
+
+Quoted numeric rows instead of a fixed integer:
+
+```yaml
+version: v1
+task: classification
+dataset_count: 2
+rows: "1024"
 profile: default
 output_root: requests/out
 ```

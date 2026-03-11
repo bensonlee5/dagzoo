@@ -280,6 +280,17 @@ def test_request_file_to_dict_omits_unset_seed() -> None:
                 "version": REQUEST_FILE_VERSION_V1,
                 "task": REQUEST_TASK_CLASSIFICATION,
                 "dataset_count": 1,
+                "rows": "1024",
+                "profile": REQUEST_PROFILE_DEFAULT,
+                "output_root": "requests/out",
+            },
+            r"rows must use one of the public request-file encodings",
+        ),
+        (
+            {
+                "version": REQUEST_FILE_VERSION_V1,
+                "task": REQUEST_TASK_CLASSIFICATION,
+                "dataset_count": 1,
                 "rows": "300..600",
                 "profile": REQUEST_PROFILE_DEFAULT,
                 "output_root": "requests/out",

@@ -115,8 +115,16 @@ def _validate_public_request_rows(value: object) -> DatasetRowsSpec:
 
     if isinstance(value, bool):
         raise ValueError(_REQUEST_ROWS_PUBLIC_SHAPE_ERROR)
-    if isinstance(value, int | str):
+    if isinstance(value, int):
         rows = normalize_dataset_rows(value)
+        if rows is None:
+            raise ValueError(_REQUEST_ROWS_PUBLIC_SHAPE_ERROR)
+        return rows
+    if isinstance(value, str):
+        normalized = value.strip()
+        if ".." not in normalized and "," not in normalized:
+            raise ValueError(_REQUEST_ROWS_PUBLIC_SHAPE_ERROR)
+        rows = normalize_dataset_rows(normalized)
         if rows is None:
             raise ValueError(_REQUEST_ROWS_PUBLIC_SHAPE_ERROR)
         return rows
