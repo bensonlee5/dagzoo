@@ -46,9 +46,9 @@ workflows, not the primary interface; prefer `dagzoo generate` and
 - `scripts/bump-version.sh <major|minor|patch> [--dry-run] [--tag]`
   - Bump the semver version in `pyproject.toml`. Use `--tag` to commit and create a git tag.
 - `scripts/cleanup_local_artifacts.py [--group runtime|docs|all] [--apply]`
-  - Dry-run or remove ignored local runtime/docs outputs (`data/`, `benchmarks/results/`, `site/public/`, etc.) without touching tracked files.
+  - Dry-run or remove ignored local runtime/docs outputs (`data/`, `benchmarks/results/`, and the built docs output under `site/`) without touching tracked files.
 - `scripts/docs/sync_hugo_content.py [--check]`
-  - Sync canonical docs from `docs/` into generated Hugo inputs under `site/.generated/` (single-source docs model).
+  - Sync canonical docs from `docs/` into the generated Hugo input area described in `site/README.md` (single-source docs model).
 - `scripts/docs/check_links.py [roots...]`
   - Validate local Markdown/HTML links across source docs and generated site content.
 - `scripts/docs/check_built_output_links.py [output_dir]`
@@ -108,7 +108,7 @@ When diagnostics is enabled for benchmark scripts, coverage artifacts are writte
 
 The diagnostics preset directory is sanitized and hash-suffixed (for example, `cpu_ca49ca4b`) to keep paths unique and filesystem-safe.
 
-Docs workflow note: built Hugo output is `site/public/`. For the full
+Docs workflow note: the built Hugo output lives under `site/`. For the full
 single-source docs/rendered-reference model, see
 `docs/development/design-decisions.md` and `site/README.md`.
 

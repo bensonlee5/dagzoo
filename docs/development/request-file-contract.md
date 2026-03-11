@@ -8,6 +8,11 @@ meant for cross-repo callers such as `tab-foundry`.
 `BL-146` layers a versioned handoff manifest on top of that run layout, and
 `BL-147` documents the end-to-end `dagzoo -> tab-foundry` smoke workflow.
 
+As of `0.9.5`, the one-way request handoff is implemented end to end:
+`dagzoo request` resolves the public request contract into canonical
+`generate -> filter` execution and publishes `handoff_manifest.json` at the
+request `output_root`.
+
 ## v1 goals
 
 - keep the public field set small

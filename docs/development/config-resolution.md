@@ -138,6 +138,7 @@ Each run writes:
 
 Each request run writes:
 
+- `<output_root>/handoff_manifest.json`
 - `<output_root>/generated/effective_config.yaml`
 - `<output_root>/generated/effective_config_trace.yaml`
 
@@ -146,6 +147,10 @@ The same request root also reserves:
 - `<output_root>/generated/` for raw generated shard outputs
 - `<output_root>/filter/` for deferred-filter artifacts
 - `<output_root>/curated/` for accepted-only curated shards
+
+`handoff_manifest.json` is the downstream entrypoint for request-driven corpus
+consumers. It points at the generated/filter/curated directories plus the
+effective-config and filter-summary artifacts for the run.
 
 ### Benchmark
 
