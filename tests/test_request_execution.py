@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 from conftest import load_repo_config, write_yaml
 
 from dagzoo.cli import main
+from dagzoo.cli.request_execution import run_request_execution
 from dagzoo.config import (
     MISSINGNESS_MECHANISM_MCAR,
     REQUEST_FILE_VERSION_V1,
@@ -20,6 +23,7 @@ from dagzoo.config import (
 from dagzoo.config.io import load_packaged_generator_config
 from dagzoo.core.config_resolution import resolve_request_config, serialize_resolution_events
 from dagzoo.core.request_handoff import REQUEST_HANDOFF_SCHEMA_NAME
+from dagzoo.filtering import DeferredFilterRunResult
 from dagzoo.hardware import HardwareInfo
 
 
@@ -320,3 +324,81 @@ def test_request_cli_end_to_end_writes_generated_filter_and_curated_outputs(
     )
     assert handoff["summary"]["accepted_datasets"] == 1
     assert handoff["diversity_artifacts"]["summary_json_path"] is None
+
+
+def test_request_execution_manifest_uses_wall_clock_filter_timing(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_root = tmp_path / "request_run"
+    request_path = write_yaml(
+        tmp_path,
+        "request.yaml",
+        _request_payload(
+            task=REQUEST_TASK_REGRESSION,
+            dataset_count=2,
+            rows=1024,
+            profile=REQUEST_PROFILE_DEFAULT,
+            output_root=str(output_root),
+        ),
+    )
+
+    perf_counter_values = iter((10.0, 16.0, 20.0, 50.0))
+    monkeypatch.setattr(
+        "dagzoo.cli.request_execution.perf_counter", lambda: next(perf_counter_values)
+    )
+
+    def _stub_write_packed_parquet_shards_stream(
+        _stream,
+        *,
+        out_dir: Path,
+        shard_size: int,
+        compression: str,
+    ) -> int:
+        assert shard_size > 0
+        assert compression
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return 2
+
+    def _stub_run_deferred_filter(**kwargs) -> DeferredFilterRunResult:
+        assert kwargs["in_dir"] == output_root / "generated"
+        assert kwargs["out_dir"] == output_root / "filter"
+        assert kwargs["curated_out_dir"] == output_root / "curated"
+        return DeferredFilterRunResult(
+            manifest_path=output_root / "filter" / "filter_manifest.ndjson",
+            summary_path=output_root / "filter" / "filter_summary.json",
+            total_datasets=2,
+            accepted_datasets=1,
+            rejected_datasets=1,
+            elapsed_seconds=0.5,
+            datasets_per_minute=999.0,
+            curated_out_dir=output_root / "curated",
+            curated_accepted_datasets=1,
+        )
+
+    monkeypatch.setattr(
+        "dagzoo.cli.request_execution.write_packed_parquet_shards_stream",
+        _stub_write_packed_parquet_shards_stream,
+    )
+    monkeypatch.setattr(
+        "dagzoo.cli.request_execution.get_cli_public_api",
+        lambda: SimpleNamespace(
+            generate_batch_iter=lambda *_args, **_kwargs: iter(()),
+            run_deferred_filter=_stub_run_deferred_filter,
+        ),
+    )
+
+    _ = run_request_execution(
+        request_path=request_path,
+        device_override="cpu",
+        hardware_policy="none",
+        n_jobs_override=None,
+        print_effective_config_flag=False,
+        print_resolution_trace_flag=False,
+    )
+
+    handoff = json.loads((output_root / "handoff_manifest.json").read_text(encoding="utf-8"))
+    assert handoff["throughput"]["generation_stage"]["elapsed_seconds"] == pytest.approx(6.0)
+    assert handoff["throughput"]["generation_stage"]["datasets_per_minute"] == pytest.approx(20.0)
+    assert handoff["throughput"]["filter_stage"]["elapsed_seconds"] == pytest.approx(30.0)
+    assert handoff["throughput"]["filter_stage"]["datasets_per_minute"] == pytest.approx(4.0)

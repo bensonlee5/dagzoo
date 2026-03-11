@@ -6,9 +6,11 @@ import json
 import math
 from collections.abc import Mapping
 from pathlib import Path
+from time import time_ns
 from typing import Any, cast
 
 from dagzoo.config import RequestFileConfig
+from dagzoo.core.staged_artifacts import cleanup_path, promote_staged_path, staged_output_path
 from dagzoo.math import sanitize_json
 
 REQUEST_HANDOFF_MANIFEST_FILENAME = "handoff_manifest.json"
@@ -96,7 +98,6 @@ def build_request_handoff_manifest(
     filter_accepted_datasets: int,
     filter_rejected_datasets: int,
     filter_elapsed_seconds: float,
-    filter_datasets_per_minute: float,
     requested_device: str,
     resolved_device: str,
     hardware_backend: str,
@@ -149,7 +150,10 @@ def build_request_handoff_manifest(
                 "accepted_datasets": int(filter_accepted_datasets),
                 "rejected_datasets": int(filter_rejected_datasets),
                 "elapsed_seconds": float(filter_elapsed_seconds),
-                "datasets_per_minute": float(filter_datasets_per_minute),
+                "datasets_per_minute": _datasets_per_minute(
+                    datasets=int(filter_total_datasets),
+                    elapsed_seconds=float(filter_elapsed_seconds),
+                ),
             },
         },
         "hardware": {
@@ -323,7 +327,6 @@ def write_request_handoff_manifest(
     filter_accepted_datasets: int,
     filter_rejected_datasets: int,
     filter_elapsed_seconds: float,
-    filter_datasets_per_minute: float,
     requested_device: str,
     resolved_device: str,
     hardware_backend: str,
@@ -358,7 +361,6 @@ def write_request_handoff_manifest(
         filter_accepted_datasets=filter_accepted_datasets,
         filter_rejected_datasets=filter_rejected_datasets,
         filter_elapsed_seconds=filter_elapsed_seconds,
-        filter_datasets_per_minute=filter_datasets_per_minute,
         requested_device=requested_device,
         resolved_device=resolved_device,
         hardware_backend=hardware_backend,
@@ -369,10 +371,19 @@ def write_request_handoff_manifest(
         diversity_summary_md_path=diversity_summary_md_path,
     )
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(
-        json.dumps(sanitize_json(payload), indent=2, sort_keys=True, allow_nan=False) + "\n",
-        encoding="utf-8",
+    staged_manifest_path = staged_output_path(
+        parent_dir=manifest_path.parent,
+        final_name=manifest_path.name,
+        staging_token=str(time_ns()),
     )
+    try:
+        staged_manifest_path.write_text(
+            json.dumps(sanitize_json(payload), indent=2, sort_keys=True, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+        promote_staged_path(staged_path=staged_manifest_path, final_path=manifest_path)
+    finally:
+        cleanup_path(staged_manifest_path)
     return manifest_path
 
 

@@ -10,6 +10,17 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.9.6] - 2026-03-11
+
+### Changed
+
+- `dagzoo request` handoff manifests now report end-to-end wall-clock
+  deferred-filter stage timing for request runs instead of the filter
+  implementation's compute-only timing fields.
+- `dagzoo request` now publishes `handoff_manifest.json` atomically via a
+  staged temp file plus rename, avoiding truncated-manifest races for
+  downstream consumers that watch the request `output_root`.
+
 ## [0.9.5] - 2026-03-11
 
 ### Added

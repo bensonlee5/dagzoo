@@ -13,8 +13,10 @@ from typing import Any
 import numpy as np
 
 from dagzoo.config import FilterConfig
+from dagzoo.core.staged_artifacts import cleanup_path as _cleanup_path
+from dagzoo.core.staged_artifacts import promote_staged_path as _promote_staged_path
+from dagzoo.core.staged_artifacts import staged_output_path as _staged_output_path
 from dagzoo.filtering.deferred_filter_artifacts import (
-    _cleanup_path,
     _close_curated_shard_writer,
     _consume_expected_split,
     _copy_lineage_tree_safe,
@@ -22,8 +24,6 @@ from dagzoo.filtering.deferred_filter_artifacts import (
     _CuratedShardWriter,
     _ensure_curated_output_dir_safe,
     _ensure_split_iter_exhausted,
-    _promote_staged_path,
-    _staged_output_path,
     _write_curated_dataset,
     _write_ndjson_record,
 )

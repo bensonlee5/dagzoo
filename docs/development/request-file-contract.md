@@ -81,6 +81,10 @@ corpus handoff. It is a JSON document with:
 - `hardware`: requested/resolved device context and the applied hardware policy
 - `diversity_artifacts`: nullable paths for request-associated diversity reports
 
+The manifest `throughput` block uses request-run wall-clock stage timing.
+`filter/filter_summary.json` remains the underlying deferred-filter artifact and
+keeps its own timing semantics.
+
 `dagzoo request` does not run `dagzoo diversity-audit` implicitly, so the
 `diversity_artifacts` paths are currently `null` unless a separate workflow
 stores request-associated diversity reports alongside the run.

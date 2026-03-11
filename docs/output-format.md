@@ -113,6 +113,11 @@ Current `diversity_artifacts` keys:
 - `summary_json_path`
 - `summary_md_path`
 
+`throughput.generation_stage` and `throughput.filter_stage` report request-run
+wall-clock stage timing from the `dagzoo request` workflow. `filter_summary.json`
+remains the underlying deferred-filter artifact and retains its own timing
+semantics.
+
 `dagzoo request` does not run a diversity audit automatically, so the
 `diversity_artifacts` values are currently `null` unless a separate workflow
 persists request-associated diversity outputs alongside the run.

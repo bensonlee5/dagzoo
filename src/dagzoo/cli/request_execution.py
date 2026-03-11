@@ -183,12 +183,14 @@ def run_request_execution(
         compression=config.output.compression,
     )
     generation_elapsed_seconds = perf_counter() - generation_started_at
+    filter_started_at = perf_counter()
     filter_result = cli_api.run_deferred_filter(
         in_dir=generated_dir,
         out_dir=filter_dir,
         curated_out_dir=curated_dir,
         n_jobs_override=n_jobs_override,
     )
+    filter_elapsed_seconds = perf_counter() - filter_started_at
     handoff_manifest_path = write_request_handoff_manifest(
         request_path=request_path,
         request=request_file,
@@ -205,8 +207,7 @@ def run_request_execution(
         filter_total_datasets=int(filter_result.total_datasets),
         filter_accepted_datasets=int(filter_result.accepted_datasets),
         filter_rejected_datasets=int(filter_result.rejected_datasets),
-        filter_elapsed_seconds=float(filter_result.elapsed_seconds),
-        filter_datasets_per_minute=float(filter_result.datasets_per_minute),
+        filter_elapsed_seconds=float(filter_elapsed_seconds),
         requested_device=str(resolved.requested_device),
         resolved_device=str(resolved_device),
         hardware_backend=str(resolved.hardware.backend),
