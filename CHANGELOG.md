@@ -10,6 +10,14 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.9.1] - 2026-03-10
+
+### Added
+
+- Added `dagzoo filter-calibration` as a threshold-sweep workflow for one
+  filter-enabled config, with consolidated `summary.json` / `summary.md`
+  artifacts that rank accepted-corpus throughput against diversity shift.
+
 ## [0.9.0] - 2026-03-10
 
 ### Removed

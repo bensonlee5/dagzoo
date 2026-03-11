@@ -41,7 +41,9 @@ from dagzoo.diagnostics import (
     write_coverage_summary_markdown,
 )
 from dagzoo.diagnostics.effective_diversity import (
+    run_filter_calibration,
     run_effective_diversity_audit,
+    write_filter_calibration_artifacts,
     write_effective_diversity_artifacts,
 )
 from dagzoo.hardware import detect_hardware
@@ -191,6 +193,28 @@ def _parse_missing_mnar_logit_scale_arg(raw: str) -> float:
         hi_inclusive=False,
         expectation="a finite value > 0",
     )
+
+
+def _parse_thresholds_csv_arg(raw: str) -> list[float]:
+    """argparse type: parse threshold sweep CSV values in [0, 1.5]."""
+
+    parts = [part.strip() for part in str(raw).split(",")]
+    if not parts or any(part == "" for part in parts):
+        raise argparse.ArgumentTypeError(
+            "Invalid --thresholds value. Expected a CSV list of finite values in [0, 1.5]."
+        )
+    return [
+        _parse_bounded_float(
+            part,
+            flag="--thresholds",
+            lo=0.0,
+            hi=1.5,
+            lo_inclusive=True,
+            hi_inclusive=True,
+            expectation="a finite value in [0, 1.5]",
+        )
+        for part in parts
+    ]
 
 
 def _parse_missing_mechanism_arg(raw: str) -> str:
@@ -492,6 +516,64 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         choices=DEVICE_CHOICES,
         help="Optional device override for scale-phase generation.",
+    )
+
+    c = sub.add_parser(
+        "filter-calibration",
+        help="Sweep filter thresholds and compare accepted-corpus throughput vs diversity shift.",
+    )
+    c.add_argument("--config", required=True, help="Filter-enabled generator config YAML path.")
+    c.add_argument(
+        "--thresholds",
+        type=_parse_thresholds_csv_arg,
+        default=None,
+        help="Optional CSV override for requested threshold sweep values.",
+    )
+    c.add_argument(
+        "--warn-threshold-pct",
+        type=float,
+        default=2.5,
+        help="Warn threshold for composite diversity shift vs baseline.",
+    )
+    c.add_argument(
+        "--fail-threshold-pct",
+        type=float,
+        default=5.0,
+        help="Fail threshold for composite diversity shift vs baseline.",
+    )
+    c.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        help="Return non-zero exit code if the best accepted-throughput threshold fails guardrails.",
+    )
+    c.add_argument(
+        "--suite",
+        choices=["smoke", "standard"],
+        default="smoke",
+        help="Probe size to use for the baseline threshold and each threshold candidate.",
+    )
+    c.add_argument(
+        "--num-datasets",
+        type=_positive_int,
+        default=None,
+        help="Optional override for per-threshold dataset count.",
+    )
+    c.add_argument(
+        "--warmup",
+        type=_non_negative_int,
+        default=None,
+        help="Optional override for per-threshold warmup count.",
+    )
+    c.add_argument(
+        "--out-dir",
+        default=str(Path("effective_config_artifacts") / "filter_calibration"),
+        help="Output directory for filter calibration artifacts.",
+    )
+    c.add_argument(
+        "--device",
+        default=None,
+        choices=DEVICE_CHOICES,
+        help="Optional device override for calibration runs.",
     )
 
     h = sub.add_parser("hardware", help="Inspect detected hardware and tier mapping.")
@@ -1059,6 +1141,62 @@ def _run_diversity_audit(args: argparse.Namespace) -> int:
     return 1 if hard_fail else 0
 
 
+def _run_filter_calibration(args: argparse.Namespace) -> int:
+    """Execute the ``filter-calibration`` command."""
+
+    config = _load_config_or_usage_error(str(args.config))
+    if args.device is not None:
+        config.runtime.device = str(args.device)
+    if not bool(config.filter.enabled):
+        _raise_usage_error(
+            "filter-calibration requires filter.enabled: true in the resolved config."
+        )
+
+    report = run_filter_calibration(
+        config=config,
+        config_path=str(args.config),
+        thresholds=args.thresholds,
+        suite=str(args.suite),
+        num_datasets=args.num_datasets,
+        warmup=args.warmup,
+        device=args.device,
+        warn_threshold_pct=float(args.warn_threshold_pct),
+        fail_threshold_pct=float(args.fail_threshold_pct),
+    )
+
+    out_dir = Path(args.out_dir)
+    artifact_paths = write_filter_calibration_artifacts(report, out_dir=out_dir)
+    for key in sorted(artifact_paths):
+        print(f"Wrote filter calibration artifact [{key}]: {artifact_paths[key]}")
+
+    summary = report.get("summary")
+    overall_status = "insufficient_metrics"
+    best_overall_status = "insufficient_metrics"
+    best_overall_threshold = "-"
+    best_passing_threshold = "-"
+    num_candidates = 0
+    if isinstance(summary, dict):
+        overall_status = str(summary.get("overall_status", overall_status))
+        best_overall_status = str(summary.get("best_overall_diversity_status", best_overall_status))
+        best_overall_raw = summary.get("best_overall_threshold_requested")
+        if isinstance(best_overall_raw, (int, float)) and not isinstance(best_overall_raw, bool):
+            best_overall_threshold = f"{float(best_overall_raw):.2f}"
+        best_passing_raw = summary.get("best_passing_threshold_requested")
+        if isinstance(best_passing_raw, (int, float)) and not isinstance(best_passing_raw, bool):
+            best_passing_threshold = f"{float(best_passing_raw):.2f}"
+        num_candidates = int(summary.get("num_candidates", 0))
+        print(
+            "Filter calibration status="
+            f"{overall_status} best_overall={best_overall_threshold} "
+            f"best_passing={best_passing_threshold} candidates={num_candidates}"
+        )
+
+    hard_fail = bool(
+        args.fail_on_regression and best_overall_status in {"fail", "insufficient_metrics"}
+    )
+    return 1 if hard_fail else 0
+
+
 def _run_hardware(args: argparse.Namespace) -> int:
     """Execute the ``hardware`` command."""
 
@@ -1083,6 +1221,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_benchmark(args)
     if args.command == "diversity-audit":
         return _run_diversity_audit(args)
+    if args.command == "filter-calibration":
+        return _run_filter_calibration(args)
     if args.command == "hardware":
         return _run_hardware(args)
     parser.error(f"Unknown command: {args.command}")

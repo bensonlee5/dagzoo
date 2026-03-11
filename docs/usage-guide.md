@@ -207,6 +207,11 @@ When you need to compare accepted-corpus diversity between configs, use
 `--variant-config` values. The audit writes `summary.json` and `summary.md`
 with per-variant diversity status and throughput deltas.
 
+When you need to tune one filter-enabled config, use
+`dagzoo filter-calibration --config configs/preset_filter_benchmark_smoke.yaml`.
+That workflow writes `summary.json` and `summary.md` with per-threshold
+accepted-throughput and diversity-shift comparisons.
+
 ______________________________________________________________________
 
 ## Related documents

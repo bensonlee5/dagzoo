@@ -62,6 +62,7 @@ def run_effective_diversity_audit(
     baseline_config_path: str,
     variant_configs: list[GeneratorConfig],
     variant_config_paths: list[str],
+    variant_labels: list[str] | None = None,
     suite: str,
     num_datasets: int | None,
     warmup: int | None,
@@ -73,6 +74,8 @@ def run_effective_diversity_audit(
 
     if len(variant_configs) != len(variant_config_paths):
         raise ValueError("variant_configs and variant_config_paths must have matching lengths.")
+    if variant_labels is not None and len(variant_labels) != len(variant_configs):
+        raise ValueError("variant_labels and variant_configs must have matching lengths.")
 
     probe_num_datasets, probe_warmup_datasets = resolve_corpus_probe_counts(
         baseline_config,
@@ -94,7 +97,9 @@ def run_effective_diversity_audit(
     variants: list[dict[str, Any]] = []
     comparisons: list[dict[str, Any]] = []
     for label, config_path, variant_config in zip(
-        _build_variant_labels(variant_config_paths),
+        variant_labels
+        if variant_labels is not None
+        else _build_variant_labels(variant_config_paths),
         variant_config_paths,
         variant_configs,
         strict=True,

@@ -213,6 +213,39 @@ def test_diversity_audit_cli_rejects_removed_parallel_generation_runtime_keys(tm
     assert int(exc.value.code) == 2
 
 
+def test_filter_calibration_cli_rejects_filter_disabled_config(tmp_path) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.filter.enabled = False
+    config_path = tmp_path / "filter_disabled.yaml"
+    config_path.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "filter-calibration",
+                "--config",
+                str(config_path),
+            ]
+        )
+
+    assert int(exc.value.code) == 2
+
+
+def test_filter_calibration_cli_rejects_invalid_threshold_csv() -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "filter-calibration",
+                "--config",
+                "configs/preset_filter_benchmark_smoke.yaml",
+                "--thresholds",
+                "0.8,2.0",
+            ]
+        )
+
+    assert int(exc.value.code) == 2
+
+
 def test_filter_cli_rejects_invalid_n_jobs() -> None:
     with pytest.raises(SystemExit) as exc:
         main(

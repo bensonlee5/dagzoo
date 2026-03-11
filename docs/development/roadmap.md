@@ -119,6 +119,7 @@ walkthroughs, see `docs/how-it-works.md`.
 - `dagzoo filter --in <shard_dir> --out <filter_dir> [--curated-out <accepted_shards_dir>] [--n-jobs ...]`
 - `dagzoo benchmark --suite standard --preset all --baseline ... --fail-on-regression`
 - `dagzoo diversity-audit --baseline-config ... --variant-config ... --suite ... --fail-on-regression`
+- `dagzoo filter-calibration --config ... [--thresholds ...] --suite ... --fail-on-regression`
 
 #### Output Contract
 
