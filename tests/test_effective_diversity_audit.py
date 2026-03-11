@@ -84,6 +84,17 @@ def test_compare_coverage_summaries_classifies_shift_severity() -> None:
     assert shifted["diversity_metric_shift_pct"]
 
 
+def test_compare_coverage_summaries_rejects_swapped_thresholds() -> None:
+    baseline = _coverage_summary(mean=1.0, p25=0.8, p50=1.0, p75=1.2)
+    with pytest.raises(ValueError, match="warn_threshold_pct must be <= fail_threshold_pct"):
+        compare_coverage_summaries(
+            baseline_summary=baseline,
+            variant_summary=baseline,
+            warn_threshold_pct=10.0,
+            fail_threshold_pct=5.0,
+        )
+
+
 def test_run_effective_diversity_audit_aggregates_variant_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -259,6 +270,143 @@ def test_run_effective_diversity_audit_uses_shared_probe_counts_from_baseline_de
     assert observed_counts == [(25, 5), (25, 5)]
     assert report["summary"]["probe_num_datasets"] == 25
     assert report["summary"]["probe_warmup_datasets"] == 5
+
+
+def test_run_effective_diversity_audit_uses_shared_probe_seed_from_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline_config = GeneratorConfig.from_yaml("configs/default.yaml")
+    baseline_config.seed = 123
+    variant_config = GeneratorConfig.from_yaml("configs/preset_shift_benchmark_smoke.yaml")
+    variant_config.seed = 987
+    observed_probe_seeds: list[int] = []
+
+    def _stub_run_corpus_probe(*_args, **kwargs):
+        observed_probe_seeds.append(int(kwargs["probe_seed"]))
+        return _probe_result(
+            label=str(kwargs["label"]),
+            config_path=str(kwargs["config_path"]),
+            coverage_summary=_coverage_summary(mean=1.0, p25=0.8, p50=1.0, p75=1.2),
+        )
+
+    monkeypatch.setattr(
+        "dagzoo.diagnostics.effective_diversity.runner.run_corpus_probe",
+        _stub_run_corpus_probe,
+    )
+    _ = run_effective_diversity_audit(
+        baseline_config=baseline_config,
+        baseline_config_path="configs/default.yaml",
+        variant_configs=[variant_config],
+        variant_config_paths=["configs/preset_shift_benchmark_smoke.yaml"],
+        suite="smoke",
+        num_datasets=None,
+        warmup=None,
+        device="cpu",
+        warn_threshold_pct=2.5,
+        fail_threshold_pct=5.0,
+    )
+
+    assert observed_probe_seeds == [123, 123]
+
+
+def test_run_effective_diversity_audit_uses_shared_probe_coverage_config_from_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline_config = GeneratorConfig.from_yaml("configs/default.yaml")
+    baseline_config.diagnostics.histogram_bins = 7
+    baseline_config.diagnostics.quantiles = [0.1, 0.9]
+    baseline_config.diagnostics.max_values_per_metric = 3
+    variant_config = GeneratorConfig.from_yaml("configs/preset_shift_benchmark_smoke.yaml")
+    variant_config.diagnostics.histogram_bins = 99
+    variant_config.diagnostics.quantiles = [0.2, 0.8]
+    variant_config.diagnostics.max_values_per_metric = 50
+    observed_coverage_configs: list[tuple[int, tuple[float, ...], int | None]] = []
+
+    def _stub_run_corpus_probe(*_args, **kwargs):
+        coverage_config = kwargs["coverage_config"]
+        observed_coverage_configs.append(
+            (
+                int(coverage_config.histogram_bins),
+                tuple(float(value) for value in coverage_config.quantiles),
+                coverage_config.max_values_per_metric,
+            )
+        )
+        return _probe_result(
+            label=str(kwargs["label"]),
+            config_path=str(kwargs["config_path"]),
+            coverage_summary=_coverage_summary(mean=1.0, p25=0.8, p50=1.0, p75=1.2),
+        )
+
+    monkeypatch.setattr(
+        "dagzoo.diagnostics.effective_diversity.runner.run_corpus_probe",
+        _stub_run_corpus_probe,
+    )
+    _ = run_effective_diversity_audit(
+        baseline_config=baseline_config,
+        baseline_config_path="configs/default.yaml",
+        variant_configs=[variant_config],
+        variant_config_paths=["configs/preset_shift_benchmark_smoke.yaml"],
+        suite="smoke",
+        num_datasets=None,
+        warmup=None,
+        device="cpu",
+        warn_threshold_pct=2.5,
+        fail_threshold_pct=5.0,
+    )
+
+    assert observed_coverage_configs == [
+        (7, (0.1, 0.25, 0.5, 0.75, 0.9), 3),
+        (7, (0.1, 0.25, 0.5, 0.75, 0.9), 3),
+    ]
+
+
+def test_run_effective_diversity_audit_ignores_diagnostics_only_drift_in_comparisons(
+    tmp_path,
+) -> None:
+    baseline = GeneratorConfig.from_yaml("configs/default.yaml")
+    baseline.runtime.device = "cpu"
+    baseline.filter.enabled = False
+    baseline.dataset.n_train = 24
+    baseline.dataset.n_test = 12
+    baseline.dataset.n_features_min = 8
+    baseline.dataset.n_features_max = 8
+    baseline.graph.n_nodes_min = 4
+    baseline.graph.n_nodes_max = 5
+    baseline.diagnostics.max_values_per_metric = 1
+    baseline.diagnostics.histogram_bins = 5
+    baseline.diagnostics.quantiles = [0.1, 0.9]
+
+    variant = copy.deepcopy(baseline)
+    variant.diagnostics.max_values_per_metric = 50_000
+    variant.diagnostics.histogram_bins = 19
+    variant.diagnostics.quantiles = [0.2, 0.8]
+
+    baseline_path = tmp_path / "baseline.yaml"
+    variant_path = tmp_path / "variant.yaml"
+    baseline_path.write_text(yaml.safe_dump(baseline.to_dict()), encoding="utf-8")
+    variant_path.write_text(yaml.safe_dump(variant.to_dict()), encoding="utf-8")
+
+    report = run_effective_diversity_audit(
+        baseline_config=baseline,
+        baseline_config_path=str(baseline_path),
+        variant_configs=[variant],
+        variant_config_paths=[str(variant_path)],
+        suite="smoke",
+        num_datasets=4,
+        warmup=0,
+        device="cpu",
+        warn_threshold_pct=0.001,
+        fail_threshold_pct=0.01,
+    )
+
+    assert report["comparisons"][0]["diversity_status"] == "pass"
+    assert report["comparisons"][0]["diversity_composite_shift_pct"] == pytest.approx(0.0)
+    assert report["baseline"]["coverage_summary"]["max_values_per_metric"] == 1
+    assert report["variants"][0]["coverage_summary"]["max_values_per_metric"] == 1
+    assert report["baseline"]["coverage_summary"]["histogram_bins"] == 5
+    assert report["variants"][0]["coverage_summary"]["histogram_bins"] == 5
+    assert report["baseline"]["coverage_summary"]["quantiles"] == [0.1, 0.25, 0.5, 0.75, 0.9]
+    assert report["variants"][0]["coverage_summary"]["quantiles"] == [0.1, 0.25, 0.5, 0.75, 0.9]
 
 
 def test_run_effective_diversity_audit_marks_insufficient_metrics_as_incomplete(

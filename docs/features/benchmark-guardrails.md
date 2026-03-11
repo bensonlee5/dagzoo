@@ -137,6 +137,35 @@ baseline files.
 
 ______________________________________________________________________
 
+## Filter calibration workflow
+
+Use `filter-calibration` when you want to sweep filter thresholds on one
+filter-enabled config and rank accepted-corpus throughput against diversity
+shift:
+
+```bash
+dagzoo filter-calibration \
+  --config configs/preset_filter_benchmark_smoke.yaml \
+  --suite smoke \
+  --device cpu \
+  --out-dir benchmarks/results/filter_calibration_smoke
+```
+
+Inspect these `summary.json` fields first:
+
+- `summary.best_overall_threshold_requested`
+- `summary.best_passing_threshold_requested`
+- `summary.best_overall_diversity_status`
+- `candidates[*].filter_accepted_datasets_per_minute`
+- `candidates[*].filter_acceptance_rate_dataset_level`
+- `candidates[*].diversity_status`
+- `candidates[*].diversity_composite_shift_pct`
+
+Like the rewritten diversity audit, filter calibration persists only
+`summary.json` and `summary.md`.
+
+______________________________________________________________________
+
 ## Regression gating
 
 For CI-like checks:

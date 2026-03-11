@@ -4,6 +4,7 @@ import pytest
 from dagzoo.bench.corpus_probe import resolve_corpus_probe_counts, run_corpus_probe
 from dagzoo.bench.stage_metrics import FilterStageMeasurement
 from dagzoo.config import GeneratorConfig
+from dagzoo.diagnostics.coverage import CoverageAggregationConfig
 from dagzoo.types import DatasetBundle
 
 
@@ -141,3 +142,84 @@ def test_run_corpus_probe_streams_filter_enabled_analysis(
     assert result.filter_accepted_datasets_per_minute == pytest.approx(20.0)
     assert result.coverage_summary["num_datasets"] == 2
     assert result.filter_summary["reason_counts"] == {"insufficient_oob_predictions": 1}
+
+
+def test_run_corpus_probe_uses_shared_probe_seed_for_generation_and_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.filter.enabled = False
+    cfg.runtime.device = "cpu"
+    cfg.seed = 11
+    captured: dict[str, int] = {}
+
+    def _stub_run_throughput_benchmark(config, **_kwargs):
+        captured["throughput_seed"] = int(config.seed)
+        return {"datasets_per_minute": 123.0}
+
+    def _stub_iter_throughput_measure_bundles(config, **_kwargs):
+        captured["analysis_seed"] = int(config.seed)
+        return (_bundle(seed=idx + 1) for idx in range(2))
+
+    monkeypatch.setattr(
+        "dagzoo.bench.corpus_probe.run_throughput_benchmark",
+        _stub_run_throughput_benchmark,
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.corpus_probe.iter_throughput_measure_bundles",
+        _stub_iter_throughput_measure_bundles,
+    )
+
+    result = run_corpus_probe(
+        cfg,
+        label="baseline",
+        config_path="configs/default.yaml",
+        suite="smoke",
+        num_datasets=2,
+        warmup=0,
+        device="cpu",
+        probe_seed=777,
+    )
+
+    assert captured["throughput_seed"] == 777
+    assert captured["analysis_seed"] == 777
+    assert result.resolved_config["seed"] == 777
+
+
+def test_run_corpus_probe_uses_injected_coverage_config_over_local_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.filter.enabled = False
+    cfg.runtime.device = "cpu"
+    cfg.diagnostics.histogram_bins = 99
+    cfg.diagnostics.quantiles = [0.1, 0.9]
+    cfg.diagnostics.max_values_per_metric = 1
+
+    monkeypatch.setattr(
+        "dagzoo.bench.corpus_probe.run_throughput_benchmark",
+        lambda *_args, **_kwargs: {"datasets_per_minute": 123.0},
+    )
+    monkeypatch.setattr(
+        "dagzoo.bench.corpus_probe.iter_throughput_measure_bundles",
+        lambda *_args, **_kwargs: (_bundle(seed=idx + 1) for idx in range(3)),
+    )
+
+    result = run_corpus_probe(
+        cfg,
+        label="baseline",
+        config_path="configs/default.yaml",
+        suite="smoke",
+        num_datasets=3,
+        warmup=0,
+        device="cpu",
+        coverage_config=CoverageAggregationConfig(
+            histogram_bins=7,
+            quantiles=(0.25, 0.5, 0.75),
+            max_values_per_metric=2,
+        ),
+    )
+
+    assert result.coverage_summary["histogram_bins"] == 7
+    assert result.coverage_summary["quantiles"] == [0.25, 0.5, 0.75]
+    assert result.coverage_summary["max_values_per_metric"] == 2

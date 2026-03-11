@@ -198,6 +198,78 @@ def test_diversity_audit_cli_fail_on_regression_treats_insufficient_metrics_as_e
     assert code == 1
 
 
+def test_filter_calibration_cli_writes_summary_and_status(
+    tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "dagzoo.cli.run_filter_calibration",
+        lambda **_kwargs: {
+            "summary": {
+                "overall_status": "warn",
+                "best_overall_threshold_requested": 0.804,
+                "best_overall_diversity_status": "warn",
+                "best_passing_threshold_requested": 0.801,
+                "num_candidates": 5,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "dagzoo.cli.write_filter_calibration_artifacts",
+        lambda _report, out_dir: {"summary_json": Path(out_dir) / "summary.json"},
+    )
+
+    code = main(
+        [
+            "filter-calibration",
+            "--config",
+            "configs/preset_filter_benchmark_smoke.yaml",
+            "--out-dir",
+            str(tmp_path / "filter_calibration"),
+        ]
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "Wrote filter calibration artifact [summary_json]:" in captured.out
+    assert "Filter calibration status=warn best_overall=0.804 best_passing=0.801 candidates=5" in (
+        captured.out
+    )
+
+
+def test_filter_calibration_cli_fail_on_regression_uses_best_overall_status(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "dagzoo.cli.run_filter_calibration",
+        lambda **_kwargs: {
+            "summary": {
+                "overall_status": "warn",
+                "best_overall_threshold_requested": 0.8,
+                "best_overall_diversity_status": "fail",
+                "best_passing_threshold_requested": None,
+                "num_candidates": 5,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "dagzoo.cli.write_filter_calibration_artifacts",
+        lambda _report, out_dir: {"summary_json": Path(out_dir) / "summary.json"},
+    )
+
+    code = main(
+        [
+            "filter-calibration",
+            "--config",
+            "configs/preset_filter_benchmark_smoke.yaml",
+            "--fail-on-regression",
+            "--out-dir",
+            str(tmp_path / "filter_calibration"),
+        ]
+    )
+
+    assert code == 1
+
+
 def test_hardware_cli_prints_detected_hardware(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

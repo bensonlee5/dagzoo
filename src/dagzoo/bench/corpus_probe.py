@@ -63,7 +63,7 @@ def resolve_corpus_probe_counts(
     return max(1, num_datasets), max(0, warmup)
 
 
-def _build_probe_coverage_config(config: GeneratorConfig) -> CoverageAggregationConfig:
+def build_corpus_probe_coverage_config(config: GeneratorConfig) -> CoverageAggregationConfig:
     """Build coverage aggregation config with quantiles needed for delta scoring."""
 
     base = build_diagnostics_aggregation_config(config.diagnostics)
@@ -102,17 +102,21 @@ def run_corpus_probe(
     num_datasets: int,
     warmup: int,
     device: str | None,
+    probe_seed: int | None = None,
+    coverage_config: CoverageAggregationConfig | None = None,
 ) -> CorpusProbeResult:
     """Run one benchmark-style corpus probe for diversity/comparison workflows."""
 
-    realized_config, _run_seed, requested_device, resolved_device = (
+    realized_config, run_seed, requested_device, resolved_device = (
         realize_generation_config_for_run(
             config,
-            seed=config.seed,
+            seed=int(config.seed if probe_seed is None else probe_seed),
             device=device,
         )
     )
+    realized_config.seed = int(run_seed)
     generation_config = clone_generator_config(realized_config, revalidate=False)
+    generation_config.seed = int(run_seed)
     generation_config.filter.enabled = False
 
     throughput = run_throughput_benchmark(
@@ -122,7 +126,11 @@ def run_corpus_probe(
         device=requested_device,
     )
 
-    coverage_aggregator = CoverageAggregator(_build_probe_coverage_config(realized_config))
+    coverage_aggregator = CoverageAggregator(
+        coverage_config
+        if coverage_config is not None
+        else build_corpus_probe_coverage_config(realized_config)
+    )
     filter_datasets_per_minute: float | None = None
     filter_accepted_datasets_per_minute: float | None = None
     filter_accepted_datasets_measured = 0

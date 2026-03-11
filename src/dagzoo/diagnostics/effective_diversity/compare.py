@@ -22,6 +22,24 @@ CORE_DIVERSITY_METRICS: tuple[str, ...] = (
 )
 
 
+def validate_diversity_thresholds(
+    *,
+    warn_threshold_pct: float,
+    fail_threshold_pct: float,
+) -> tuple[float, float]:
+    """Validate diversity threshold values and ordering."""
+
+    warn_value = _coerce_optional_finite_float(warn_threshold_pct)
+    fail_value = _coerce_optional_finite_float(fail_threshold_pct)
+    if warn_value is None or fail_value is None:
+        raise ValueError("warn_threshold_pct and fail_threshold_pct must be finite values.")
+    if warn_value < 0.0 or fail_value < 0.0:
+        raise ValueError("warn_threshold_pct and fail_threshold_pct must be >= 0.")
+    if warn_value > fail_value:
+        raise ValueError("warn_threshold_pct must be <= fail_threshold_pct.")
+    return float(warn_value), float(fail_value)
+
+
 def _metric_payload(summary: dict[str, Any], metric: str) -> dict[str, Any] | None:
     metrics = summary.get("metrics")
     if not isinstance(metrics, dict):
@@ -98,6 +116,10 @@ def classify_diversity_status(
 ) -> str:
     """Classify one comparison severity from the composite shift."""
 
+    warn_threshold_pct, fail_threshold_pct = validate_diversity_thresholds(
+        warn_threshold_pct=warn_threshold_pct,
+        fail_threshold_pct=fail_threshold_pct,
+    )
     if composite_shift_pct is None:
         return "insufficient_metrics"
     if float(composite_shift_pct) >= float(fail_threshold_pct):
