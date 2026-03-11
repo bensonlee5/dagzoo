@@ -108,6 +108,35 @@ The CLI preset line prints the same headline values as `filter/min`,
 
 ______________________________________________________________________
 
+## Diversity audit workflow
+
+Use `diversity-audit` when you need a baseline-vs-variant comparison of the
+accepted corpus, not just benchmark throughput:
+
+```bash
+dagzoo diversity-audit \
+  --baseline-config configs/default.yaml \
+  --variant-config configs/preset_shift_benchmark_smoke.yaml \
+  --suite smoke \
+  --num-datasets 10 \
+  --warmup 0 \
+  --device cpu \
+  --out-dir benchmarks/results/diversity_audit_shift
+```
+
+Inspect these `summary.json` fields first:
+
+- `comparisons[*].diversity_status`
+- `comparisons[*].diversity_composite_shift_pct`
+- `comparisons[*].datasets_per_minute_delta_pct`
+- `comparisons[*].filter_accepted_datasets_per_minute_delta_pct`
+
+The rewritten audit now persists only `summary.json` and `summary.md`. It no
+longer writes legacy equivalence/local-overlap artifacts or cross-run diversity
+baseline files.
+
+______________________________________________________________________
+
 ## Regression gating
 
 For CI-like checks:

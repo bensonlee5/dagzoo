@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from dagzoo.bench.constants import (
@@ -28,6 +28,12 @@ _CPU_FIXED_LAYOUT_TARGET_CELLS_SWEEP: tuple[int, ...] = (
     16_000_000,
 )
 _CUDA_FIXED_LAYOUT_TARGET_CELLS_SWEEP_MULTIPLIERS: tuple[float, ...] = (1.0, 1.5, 2.0, 3.0)
+
+
+def _throughput_root(config: GeneratorConfig) -> KeyedRng:
+    """Return the shared keyed RNG root for throughput benchmark runs."""
+
+    return KeyedRng(int(config.seed)).keyed("bench", "throughput")
 
 
 def _default_fixed_layout_target_cells_sweep_values(
@@ -143,6 +149,23 @@ def _consume_generation(
             on_bundle(bundle)
 
 
+def iter_throughput_measure_bundles(
+    config: GeneratorConfig,
+    *,
+    num_datasets: int,
+    device: str | None = None,
+) -> Iterator[DatasetBundle]:
+    """Yield the deterministic measured corpus used by throughput benchmarks."""
+
+    throughput_root = _throughput_root(config)
+    yield from generate_batch_iter(
+        config,
+        num_datasets=num_datasets,
+        seed=throughput_root.child_seed("measure"),
+        device=device,
+    )
+
+
 def run_throughput_benchmark(
     config: GeneratorConfig,
     *,
@@ -153,7 +176,7 @@ def run_throughput_benchmark(
 ) -> dict[str, Any]:
     """Measure end-to-end generation throughput for a benchmark preset."""
 
-    throughput_root = KeyedRng(int(config.seed)).keyed("bench", "throughput")
+    throughput_root = _throughput_root(config)
     if warmup_datasets > 0:
         _consume_generation(
             config,
@@ -163,13 +186,13 @@ def run_throughput_benchmark(
         )
 
     start = time.perf_counter()
-    _consume_generation(
+    for bundle in iter_throughput_measure_bundles(
         config,
         num_datasets=num_datasets,
-        seed=throughput_root.child_seed("measure"),
         device=device,
-        on_bundle=on_bundle,
-    )
+    ):
+        if on_bundle is not None:
+            on_bundle(bundle)
     elapsed = time.perf_counter() - start
     dps = num_datasets / elapsed if elapsed > 0 else 0.0
     dpm = dps * SECONDS_PER_MINUTE

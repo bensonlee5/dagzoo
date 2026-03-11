@@ -204,8 +204,10 @@ def test_diversity_audit_cli_rejects_removed_parallel_generation_runtime_keys(tm
         main(
             [
                 "diversity-audit",
-                "--config",
+                "--baseline-config",
                 str(config_path),
+                "--variant-config",
+                "configs/default.yaml",
             ]
         )
     assert int(exc.value.code) == 2

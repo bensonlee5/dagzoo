@@ -137,44 +137,65 @@ def test_benchmark_cli_prints_configs_and_writes_baseline(
     assert "Wrote benchmark baseline:" in captured.out
 
 
-def test_diversity_audit_cli_writes_baseline_and_regression_summary(
+def test_diversity_audit_cli_writes_summary_and_status(
     tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     report = {
-        "scale_report": {"schema_version": 1},
-        "regression": {"status": "warn", "issues": ["delta"]},
+        "summary": {"overall_status": "warn", "num_variants": 1},
     }
 
     monkeypatch.setattr("dagzoo.cli.run_effective_diversity_audit", lambda **kwargs: report)
     monkeypatch.setattr(
-        "dagzoo.cli.write_effective_diversity_run_artifacts",
-        lambda _report, out_dir: {"summary": Path(out_dir) / "summary.json"},
-    )
-    monkeypatch.setattr(
-        "dagzoo.cli.build_effective_diversity_baseline_payload",
-        lambda _scale_report: {"schema_version": 1},
-    )
-    monkeypatch.setattr(
-        "dagzoo.cli.write_effective_diversity_baseline_payload",
-        lambda _payload, path: Path(path),
+        "dagzoo.cli.write_effective_diversity_artifacts",
+        lambda _report, out_dir: {"summary_json": Path(out_dir) / "summary.json"},
     )
 
     code = main(
         [
             "diversity-audit",
-            "--config",
+            "--baseline-config",
             "configs/default.yaml",
+            "--variant-config",
+            "configs/preset_shift_benchmark_smoke.yaml",
             "--out-dir",
             str(tmp_path / "diversity"),
-            "--save-baseline",
-            str(tmp_path / "diversity_baseline.json"),
         ]
     )
 
     assert code == 0
     captured = capsys.readouterr()
-    assert "Wrote diversity baseline:" in captured.out
-    assert "Diversity regression status=warn issues=1" in captured.out
+    assert "Wrote diversity artifact [summary_json]:" in captured.out
+    assert "Diversity audit status=warn variants=1" in captured.out
+
+
+def test_diversity_audit_cli_fail_on_regression_treats_insufficient_metrics_as_error(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "dagzoo.cli.run_effective_diversity_audit",
+        lambda **_kwargs: {
+            "summary": {"overall_status": "insufficient_metrics", "num_variants": 1}
+        },
+    )
+    monkeypatch.setattr(
+        "dagzoo.cli.write_effective_diversity_artifacts",
+        lambda _report, out_dir: {"summary_json": Path(out_dir) / "summary.json"},
+    )
+
+    code = main(
+        [
+            "diversity-audit",
+            "--baseline-config",
+            "configs/default.yaml",
+            "--variant-config",
+            "configs/preset_shift_benchmark_smoke.yaml",
+            "--fail-on-regression",
+            "--out-dir",
+            str(tmp_path / "diversity"),
+        ]
+    )
+
+    assert code == 1
 
 
 def test_hardware_cli_prints_detected_hardware(

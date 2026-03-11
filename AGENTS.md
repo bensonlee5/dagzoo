@@ -8,5 +8,5 @@
 - On every version bump, update `CHANGELOG.md` in the same PR.
 - We prefer shared utility packages over hand-rolled helpers to keep invariants centralized
 - We don’t probe data “YOLO-style”—we validate boundaries or rely on typed SDKs
-- Prior to declaring a branch ready for review, run /review and resolve all issues found
+- Prior to declaring a branch ready for review, compare branch to main and verify that all intended changes are included and no unintended changes are included
 - Canonical local verification is `./scripts/dev verify quick`; use `./scripts/dev impact` when you need a dependency-aware ripple check before broader refactors

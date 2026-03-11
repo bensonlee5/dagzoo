@@ -16,7 +16,6 @@ from dagzoo.core.fixed_layout_batched import (
     apply_function_plan_batch,
 )
 from dagzoo.core.fixed_layout_plan_types import (
-    ActivationMatrixPlan,
     CategoricalConverterPlan,
     FixedActivationPlan,
     FixedLayoutConverterPlan,
@@ -38,8 +37,6 @@ from dagzoo.core.fixed_layout_plan_types import (
 )
 from dagzoo.core.layout_types import MechanismFamily
 from dagzoo.core.node_pipeline import apply_node_pipeline
-from dagzoo.diagnostics.effective_diversity import AblationArm, _runtime_override_context
-from dagzoo.functions.multi import apply_multi_function
 from dagzoo.functions.random_functions import apply_random_function
 from dagzoo.sampling.random_points import sample_random_points
 from conftest import make_generator as _make_generator, make_keyed_rng as _make_keyed_rng
@@ -48,7 +45,6 @@ import dagzoo.converters.numeric as numeric_mod
 import dagzoo.core.fixed_layout_batched as fixed_layout_batched_mod
 import dagzoo.core.execution_semantics as execution_semantics_mod
 import dagzoo.core.node_pipeline as node_pipeline_mod
-import dagzoo.functions.multi as multi_mod
 import dagzoo.functions.random_functions as random_functions_mod
 import dagzoo.sampling.random_points as random_points_mod
 from dagzoo.rng import KeyedRng
@@ -562,86 +558,6 @@ def test_keyed_node_plan_sampling_keeps_later_converters_and_source_stable(
     assert sample_with_first_converter_draws(32) == sample_with_first_converter_draws(1)
 
 
-@pytest.mark.parametrize(
-    ("family", "plan", "mapped_plan"),
-    [
-        (
-            "nn",
-            NeuralNetFunctionPlan(
-                n_layers=2,
-                hidden_width=5,
-                input_activation=FixedActivationPlan(name="relu"),
-                output_activation=FixedActivationPlan(name="relu"),
-                layer_matrices=(GaussianMatrixPlan(), GaussianMatrixPlan()),
-                hidden_activations=(FixedActivationPlan(name="relu"),),
-            ),
-            NeuralNetFunctionPlan(
-                n_layers=2,
-                hidden_width=5,
-                input_activation=FixedActivationPlan(name="tanh"),
-                output_activation=FixedActivationPlan(name="tanh"),
-                layer_matrices=(GaussianMatrixPlan(), GaussianMatrixPlan()),
-                hidden_activations=(FixedActivationPlan(name="tanh"),),
-            ),
-        ),
-        (
-            "linear",
-            LinearFunctionPlan(
-                matrix=ActivationMatrixPlan(
-                    base_kind="gaussian",
-                    activation=FixedActivationPlan(name="relu"),
-                )
-            ),
-            LinearFunctionPlan(
-                matrix=ActivationMatrixPlan(
-                    base_kind="gaussian",
-                    activation=FixedActivationPlan(name="tanh"),
-                )
-            ),
-        ),
-    ],
-)
-def test_apply_random_function_respects_activation_override(
-    family: str,
-    plan: object,
-    mapped_plan: object,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    x = torch.randn(32, 4, generator=_make_generator(6))
-    monkeypatch.setattr(
-        random_functions_mod,
-        "sample_function_plan_for_family",
-        lambda *_args, **_kwargs: plan,
-    )
-
-    actual_generator = _make_generator(7)
-    with _runtime_override_context(
-        AblationArm(arm_id="act_relu_to_tanh", description="x", activation_map={"relu": "tanh"})
-    ):
-        actual = apply_random_function(
-            x.clone(),
-            actual_generator,
-            out_dim=3,
-            function_type=family,  # type: ignore[arg-type]
-        )
-
-    monkeypatch.setattr(
-        random_functions_mod,
-        "sample_function_plan_for_family",
-        lambda *_args, **_kwargs: mapped_plan,
-    )
-    expected_generator = _make_generator(7)
-    expected = apply_random_function(
-        x.clone(),
-        expected_generator,
-        out_dim=3,
-        function_type=family,  # type: ignore[arg-type]
-    )
-
-    torch.testing.assert_close(actual, expected)
-    torch.testing.assert_close(actual_generator.get_state(), expected_generator.get_state())
-
-
 def test_apply_numeric_converter_matches_explicit_plan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -664,60 +580,6 @@ def test_apply_numeric_converter_matches_explicit_plan(
     torch.testing.assert_close(actual_x, expected_x.squeeze(0))
     torch.testing.assert_close(actual_values, expected_values.squeeze(0))
     torch.testing.assert_close(actual_generator.get_state(), reference_generator.get_state())
-
-
-def test_apply_multi_function_respects_logsumexp_aggregation_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    inputs = [
-        torch.randn(32, 3, generator=_make_generator(14)),
-        torch.randn(32, 2, generator=_make_generator(15)),
-    ]
-    source = StackedNodeSource(
-        aggregation_kind="logsumexp",
-        parent_functions=(
-            LinearFunctionPlan(matrix=GaussianMatrixPlan()),
-            LinearFunctionPlan(matrix=GaussianMatrixPlan()),
-        ),
-    )
-    mapped_source = StackedNodeSource(
-        aggregation_kind="max",
-        parent_functions=source.parent_functions,
-    )
-    monkeypatch.setattr(
-        multi_mod,
-        "sample_multi_source_plan",
-        lambda *_args, **_kwargs: source,
-    )
-
-    actual_generator = _make_generator(16)
-    with _runtime_override_context(
-        AblationArm(
-            arm_id="agg_logsumexp_to_max",
-            description="x",
-            aggregation_map={"logsumexp": "max"},
-        )
-    ):
-        actual = apply_multi_function(
-            [inp.clone() for inp in inputs],
-            actual_generator,
-            out_dim=4,
-        )
-
-    monkeypatch.setattr(
-        multi_mod,
-        "sample_multi_source_plan",
-        lambda *_args, **_kwargs: mapped_source,
-    )
-    expected_generator = _make_generator(16)
-    expected = apply_multi_function(
-        [inp.clone() for inp in inputs],
-        expected_generator,
-        out_dim=4,
-    )
-
-    torch.testing.assert_close(actual, expected)
-    torch.testing.assert_close(actual_generator.get_state(), expected_generator.get_state())
 
 
 def test_apply_categorical_converter_matches_explicit_plan(
@@ -854,77 +716,6 @@ def test_apply_node_pipeline_matches_explicit_node_plan(
     for key, value in actual_extracted.items():
         torch.testing.assert_close(value, expected_extracted[key].squeeze(0))
     torch.testing.assert_close(actual_generator.get_state(), reference_generator.get_state())
-
-
-def test_apply_node_pipeline_respects_logsumexp_aggregation_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    specs = [ConverterSpec(key="value", kind="num", dim=1)]
-    typed_specs = typed_converter_specs(specs)
-    converter_plans = (NumericConverterPlan(kind="num", warp_enabled=False),)
-    node_plan = FixedLayoutNodePlan(
-        node_index=0,
-        parent_indices=(0, 1),
-        converter_specs=typed_specs,
-        converter_plans=converter_plans,
-        converter_groups=fixed_layout_converter_groups(typed_specs, converter_plans),
-        latent=FixedLayoutLatentPlan(required_dim=1, extra_dim=1, total_dim=2),
-        source=StackedNodeSource(
-            aggregation_kind="logsumexp",
-            parent_functions=(
-                LinearFunctionPlan(matrix=GaussianMatrixPlan()),
-                LinearFunctionPlan(matrix=GaussianMatrixPlan()),
-            ),
-        ),
-    )
-    mapped_plan = FixedLayoutNodePlan(
-        node_index=node_plan.node_index,
-        parent_indices=node_plan.parent_indices,
-        converter_specs=node_plan.converter_specs,
-        converter_plans=node_plan.converter_plans,
-        converter_groups=node_plan.converter_groups,
-        latent=node_plan.latent,
-        source=StackedNodeSource(
-            aggregation_kind="max",
-            parent_functions=node_plan.source.parent_functions,  # type: ignore[attr-defined]
-        ),
-    )
-    parents = [
-        torch.randn(16, 3, generator=_make_generator(42)),
-        torch.randn(16, 2, generator=_make_generator(43)),
-    ]
-    monkeypatch.setattr(node_pipeline_mod, "sample_node_plan", lambda **_kwargs: node_plan)
-
-    actual_generator = _make_generator(44)
-    with _runtime_override_context(
-        AblationArm(
-            arm_id="agg_logsumexp_to_max",
-            description="x",
-            aggregation_map={"logsumexp": "max"},
-        )
-    ):
-        actual_latent, actual_extracted = apply_node_pipeline(
-            [parent.clone() for parent in parents],
-            16,
-            typed_converter_specs(specs),
-            actual_generator,
-            "cpu",
-        )
-
-    monkeypatch.setattr(node_pipeline_mod, "sample_node_plan", lambda **_kwargs: mapped_plan)
-    expected_generator = _make_generator(44)
-    expected_latent, expected_extracted = apply_node_pipeline(
-        [parent.clone() for parent in parents],
-        16,
-        typed_converter_specs(specs),
-        expected_generator,
-        "cpu",
-    )
-
-    torch.testing.assert_close(actual_latent, expected_latent)
-    for key, value in actual_extracted.items():
-        torch.testing.assert_close(value, expected_extracted[key])
-    torch.testing.assert_close(actual_generator.get_state(), expected_generator.get_state())
 
 
 @pytest.mark.parametrize(("kind", "key"), [("num", "value"), ("target_reg", "target")])

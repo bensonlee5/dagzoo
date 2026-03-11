@@ -202,6 +202,11 @@ with dataset-level accept/reject yield in the benchmark summary artifacts.
 
 Detailed guide: [Benchmark Workflows and Guardrails](features/benchmark-guardrails.md)
 
+When you need to compare accepted-corpus diversity between configs, use
+`dagzoo diversity-audit` with one `--baseline-config` and one or more
+`--variant-config` values. The audit writes `summary.json` and `summary.md`
+with per-variant diversity status and throughput deltas.
+
 ______________________________________________________________________
 
 ## Related documents
