@@ -5,13 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dagzoo.config import (
-    DATASET_ROWS_MIN_TOTAL,
-    DatasetRowsSpec,
     GeneratorConfig,
     clone_generator_config,
-    normalize_dataset_rows,
 )
-from dagzoo.core.config_resolution import BenchmarkSmokeCaps
+from dagzoo.core.config_resolution import BenchmarkSmokeCaps, cap_rows_spec_to_total
 
 from .constants import (
     SMOKE_N_FEATURES_CAP,
@@ -66,37 +63,10 @@ def _split_total_rows(total_rows: int) -> tuple[int, int]:
 def _cap_smoke_rows_spec(config: GeneratorConfig) -> None:
     """Cap benchmark rows spec to the already-capped smoke split total."""
 
-    normalized_rows = normalize_dataset_rows(config.dataset.rows)
-    if normalized_rows is None:
-        return
-
-    total_cap = int(config.dataset.n_train + config.dataset.n_test)
-    if total_cap < int(DATASET_ROWS_MIN_TOTAL):
-        config.dataset.rows = None
-        return
-
-    if normalized_rows.mode == "fixed":
-        assert normalized_rows.value is not None
-        config.dataset.rows = DatasetRowsSpec(
-            mode="fixed",
-            value=min(int(normalized_rows.value), total_cap),
-        )
-        return
-    if normalized_rows.mode == "range":
-        assert normalized_rows.start is not None and normalized_rows.stop is not None
-        capped_start = min(int(normalized_rows.start), total_cap)
-        capped_stop = min(int(normalized_rows.stop), total_cap)
-        if capped_start >= capped_stop:
-            config.dataset.rows = DatasetRowsSpec(mode="fixed", value=capped_stop)
-            return
-        config.dataset.rows = DatasetRowsSpec(mode="range", start=capped_start, stop=capped_stop)
-        return
-
-    capped_choices = sorted({min(int(choice), total_cap) for choice in normalized_rows.choices})
-    if len(capped_choices) == 1:
-        config.dataset.rows = DatasetRowsSpec(mode="fixed", value=capped_choices[0])
-        return
-    config.dataset.rows = DatasetRowsSpec(mode="choices", choices=capped_choices)
+    cap_rows_spec_to_total(
+        config,
+        total_rows_cap=int(config.dataset.n_train + config.dataset.n_test),
+    )
 
 
 def _expand_builtin_cpu_run_specs(

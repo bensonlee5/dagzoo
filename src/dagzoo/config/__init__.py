@@ -28,7 +28,7 @@ from .constants import (
     RowsMode,
     ShiftMode,
 )
-from .io import clone_generator_config
+from .io import clone_generator_config, load_packaged_generator_config
 from .models import (
     BenchmarkConfig,
     DatasetConfig,
@@ -112,6 +112,7 @@ __all__ = [
     "clone_generator_config",
     "dataset_rows_bounds",
     "dataset_rows_is_variable",
+    "load_packaged_generator_config",
     "normalize_dataset_rows",
     "normalize_missing_mechanism",
     "normalize_noise_family",

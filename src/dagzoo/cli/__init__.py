@@ -22,6 +22,7 @@ from .parsing import (
     HARDWARE_POLICY_CHOICES,
     MISSINGNESS_MECHANISM_CLI_CHOICES,
 )
+from .request_execution import run_request_execution
 
 __all__ = [
     "DEVICE_CHOICES",
@@ -39,6 +40,7 @@ __all__ = [
     "run_deferred_filter",
     "run_effective_diversity_audit",
     "run_filter_calibration",
+    "run_request_execution",
     "write_baseline",
     "write_effective_diversity_artifacts",
     "write_filter_calibration_artifacts",

@@ -15,6 +15,7 @@ from .commands.diagnostics import (
 from .commands.filter import run_filter_command
 from .commands.generate import run_generate_command
 from .commands.hardware import run_hardware_command
+from .commands.request import run_request_command
 from .parsing import (
     DEVICE_CHOICES,
     HARDWARE_POLICY_CHOICES,
@@ -132,6 +133,41 @@ def build_parser() -> argparse.ArgumentParser:
         "--print-resolution-trace",
         action="store_true",
         help="Print field-level override trace for resolved config before generation.",
+    )
+
+    r = sub.add_parser(
+        "request",
+        help="Resolve a public request file into canonical generate and deferred filter runs.",
+    )
+    r.set_defaults(handler=run_request_command)
+    r.add_argument("--request", required=True, help="Path to v1 request YAML.")
+    r.add_argument(
+        "--device",
+        default=None,
+        choices=DEVICE_CHOICES,
+        help="Device override (auto/cpu/cuda/mps).",
+    )
+    r.add_argument(
+        "--hardware-policy",
+        default="none",
+        choices=HARDWARE_POLICY_CHOICES,
+        help="Explicit hardware policy to apply to the resolved config (default: none).",
+    )
+    r.add_argument(
+        "--n-jobs",
+        type=filter_n_jobs,
+        default=None,
+        help="Optional override for deferred-filter ExtraTrees worker count (-1 or >= 1).",
+    )
+    r.add_argument(
+        "--print-effective-config",
+        action="store_true",
+        help="Print resolved effective config YAML before request execution.",
+    )
+    r.add_argument(
+        "--print-resolution-trace",
+        action="store_true",
+        help="Print field-level override trace for the resolved request config.",
     )
 
     f = sub.add_parser(

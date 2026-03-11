@@ -10,6 +10,38 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.9.3] - 2026-03-11
+
+### Added
+
+- Added `dagzoo request --request <path>` as a request-file execution workflow
+  that resolves a v1 request into the canonical `generate -> deferred filter`
+  pipeline.
+
+### Changed
+
+- Request execution now writes artifacts under one stable `output_root`
+  layout with `generated/`, `filter/`, and `curated/` subdirectories, and
+  persists request effective-config plus resolution-trace artifacts under
+  `generated/`.
+- Config resolution now supports request-owned precedence for
+  default/smoke profiles, public `rows` overrides, missingness-profile
+  overlays, and `output_root` mapping to request-run generation output.
+
+### Fixed
+
+- `dagzoo request` now loads its built-in default and missingness preset
+  configs from packaged wheel resources instead of repo-relative paths, so
+  installed consumers can run request files outside a source checkout.
+- `dagzoo request` now preserves the smoke profile envelope under CUDA hardware
+  policies by reapplying the smoke caps before request config validation and by
+  capping smoke rows before one-time run realization.
+- Non-smoke `dagzoo request` runs now reapply request-owned `rows` specs after
+  hardware-policy transforms, so supported CUDA policies preserve the same row
+  precedence as `dagzoo generate --rows`.
+- `dagzoo request` now converts malformed request YAML into the normal
+  argparse-style usage error path instead of printing a traceback.
+
 ## [0.9.2] - 2026-03-11
 
 ### Changed

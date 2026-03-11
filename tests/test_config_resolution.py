@@ -9,6 +9,7 @@ from dagzoo.bench.constants import (
 from dagzoo.config import GeneratorConfig
 from dagzoo.core.config_resolution import (
     BenchmarkSmokeCaps,
+    cap_rows_spec_to_total,
     resolve_benchmark_preset_config,
     resolve_generate_config,
     serialize_resolution_events,
@@ -86,6 +87,39 @@ def test_resolve_generate_config_applies_rows_override() -> None:
 
     trace = serialize_resolution_events(resolved.trace_events)
     assert any(event["path"] == "dataset.rows" and event["source"] == "cli.rows" for event in trace)
+
+
+def test_cap_rows_spec_to_total_clears_rows_when_cap_is_below_min_total() -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.dataset.rows = 1024  # type: ignore[assignment]
+
+    cap_rows_spec_to_total(cfg, total_rows_cap=160)
+
+    assert cfg.dataset.rows is None
+
+
+@pytest.mark.parametrize(
+    ("rows_spec", "expected_mode", "expected_payload"),
+    [
+        (1024, "fixed", {"value": 500}),
+        ("400..60000", "range", {"start": 400, "stop": 500}),
+        ("400,600,800", "choices", {"choices": [400, 500]}),
+    ],
+)
+def test_cap_rows_spec_to_total_caps_fixed_range_and_choice_rows(
+    rows_spec: object,
+    expected_mode: str,
+    expected_payload: dict[str, int | list[int]],
+) -> None:
+    cfg = GeneratorConfig.from_yaml("configs/default.yaml")
+    cfg.dataset.rows = rows_spec  # type: ignore[assignment]
+
+    cap_rows_spec_to_total(cfg, total_rows_cap=500)
+
+    assert cfg.dataset.rows is not None
+    assert cfg.dataset.rows.mode == expected_mode
+    for field_name, expected_value in expected_payload.items():
+        assert getattr(cfg.dataset.rows, field_name) == expected_value
 
 
 def test_resolve_generate_config_rejects_invalid_missingness_combination() -> None:

@@ -79,6 +79,55 @@ def test_filter_cli_prints_curated_output_summary(
     assert "Wrote curated accepted-only shards:" in captured.out
 
 
+def test_request_cli_prints_request_execution_summary(
+    tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _FilterResult:
+        manifest_path = Path("filter_manifest.ndjson")
+        summary_path = Path("filter_summary.json")
+        total_datasets = 2
+        accepted_datasets = 1
+        rejected_datasets = 1
+        datasets_per_minute = 42.0
+        curated_out_dir = Path("curated")
+        curated_accepted_datasets = 1
+
+    class _Result:
+        effective_config_path = Path("effective_config.yaml")
+        effective_config_trace_path = Path("effective_config_trace.yaml")
+        generated_dir = Path("generated")
+        generated_datasets = 2
+        filter_result = _FilterResult()
+
+    monkeypatch.setattr("dagzoo.cli.run_request_execution", lambda **kwargs: _Result())
+
+    request_path = tmp_path / "request.yaml"
+    request_path.write_text(
+        "version: v1\n"
+        "task: classification\n"
+        "dataset_count: 2\n"
+        "rows: 1024\n"
+        "profile: default\n"
+        "output_root: requests/out\n",
+        encoding="utf-8",
+    )
+
+    code = main(
+        [
+            "request",
+            "--request",
+            str(request_path),
+        ]
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "Wrote effective config:" in captured.out
+    assert "Wrote filter manifest:" in captured.out
+    assert "Deferred filter summary:" in captured.out
+    assert "Wrote curated accepted-only shards:" in captured.out
+
+
 def test_benchmark_cli_prints_configs_and_writes_baseline(
     tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

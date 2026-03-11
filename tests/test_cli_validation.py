@@ -417,6 +417,125 @@ def test_filter_cli_rejects_removed_config_flag() -> None:
     assert int(exc.value.code) == 2
 
 
+def test_request_cli_rejects_missing_request_file(tmp_path) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "request",
+                "--request",
+                str(tmp_path / "missing.yaml"),
+            ]
+        )
+
+    assert int(exc.value.code) == 2
+
+
+def test_request_cli_rejects_invalid_request_payload(tmp_path) -> None:
+    request_path = tmp_path / "invalid_request.yaml"
+    request_path.write_text(
+        yaml.safe_dump({"version": "v1", "unexpected": "value"}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "request",
+                "--request",
+                str(request_path),
+            ]
+        )
+
+    assert int(exc.value.code) == 2
+
+
+def test_request_cli_rejects_invalid_request_yaml(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    request_path = tmp_path / "invalid_request.yaml"
+    request_path.write_text("version: [v1\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "request",
+                "--request",
+                str(request_path),
+            ]
+        )
+
+    assert int(exc.value.code) == 2
+    captured = capsys.readouterr()
+    assert "Failed to parse request file" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_request_cli_invokes_request_runner(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FilterResult:
+        manifest_path = Path("manifest.ndjson")
+        summary_path = Path("summary.json")
+        total_datasets = 2
+        accepted_datasets = 1
+        rejected_datasets = 1
+        datasets_per_minute = 42.0
+        curated_out_dir = Path("curated")
+        curated_accepted_datasets = 1
+
+    class _Result:
+        effective_config_path = Path("effective_config.yaml")
+        effective_config_trace_path = Path("effective_config_trace.yaml")
+        generated_dir = Path("generated")
+        generated_datasets = 2
+        filter_result = _FilterResult()
+
+    def _stub_run_request_execution(**kwargs):
+        captured.update(kwargs)
+        return _Result()
+
+    monkeypatch.setattr("dagzoo.cli.run_request_execution", _stub_run_request_execution)
+
+    request_path = tmp_path / "request.yaml"
+    request_path.write_text(
+        yaml.safe_dump(
+            {
+                "version": "v1",
+                "task": "classification",
+                "dataset_count": 2,
+                "rows": 1024,
+                "profile": "default",
+                "output_root": "requests/out",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = main(
+        [
+            "request",
+            "--request",
+            str(request_path),
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
+            "--n-jobs",
+            "4",
+            "--print-effective-config",
+            "--print-resolution-trace",
+        ]
+    )
+
+    assert code == 0
+    assert captured["request_path"] == str(request_path)
+    assert captured["device_override"] == "cpu"
+    assert captured["hardware_policy"] == "none"
+    assert captured["n_jobs_override"] == 4
+    assert captured["print_effective_config_flag"] is True
+    assert captured["print_resolution_trace_flag"] is True
+
+
 def test_generate_cli_uses_default_config_without_noise_overrides(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

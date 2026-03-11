@@ -4,9 +4,10 @@
 requests. This contract is intentionally smaller than `GeneratorConfig` and is
 meant for cross-repo callers such as `tab-foundry`.
 
-This document defines the request shape only. It does not yet add request
-execution, handoff manifests, or the end-to-end `dagzoo -> tab-foundry`
-workflow. Those land in `BL-145`, `BL-146`, and `BL-147`.
+`BL-145` adds request execution through `dagzoo request --request <path>`.
+Request runs now execute through the canonical `generate -> deferred filter`
+flow. Handoff manifests and the documented end-to-end `dagzoo -> tab-foundry`
+workflow still land in `BL-146` and `BL-147`.
 
 ## v1 goals
 
@@ -30,6 +31,9 @@ Required fields:
   - YAML list or mapping forms are not part of the request-file contract, even
     though internal `GeneratorConfig` normalization accepts them
 - `profile`: stable public request profile; v1 supports `default` and `smoke`
+  - `smoke` keeps the request run within the smoke split envelope during execution
+    by capping or clearing the active rows spec before run realization so the
+    smoke `n_train` / `n_test` split is preserved
 - `output_root`: non-empty output root string
 
 Optional fields:
@@ -46,6 +50,20 @@ public wire shape:
 - choice rows serialize as a CSV string
 - unset `seed` is omitted instead of serialized as `null`
 
+## Execution Layout
+
+`dagzoo request --request <path>` treats `output_root` as the request-run root
+and writes these subdirectories:
+
+- `generated/`: raw generated shard outputs plus
+  `effective_config.yaml` and `effective_config_trace.yaml`
+- `filter/`: deferred-filter artifacts
+  (`filter_manifest.ndjson` and `filter_summary.json`)
+- `curated/`: accepted-only curated shard outputs
+
+This PR does not add the downstream handoff manifest yet; later work will layer
+that on top of the same request-run root.
+
 ## Out Of Scope
 
 The request file must not expose raw internal config sections or split-level row
@@ -55,7 +73,7 @@ controls. In particular, v1 does not allow:
 - `n_train` or `n_test`
 - direct missingness tuning fields such as `missing_rate` or MAR/MNAR logit knobs
 - repo-local preset/config file references
-- request execution or handoff-manifest semantics
+- handoff-manifest semantics
 
 ## Mapping Intent
 
