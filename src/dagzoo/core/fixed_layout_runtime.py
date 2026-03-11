@@ -4,22 +4,27 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
 
 import torch
 
-from dagzoo.config import (
-    DatasetRowsSpec,
-    GeneratorConfig,
-    clone_generator_config,
-    dataset_rows_is_variable,
-    resolve_dataset_total_rows,
-)
+from dagzoo.config import GeneratorConfig
 from dagzoo.core.fixed_layout import (
     _FixedLayoutPlan,
     _annotate_fixed_layout_metadata,
     _extract_emitted_schema_signature,
     _layout_signature,
+)
+from dagzoo.core.fixed_layout_grouped import (
+    _GroupedRawBatch,
+    _NoiseRuntimeGroup,
+    generate_grouped_raw_batches as _generate_grouped_raw_batches_impl,
+    group_noise_runtime_chunk as _group_noise_runtime_chunk_impl,
+)
+from dagzoo.core.fixed_layout_prepare import (
+    _effective_fixed_layout_target_cells,
+    _resolve_fixed_layout_batch_size,
+    _validate_fixed_layout_rows_mode,
+    realize_generation_config_for_run,
 )
 from dagzoo.core.fixed_layout_batched import (
     build_fixed_layout_execution_plan,
@@ -43,7 +48,6 @@ from dagzoo.core.generation_runtime import (
 from dagzoo.core.layout import _sample_layout
 from dagzoo.core.layout_types import LayoutPlan
 from dagzoo.core.noise_runtime import (
-    NoiseRuntimeSelection,
     _noise_sampling_spec,
     _resolve_noise_runtime_selection,
 )
@@ -57,8 +61,6 @@ from dagzoo.core.validation import (
 from dagzoo.rng import KeyedRng
 from dagzoo.types import DatasetBundle
 
-_FIXED_LAYOUT_TARGET_CELLS = 4_000_000
-
 
 @dataclass(slots=True)
 class CanonicalFixedLayoutRun:
@@ -71,30 +73,6 @@ class CanonicalFixedLayoutRun:
     resolved_device: str
     batch_size: int
     classification_attempt_plan: tuple[int, ...] | None = None
-
-
-@dataclass(slots=True)
-class _NoiseRuntimeGroup:
-    """One chunk subgroup that shares the same raw noise sampling contract."""
-
-    chunk_offsets: list[int]
-    generation_seeds: list[int]
-    selection: NoiseRuntimeSelection
-    attempt: int
-
-
-@dataclass(slots=True)
-class _GroupedRawBatch:
-    """One raw fixed-layout subgroup generation result."""
-
-    chunk_offsets: list[int]
-    selection: NoiseRuntimeSelection
-    attempt: int
-    x_batch: torch.Tensor
-    y_batch: torch.Tensor
-    aux_meta_batch: list[dict[str, Any]]
-    effective_resolved_device: str
-    device_fallback_reason: str | None
 
 
 def _sample_fixed_layout_candidate(
@@ -116,54 +94,18 @@ def _sample_fixed_layout_candidate(
     )
 
 
-def _noise_runtime_selection_key(
-    selection: NoiseRuntimeSelection,
-) -> tuple[str, float, float]:
-    return (
-        str(selection.family_sampled),
-        float(selection.base_scale),
-        float(selection.student_t_df),
-    )
-
-
 def _group_noise_runtime_chunk(
     config: GeneratorConfig,
     *,
     dataset_roots: list[KeyedRng],
     attempts: list[int] | None = None,
 ) -> list[_NoiseRuntimeGroup]:
-    effective_attempts = attempts or [0] * len(dataset_roots)
-    if len(effective_attempts) != len(dataset_roots):
-        raise ValueError(
-            "Fixed-layout attempt plan length must match chunk dataset count: "
-            f"dataset_roots={len(dataset_roots)} attempts={len(effective_attempts)}"
-        )
-
-    grouped: dict[tuple[str, float, float, int], _NoiseRuntimeGroup] = {}
-    ordered_keys: list[tuple[str, float, float, int]] = []
-    for chunk_offset, (dataset_root, attempt) in enumerate(
-        zip(dataset_roots, effective_attempts, strict=True)
-    ):
-        if attempt < 0:
-            raise ValueError(f"Fixed-layout attempt plan entries must be >= 0, got {attempt}.")
-        selection = _resolve_noise_runtime_selection(
-            config,
-            keyed_rng=dataset_root.keyed("noise_runtime"),
-        )
-        generation_seed = dataset_root.keyed("attempt", int(attempt), "raw_generation").child_seed()
-        key = _noise_runtime_selection_key(selection) + (int(attempt),)
-        if key not in grouped:
-            grouped[key] = _NoiseRuntimeGroup(
-                chunk_offsets=[],
-                generation_seeds=[],
-                selection=selection,
-                attempt=int(attempt),
-            )
-            ordered_keys.append(key)
-        group = grouped[key]
-        group.chunk_offsets.append(int(chunk_offset))
-        group.generation_seeds.append(int(generation_seed))
-    return [grouped[key] for key in ordered_keys]
+    return _group_noise_runtime_chunk_impl(
+        config,
+        dataset_roots=dataset_roots,
+        attempts=attempts,
+        resolve_noise_runtime_selection=_resolve_noise_runtime_selection,
+    )
 
 
 def _generate_grouped_raw_batches(
@@ -176,97 +118,16 @@ def _generate_grouped_raw_batches(
     resolved_device: str,
     noise_sigma_multiplier: float,
 ) -> list[_GroupedRawBatch]:
-    grouped_batches: list[_GroupedRawBatch] = []
-    for group in grouped_noise_runtime:
-        noise_spec = _noise_sampling_spec(group.selection)
-        (
-            x_batch,
-            y_batch,
-            aux_meta_batch,
-        ) = generate_fixed_layout_graph_batch(
-            config,
-            layout,
-            execution_plan=execution_plan,
-            dataset_seeds=group.generation_seeds,
-            device=resolved_device,
-            noise_sigma_multiplier=noise_sigma_multiplier,
-            noise_spec=noise_spec,
-        )
-        grouped_batches.append(
-            _GroupedRawBatch(
-                chunk_offsets=list(group.chunk_offsets),
-                selection=group.selection,
-                attempt=int(group.attempt),
-                x_batch=x_batch,
-                y_batch=y_batch,
-                aux_meta_batch=aux_meta_batch,
-                effective_resolved_device=str(resolved_device),
-                device_fallback_reason=None,
-            )
-        )
-    return grouped_batches
-
-
-def _validate_fixed_layout_rows_mode(config: GeneratorConfig) -> None:
-    if dataset_rows_is_variable(config.dataset.rows):
-        raise ValueError(
-            "Fixed-layout generation requires a fixed split size; variable dataset.rows "
-            "modes (range/choices) are not supported."
-        )
-
-
-def _effective_fixed_layout_target_cells(config: GeneratorConfig) -> int:
-    """Return the configured fixed-layout auto-batch target cell budget."""
-
-    target_cells = config.runtime.fixed_layout_target_cells
-    if target_cells is None:
-        return int(_FIXED_LAYOUT_TARGET_CELLS)
-    return int(target_cells)
-
-
-def _resolve_fixed_layout_batch_size(
-    plan: _FixedLayoutPlan,
-    *,
-    num_datasets: int,
-    batch_size: int | None,
-    target_cells: int | None = None,
-) -> int:
-    if batch_size is not None:
-        return max(1, min(int(batch_size), int(num_datasets)))
-    per_dataset_cells = max(
-        1, int(plan.n_train + plan.n_test) * max(1, int(plan.layout.n_features))
+    return _generate_grouped_raw_batches_impl(
+        config,
+        layout,
+        execution_plan=execution_plan,
+        grouped_noise_runtime=grouped_noise_runtime,
+        resolved_device=resolved_device,
+        noise_sigma_multiplier=noise_sigma_multiplier,
+        noise_sampling_spec=_noise_sampling_spec,
+        generate_graph_batch=generate_fixed_layout_graph_batch,
     )
-    auto_batch = max(1, int(target_cells or _FIXED_LAYOUT_TARGET_CELLS) // per_dataset_cells)
-    return max(1, min(int(num_datasets), int(auto_batch)))
-
-
-def realize_generation_config_for_run(
-    config: GeneratorConfig,
-    *,
-    seed: int | None = None,
-    device: str | None = None,
-) -> tuple[GeneratorConfig, int, str, str]:
-    """Resolve one canonical single-run config with rows fixed for the full run."""
-
-    run_seed = _resolve_run_seed(config, seed)
-    requested_device = (device or config.runtime.device or "auto").lower()
-    resolved_device = _resolve_device(config, device)
-
-    realized = clone_generator_config(config, revalidate=False)
-    rows_seed = KeyedRng(run_seed).child_seed("rows")
-    total_rows = resolve_dataset_total_rows(realized.dataset.rows, dataset_seed=rows_seed)
-    if total_rows is not None:
-        n_test = int(realized.dataset.n_test)
-        n_train = int(total_rows) - n_test
-        if n_train <= 0:
-            raise ValueError(
-                "Resolved rows split is invalid: total rows must be > dataset.n_test "
-                f"(total_rows={int(total_rows)}, n_test={n_test})."
-            )
-        realized.dataset.n_train = int(n_train)
-        realized.dataset.rows = DatasetRowsSpec(mode="fixed", value=int(total_rows))
-
-    return realized, int(run_seed), str(requested_device), str(resolved_device)
 
 
 def prepare_canonical_fixed_layout_run(

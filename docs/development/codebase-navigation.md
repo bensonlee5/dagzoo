@@ -17,7 +17,7 @@ surfaces.
 The high-level logic that bridges CLI/API requests to the canonical generation
 runtime.
 
-- [`src/dagzoo/cli.py`](../../src/dagzoo/cli.py): Maps CLI flags to `GeneratorConfig` and handles command dispatch.
+- [`src/dagzoo/cli/`](../../src/dagzoo/cli/__init__.py): Maps CLI flags to `GeneratorConfig` and handles command dispatch.
 - [`src/dagzoo/core/dataset.py`](../../src/dagzoo/core/dataset.py): Public generation facade. Resolves canonical runs, annotates replay metadata, and streams emitted bundles.
 - [`src/dagzoo/core/generation_runtime.py`](../../src/dagzoo/core/generation_runtime.py): Shared split/finalization helpers used by canonical fixed-layout generation.
 - [`src/dagzoo/core/fixed_layout_runtime.py`](../../src/dagzoo/core/fixed_layout_runtime.py): Canonical fixed-layout run preparation, classification replay validation, and batched execution orchestration.
@@ -51,7 +51,7 @@ Infrastructure that ensures reproducibility, deterministic behavior, and data qu
 
 ## 4. Configuration, Hardware & Architecture
 
-- [`src/dagzoo/config.py`](../../src/dagzoo/config.py): The source of truth for all generator settings, implemented as strongly-typed dataclasses.
+- [`src/dagzoo/config/`](../../src/dagzoo/config/__init__.py): The source of truth for all generator settings, implemented as strongly-typed dataclasses.
 - [`src/dagzoo/hardware.py`](../../src/dagzoo/hardware.py) + [`hardware_policy.py`](../../src/dagzoo/hardware_policy.py): Tier detection and extensible policy registry.
 - [`docs/development/design-decisions.md`](design-decisions.md): Rationale behind the architectural choices and reproducibility guarantees.
 - [`docs/development/keyed-rng.md`](keyed-rng.md): Active migration plan for keyed RNG namespaces and semantic reproducibility.

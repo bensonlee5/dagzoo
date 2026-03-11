@@ -6,24 +6,36 @@ from collections import Counter
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 import json
-import math
 from pathlib import Path
-import shutil
 import time
-from typing import Any, TextIO
+from typing import Any
 
 from dagzoo.config import FilterConfig
 from dagzoo.filtering.extra_trees_filter import _apply_extra_trees_filter_numpy
+from dagzoo.filtering.deferred_filter_artifacts import (
+    _CuratedShardWriter,
+    _cleanup_path,
+    _close_curated_shard_writer,
+    _consume_expected_split,
+    _copy_lineage_tree_safe,
+    _create_curated_shard_writer,
+    _ensure_curated_output_dir_safe,
+    _ensure_split_iter_exhausted,
+    _promote_staged_path,
+    _staged_output_path,
+    _write_curated_dataset,
+    _write_ndjson_record,
+)
+from dagzoo.filtering.deferred_filter_replay import (
+    _build_filter_metadata,
+    _resolve_filter_seed,
+    _resolve_task_and_filter_config,
+)
 from dagzoo.io.parquet_writer import (
-    _PackedShardState,
-    _close_packed_shard_handles,
-    _ensure_metadata_file_open,
     _require_pyarrow,
-    _write_packed_split,
     pq,
 )
 from dagzoo.math_utils import sanitize_json as _sanitize_json
-from dagzoo.rng import SEED32_MAX, SEED32_MIN
 
 import numpy as np
 
@@ -54,18 +66,6 @@ class _PackedSplitDataset:
     dataset_index: int
     x: np.ndarray
     y: np.ndarray
-
-
-@dataclass(slots=True)
-class _CuratedShardWriter:
-    """Incremental writer state for one curated accepted-only shard."""
-
-    shard_state: _PackedShardState
-    final_shard_dir: Path
-
-    @property
-    def shard_dir(self) -> Path:
-        return self.shard_state.shard_dir
 
 
 def _discover_shard_dirs(input_path: Path) -> list[Path]:
@@ -283,93 +283,6 @@ def _iter_packed_split_datasets(split_path: Path) -> Iterator[_PackedSplitDatase
         )
 
 
-def _coerce_seed(raw_seed: object, *, dataset_index: int) -> int:
-    """Resolve a valid seed32 for filter replay."""
-
-    if isinstance(raw_seed, bool):
-        raw_seed = None
-
-    if isinstance(raw_seed, float):
-        if math.isfinite(raw_seed) and float(raw_seed).is_integer():
-            raw_seed = int(raw_seed)
-        else:
-            raw_seed = None
-
-    if isinstance(raw_seed, int):
-        if SEED32_MIN <= raw_seed <= SEED32_MAX:
-            return int(raw_seed)
-
-    return int(dataset_index % (SEED32_MAX + 1))
-
-
-def _resolve_filter_seed(metadata_payload: Mapping[str, Any], *, dataset_index: int) -> int:
-    """Resolve filter replay seed from persisted metadata with child-seed preference."""
-
-    return _coerce_seed(
-        metadata_payload.get("dataset_seed", metadata_payload.get("seed")),
-        dataset_index=dataset_index,
-    )
-
-
-def _resolve_task_and_filter_config(
-    *,
-    metadata_payload: Mapping[str, Any],
-    n_jobs_override: int | None,
-) -> tuple[str, FilterConfig]:
-    """Resolve task + filter config for one dataset record."""
-
-    task: str | None = None
-    embedded_filter: Mapping[str, Any] | None = None
-
-    config_payload = metadata_payload.get("config")
-    if isinstance(config_payload, Mapping):
-        dataset_payload = config_payload.get("dataset")
-        if isinstance(dataset_payload, Mapping):
-            dataset_task = dataset_payload.get("task")
-            if isinstance(dataset_task, str) and dataset_task.strip():
-                task = dataset_task.strip().lower()
-
-        filter_payload = config_payload.get("filter")
-        if isinstance(filter_payload, Mapping):
-            embedded_filter = filter_payload
-
-    if task not in {"classification", "regression"}:
-        raise ValueError(
-            "Deferred filter requires embedded metadata.config.dataset.task in shard metadata."
-        )
-
-    if embedded_filter is not None:
-        filter_cfg = FilterConfig(**dict(embedded_filter))
-    else:
-        raise ValueError(
-            "Deferred filter requires embedded metadata.config.filter in shard metadata."
-        )
-
-    filter_cfg.enabled = True
-    if n_jobs_override is not None:
-        filter_cfg.n_jobs = int(n_jobs_override)
-        filter_cfg.__post_init__()
-
-    return task, filter_cfg
-
-
-def _build_filter_metadata(
-    *,
-    existing_filter: object,
-    accepted: bool,
-    filter_details: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Build normalized filter metadata payload for deferred status."""
-
-    payload: dict[str, Any] = dict(existing_filter) if isinstance(existing_filter, Mapping) else {}
-    payload["mode"] = "deferred"
-    payload["status"] = "accepted" if accepted else "rejected"
-    payload["enabled"] = True
-    payload["accepted"] = bool(accepted)
-    payload.update(dict(filter_details))
-    return payload
-
-
 def _filter_dataset(
     *,
     x_train: np.ndarray,
@@ -404,218 +317,6 @@ def _filter_dataset(
     )
     elapsed_seconds = max(0.0, time.perf_counter() - start)
     return bool(accepted), dict(details), float(elapsed_seconds)
-
-
-def _ensure_curated_output_dir_safe(out_dir: Path) -> None:
-    """Fail fast when curated output already contains shard artifacts."""
-
-    if not out_dir.exists():
-        out_dir.mkdir(parents=True, exist_ok=True)
-        return
-
-    stale = next(out_dir.glob("shard_*"), None)
-    if stale is not None:
-        raise RuntimeError(
-            f"Curated output directory already contains shard data: {out_dir}. "
-            "Choose a new --curated-out directory or remove existing shard_* folders first."
-        )
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-
-def _write_ndjson_record(handle: TextIO, record: Mapping[str, Any]) -> None:
-    """Append one JSON-safe NDJSON record to an already-open handle."""
-
-    handle.write(
-        json.dumps(
-            _sanitize_json(dict(record)),
-            sort_keys=True,
-            allow_nan=False,
-        )
-    )
-    handle.write("\n")
-
-
-def _staged_output_path(*, parent_dir: Path, final_name: str, staging_token: str) -> Path:
-    """Return one hidden temp path used for deferred-filter staging."""
-
-    return parent_dir / f".{final_name}.{staging_token}.tmp"
-
-
-def _cleanup_path(path: Path | None) -> None:
-    """Best-effort cleanup for one staged or promoted artifact path."""
-
-    if path is None or not path.exists():
-        return
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-        return
-    path.unlink(missing_ok=True)
-
-
-def _promote_staged_path(*, staged_path: Path, final_path: Path) -> None:
-    """Promote one staged file or directory into its final visible location."""
-
-    if final_path.exists():
-        raise RuntimeError(
-            "Deferred filter promotion target already exists: "
-            f"{final_path}. Remove the existing artifact and retry."
-        )
-    staged_path.replace(final_path)
-
-
-def _create_curated_shard_writer(
-    *,
-    curated_out_dir: Path,
-    shard_name: str,
-    staging_token: str,
-) -> _CuratedShardWriter:
-    """Initialize incremental writer state for one curated shard."""
-
-    shard_dir = _staged_output_path(
-        parent_dir=curated_out_dir,
-        final_name=shard_name,
-        staging_token=staging_token,
-    )
-    shard_dir.mkdir(parents=True, exist_ok=False)
-    final_shard_dir = curated_out_dir / shard_name
-    return _CuratedShardWriter(
-        shard_state=_PackedShardState(
-            shard_dir=shard_dir,
-            train_path=shard_dir / "train.parquet",
-            test_path=shard_dir / "test.parquet",
-            metadata_path=shard_dir / "metadata.ndjson",
-        ),
-        final_shard_dir=final_shard_dir,
-    )
-
-
-def _ensure_curated_metadata_file_open(state: _CuratedShardWriter) -> TextIO:
-    """Return an append-ready metadata handle for a curated shard."""
-
-    return _ensure_metadata_file_open(state.shard_state)
-
-
-def _write_curated_split(
-    *,
-    state: _CuratedShardWriter,
-    split: str,
-    dataset_index: int,
-    x: np.ndarray,
-    y: np.ndarray,
-    compression: str,
-) -> None:
-    """Append one accepted dataset split into a curated shard parquet file."""
-
-    _write_packed_split(
-        state=state.shard_state,
-        split=split,
-        dataset_index=dataset_index,
-        x=x,
-        y=y,
-        compression=compression,
-    )
-
-
-def _write_curated_dataset(
-    *,
-    state: _CuratedShardWriter,
-    dataset_index: int,
-    train_split: _PackedSplitDataset,
-    test_split: _PackedSplitDataset,
-    record: Mapping[str, Any],
-) -> None:
-    """Append one accepted dataset to curated shard outputs."""
-
-    _write_curated_split(
-        state=state,
-        split="train",
-        dataset_index=dataset_index,
-        x=train_split.x,
-        y=train_split.y,
-        compression="zstd",
-    )
-    _write_curated_split(
-        state=state,
-        split="test",
-        dataset_index=dataset_index,
-        x=test_split.x,
-        y=test_split.y,
-        compression="zstd",
-    )
-    metadata_file = _ensure_curated_metadata_file_open(state)
-    _write_ndjson_record(metadata_file, record)
-
-
-def _close_curated_shard_writer(state: _CuratedShardWriter | None) -> None:
-    """Close open parquet and metadata handles for one curated shard."""
-
-    if state is None:
-        return
-    _close_packed_shard_handles(state.shard_state)
-
-
-def _copy_lineage_tree_safe(*, source_dir: Path, dest_dir: Path) -> None:
-    """Copy lineage artifacts without following symlinks."""
-
-    if source_dir.is_symlink():
-        raise RuntimeError(f"Lineage directory must not be a symlink: {source_dir}")
-
-    for source_path in sorted(source_dir.rglob("*")):
-        rel_path = source_path.relative_to(source_dir)
-        dest_path = dest_dir / rel_path
-        if source_path.is_symlink():
-            raise RuntimeError(f"Lineage artifact must not be a symlink: {source_path}")
-        if source_path.is_dir():
-            dest_path.mkdir(parents=True, exist_ok=True)
-            continue
-        if source_path.is_file():
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_path, dest_path)
-            continue
-        raise RuntimeError(f"Unsupported lineage artifact entry: {source_path}")
-
-
-def _consume_expected_split(
-    split_iter: Iterator[_PackedSplitDataset],
-    *,
-    expected_dataset_index: int,
-    split_path: Path,
-) -> _PackedSplitDataset:
-    """Consume the next packed split group and validate dataset alignment."""
-
-    try:
-        split_dataset = next(split_iter)
-    except StopIteration as exc:
-        raise ValueError(
-            "Missing packed split rows for deferred filtering: "
-            f"split={split_path} dataset_index={expected_dataset_index}"
-        ) from exc
-
-    if split_dataset.dataset_index != expected_dataset_index:
-        raise ValueError(
-            "Packed split coverage mismatch for deferred filtering: "
-            f"split={split_path} expected dataset_index={expected_dataset_index} "
-            f"got={split_dataset.dataset_index}"
-        )
-    return split_dataset
-
-
-def _ensure_split_iter_exhausted(
-    split_iter: Iterator[_PackedSplitDataset],
-    *,
-    split_path: Path,
-) -> None:
-    """Ensure a packed split iterator has no extra dataset groups beyond metadata."""
-
-    try:
-        extra_split = next(split_iter)
-    except StopIteration:
-        return
-    raise ValueError(
-        "Packed split contains extra dataset rows beyond metadata coverage: "
-        f"split={split_path} dataset_index={extra_split.dataset_index}"
-    )
 
 
 def run_deferred_filter(

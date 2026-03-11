@@ -4,8 +4,20 @@ from pathlib import Path
 import yaml
 
 from dagzoo.bench.constants import SMOKE_N_TEST_CAP, SMOKE_N_TRAIN_CAP
-from dagzoo.cli import _print_preset_result_line, main
+from dagzoo.cli import (
+    DEVICE_CHOICES,
+    HARDWARE_POLICY_CHOICES,
+    MISSINGNESS_MECHANISM_CLI_CHOICES,
+    _print_preset_result_line,
+    main,
+)
 from dagzoo.config import GeneratorConfig
+
+
+def test_cli_package_reexports_parser_choice_constants() -> None:
+    assert DEVICE_CHOICES == ("auto", "cpu", "cuda", "mps")
+    assert "none" in HARDWARE_POLICY_CHOICES
+    assert tuple(MISSINGNESS_MECHANISM_CLI_CHOICES) == ("none", "mcar", "mar", "mnar")
 
 
 def test_benchmark_cli_writes_json(tmp_path) -> None:

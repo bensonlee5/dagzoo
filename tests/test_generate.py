@@ -1637,7 +1637,7 @@ def test_auto_surfaces_mps_runtime_failure_in_generate_one(
         )
 
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout_runtime._resolve_device",
+        "dagzoo.core.fixed_layout_prepare._resolve_device",
         lambda *_args, **_kwargs: "mps",
     )
     monkeypatch.setattr(
@@ -1681,7 +1681,7 @@ def test_generate_batch_iter_auto_surfaces_mps_batch_generation_failure(
         return x, y, [{}]
 
     monkeypatch.setattr(
-        "dagzoo.core.fixed_layout_runtime._resolve_device",
+        "dagzoo.core.fixed_layout_prepare._resolve_device",
         lambda *_args, **_kwargs: "mps",
     )
     monkeypatch.setattr(

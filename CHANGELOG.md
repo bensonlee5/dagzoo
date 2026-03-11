@@ -10,6 +10,20 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.9.2] - 2026-03-11
+
+### Changed
+
+- Split the monolithic `dagzoo.cli`, `dagzoo.config`, `dagzoo.bench.suite`,
+  `dagzoo.filtering.deferred_filter`, and fixed-layout core modules into
+  smaller internal packages/modules while preserving the existing public CLI,
+  config import surface, benchmark summary contracts, and deferred-filter
+  artifact schema.
+- Extracted fixed-layout batching, execution-semantic sampling, and runtime
+  preparation/grouping helpers into dedicated internal modules so the core
+  generation paths keep one canonical implementation without parallel legacy
+  code paths.
+
 ## [0.9.1] - 2026-03-10
 
 ### Added

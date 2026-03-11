@@ -4,14 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
-import hashlib
-import re
-import resource
-import sys
-import time
 from collections.abc import Callable, Mapping
 from collections import Counter
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,30 +13,16 @@ import torch
 from dagzoo.bench.baseline import compare_summary_to_baseline
 from dagzoo.bench.constants import (
     DIAGNOSTICS_DUPLICATE_PRESET_SUFFIX_BASE,
-    KIB,
     MIB,
     MICROBENCH_REPEATS,
     MISSINGNESS_RATE_FAIL_ABS_ERROR,
     MISSINGNESS_RATE_WARN_ABS_ERROR,
-    PRESET_KEY_HASH_SUFFIX_LEN,
-    SMOKE_LATENCY_SAMPLES_CAP,
-    SMOKE_N_FEATURES_CAP,
-    SMOKE_N_NODES_CAP,
-    SMOKE_N_TEST_CAP,
-    SMOKE_N_TRAIN_CAP,
-    SMOKE_NUM_DATASETS_CAP,
-    SMOKE_WARMUP_DATASETS_CAP,
     SHIFT_GUARDRAIL_DIRECTIONAL_GATING_MIN_SAMPLE,
     SHIFT_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE,
     NOISE_GUARDRAIL_RUNTIME_GATING_MIN_SAMPLE,
 )
 from dagzoo.bench.micro import run_microbenchmarks
-from dagzoo.bench.metrics import (
-    degradation_percent,
-    percent_change,
-    reproducibility_signatures,
-    summarize_latencies,
-)
+from dagzoo.bench.metrics import degradation_percent, reproducibility_signatures
 from dagzoo.bench.collectors import (
     _MissingnessAcceptanceCollector,
     _NoiseGuardrailCollector,
@@ -59,28 +39,43 @@ from dagzoo.bench.guardrails import (
     _status_from_issues,
 )
 from dagzoo.bench.throughput import run_throughput_benchmark
+from dagzoo.bench.preset_specs import (
+    PresetRunSpec,
+    _cap_smoke_rows_spec,
+    _copy_runtime_config,
+    _smoke_caps_for_spec,
+    resolve_preset_run_specs as _resolve_preset_run_specs,
+)
+from dagzoo.bench.runtime_support import (
+    _artifact_pointer,
+    _build_diagnostics_aggregator,
+    _build_shift_directional_check,
+    _collect_latency,
+    _is_missingness_enabled,
+    _is_noise_enabled,
+    _is_shift_enabled,
+    _latency_sample_count,
+    _peak_rss_mb,
+    _preset_counts,
+    _sanitize_preset_key,
+)
 from dagzoo.bench.stage_metrics import (
     StageSampleCollector,
     measure_filter_stage_metrics,
     measure_write_datasets_per_minute,
 )
 from dagzoo.config import (
-    DATASET_ROWS_MIN_TOTAL,
-    DatasetRowsSpec,
     GeneratorConfig,
     MISSINGNESS_MECHANISM_NONE,
     NOISE_FAMILY_GAUSSIAN,
     SHIFT_MODE_OFF,
-    clone_generator_config,
-    normalize_dataset_rows,
 )
 from dagzoo.core.config_resolution import (
-    BenchmarkSmokeCaps,
     append_config_diff_events,
     resolve_benchmark_preset_config,
     serialize_resolution_events,
 )
-from dagzoo.core.dataset import generate_batch_iter, generate_one
+from dagzoo.core.dataset import generate_batch_iter
 from dagzoo.core.fixed_layout_runtime import realize_generation_config_for_run
 from dagzoo.core.shift import resolve_shift_runtime_params
 from dagzoo.diagnostics import (
@@ -88,189 +83,8 @@ from dagzoo.diagnostics import (
     write_coverage_summary_json,
     write_coverage_summary_markdown,
 )
-from dagzoo.diagnostics_targets import (
-    build_diagnostics_aggregation_config,
-)
 from dagzoo.rng import KeyedRng
 from dagzoo.types import DatasetBundle
-
-
-DEFAULT_PRESET_CONFIGS: dict[str, str] = {
-    "cpu": "configs/benchmark_cpu.yaml",
-    "cuda_desktop": "configs/benchmark_cuda_desktop.yaml",
-    "cuda_h100": "configs/benchmark_cuda_h100.yaml",
-}
-CPU_BENCHMARK_ROW_TOTALS: tuple[int, ...] = (1024, 4096, 8192)
-
-
-@dataclass(slots=True)
-class PresetRunSpec:
-    """Benchmark execution spec for one preset/config pair."""
-
-    key: str
-    config: GeneratorConfig
-    device: str | None = None
-
-
-def _copy_runtime_config(config: GeneratorConfig) -> GeneratorConfig:
-    """Copy an already validated runtime config without re-running schema validation."""
-
-    return clone_generator_config(config, revalidate=False)
-
-
-def _cpu_row_profile_key(total_rows: int) -> str:
-    """Return the derived preset key for one built-in CPU row profile."""
-
-    return f"cpu_rows{int(total_rows)}"
-
-
-def _is_builtin_cpu_row_profile_key(preset_key: str) -> bool:
-    """Return whether `preset_key` is one derived built-in CPU row-profile key."""
-
-    return str(preset_key).startswith("cpu_rows")
-
-
-def _split_total_rows(total_rows: int) -> tuple[int, int]:
-    """Split total rows into the repo-standard 3:1 train/test ratio."""
-
-    n_test = max(1, int(total_rows) // 4)
-    n_train = max(1, int(total_rows) - n_test)
-    return n_train, n_test
-
-
-def _cap_smoke_rows_spec(config: GeneratorConfig) -> None:
-    """Cap benchmark rows spec to the already-capped smoke split total."""
-
-    normalized_rows = normalize_dataset_rows(config.dataset.rows)
-    if normalized_rows is None:
-        return
-
-    total_cap = int(config.dataset.n_train + config.dataset.n_test)
-    if total_cap < int(DATASET_ROWS_MIN_TOTAL):
-        config.dataset.rows = None
-        return
-
-    if normalized_rows.mode == "fixed":
-        assert normalized_rows.value is not None
-        config.dataset.rows = DatasetRowsSpec(
-            mode="fixed",
-            value=min(int(normalized_rows.value), total_cap),
-        )
-        return
-    if normalized_rows.mode == "range":
-        assert normalized_rows.start is not None and normalized_rows.stop is not None
-        capped_start = min(int(normalized_rows.start), total_cap)
-        capped_stop = min(int(normalized_rows.stop), total_cap)
-        if capped_start >= capped_stop:
-            config.dataset.rows = DatasetRowsSpec(mode="fixed", value=capped_stop)
-            return
-        config.dataset.rows = DatasetRowsSpec(mode="range", start=capped_start, stop=capped_stop)
-        return
-
-    capped_choices = sorted({min(int(choice), total_cap) for choice in normalized_rows.choices})
-    if len(capped_choices) == 1:
-        config.dataset.rows = DatasetRowsSpec(mode="fixed", value=capped_choices[0])
-        return
-    config.dataset.rows = DatasetRowsSpec(mode="choices", choices=capped_choices)
-
-
-def _expand_builtin_cpu_run_specs(
-    config: GeneratorConfig, *, device: str | None
-) -> list[PresetRunSpec]:
-    """Expand the built-in CPU preset into explicit row-profile run specs."""
-
-    base_preset = dict(config.benchmark.presets.get("cpu", {}))
-    expanded: list[PresetRunSpec] = []
-    for total_rows in CPU_BENCHMARK_ROW_TOTALS:
-        derived = _copy_runtime_config(config)
-        n_train, n_test = _split_total_rows(total_rows)
-        derived.dataset.n_train = int(n_train)
-        derived.dataset.n_test = int(n_test)
-        derived_key = _cpu_row_profile_key(total_rows)
-        derived.benchmark.preset_name = derived_key
-        derived.benchmark.presets[derived_key] = dict(base_preset)
-        expanded.append(PresetRunSpec(key=derived_key, config=derived, device=device))
-    return expanded
-
-
-def _smoke_caps_for_spec(spec: PresetRunSpec) -> BenchmarkSmokeCaps:
-    """Resolve smoke-suite caps for one preset spec."""
-
-    if _is_builtin_cpu_row_profile_key(spec.key):
-        return BenchmarkSmokeCaps(
-            n_train=int(spec.config.dataset.n_train),
-            n_test=int(spec.config.dataset.n_test),
-            n_features=SMOKE_N_FEATURES_CAP,
-            n_nodes=SMOKE_N_NODES_CAP,
-        )
-    return BenchmarkSmokeCaps(
-        n_train=SMOKE_N_TRAIN_CAP,
-        n_test=SMOKE_N_TEST_CAP,
-        n_features=SMOKE_N_FEATURES_CAP,
-        n_nodes=SMOKE_N_NODES_CAP,
-    )
-
-
-def _peak_rss_mb() -> float:
-    """Return process max resident set size in MiB."""
-
-    rss = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-    if sys.platform == "darwin":
-        return rss / MIB
-    return rss / KIB
-
-
-def _preset_counts(
-    config: GeneratorConfig,
-    *,
-    preset_key: str,
-    suite: str,
-    num_datasets_override: int | None,
-    warmup_override: int | None,
-) -> tuple[int, int]:
-    """Resolve benchmark dataset and warmup counts for a preset and suite mode."""
-
-    preset_map = config.benchmark.presets.get(preset_key, {})
-    num = int(preset_map.get("num_datasets", config.benchmark.num_datasets))
-    warmup = int(preset_map.get("warmup_datasets", config.benchmark.warmup_datasets))
-
-    if num_datasets_override is not None:
-        num = int(num_datasets_override)
-    if warmup_override is not None:
-        warmup = int(warmup_override)
-
-    if suite == "smoke":
-        num = min(num, SMOKE_NUM_DATASETS_CAP)
-        warmup = min(warmup, SMOKE_WARMUP_DATASETS_CAP)
-
-    return max(1, num), max(0, warmup)
-
-
-def _latency_sample_count(config: GeneratorConfig, suite: str, num_datasets: int) -> int:
-    """Choose per-preset latency sample count for the requested suite level."""
-
-    n = max(1, min(int(config.benchmark.latency_num_samples), num_datasets))
-    if suite == "smoke":
-        return min(n, SMOKE_LATENCY_SAMPLES_CAP)
-    return n
-
-
-def _collect_latency(
-    config: GeneratorConfig,
-    *,
-    device: str | None,
-    num_samples: int,
-) -> dict[str, float]:
-    """Collect per-dataset latency samples by repeatedly calling ``generate_one``."""
-
-    latency_root = KeyedRng(int(config.seed)).keyed("bench", "suite", "latency")
-    samples: list[float] = []
-    for i in range(max(1, num_samples)):
-        seed = latency_root.child_seed("sample", i)
-        start = time.perf_counter()
-        _ = generate_one(config, seed=seed, device=device)
-        samples.append(time.perf_counter() - start)
-    return summarize_latencies(samples)
 
 
 def _collect_reproducibility(
@@ -296,106 +110,6 @@ def _collect_reproducibility(
         "reproducibility_workload_signature": workload_a,
         "reproducibility_workload_match": bool(workload_a == workload_b),
     }
-
-
-def _sanitize_preset_key(preset_key: str) -> str:
-    """Normalize preset key into a filesystem-safe unique path segment."""
-
-    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", preset_key).strip("._-")
-    if not normalized:
-        normalized = "preset"
-    suffix = hashlib.sha1(preset_key.encode("utf-8")).hexdigest()[:PRESET_KEY_HASH_SUFFIX_LEN]
-    return f"{normalized}_{suffix}"
-
-
-def _artifact_pointer(path: Path) -> str:
-    """Return a summary-safe pointer for diagnostics artifacts."""
-
-    return str(path.resolve())
-
-
-def _build_diagnostics_aggregator(config: GeneratorConfig) -> CoverageAggregator:
-    """Create a diagnostics coverage aggregator from config."""
-
-    return CoverageAggregator(build_diagnostics_aggregation_config(config.diagnostics))
-
-
-def _is_missingness_enabled(config: GeneratorConfig) -> bool:
-    """Return whether missingness is enabled in config."""
-
-    return bool(
-        float(config.dataset.missing_rate) > 0.0
-        and str(config.dataset.missing_mechanism).strip().lower() != MISSINGNESS_MECHANISM_NONE
-    )
-
-
-def _is_shift_enabled(config: GeneratorConfig) -> bool:
-    """Return whether shift controls are enabled in config."""
-
-    return bool(config.shift.enabled)
-
-
-def _is_noise_enabled(config: GeneratorConfig) -> bool:
-    """Return whether non-gaussian noise controls are enabled in config."""
-
-    return str(config.noise.family).strip().lower() != NOISE_FAMILY_GAUSSIAN
-
-
-def _build_shift_directional_check(
-    *,
-    metric: str,
-    enabled: bool,
-    gating_enabled: bool,
-    current: float | None,
-    baseline: float | None,
-    detail: str,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Build directional check payload and optional issue for one shift metric."""
-
-    payload: dict[str, Any] = {
-        "enabled": bool(enabled),
-        "gating_enabled": bool(gating_enabled),
-        "current": current,
-        "baseline": baseline,
-        "status": "not_applicable",
-        "detail": detail,
-    }
-    if not enabled:
-        payload["reason"] = "axis_inactive"
-        return payload, None
-    if not gating_enabled:
-        payload["status"] = "suppressed"
-        payload["reason"] = "insufficient_sample_size"
-        return payload, None
-    if current is None or baseline is None:
-        payload["status"] = "fail"
-        issue = _build_guardrail_issue(
-            metric=f"shift_{metric}_directionality_unavailable",
-            severity="fail",
-            current=current,
-            baseline=baseline,
-            degradation_pct=None,
-            detail=f"{detail} Directional check could not be computed from benchmark samples.",
-        )
-        return payload, issue
-    if float(current) > float(baseline):
-        payload["status"] = "pass"
-        return payload, None
-
-    payload["status"] = "fail"
-    current_value = float(current)
-    baseline_value = float(baseline)
-    raw_change = percent_change(current_value, baseline_value)
-    raw_degradation = -raw_change if raw_change is not None else None
-    issue = _build_guardrail_issue(
-        metric=f"shift_{metric}_directionality",
-        severity="fail",
-        current=current_value,
-        baseline=baseline_value,
-        degradation_pct=(float(raw_degradation) if raw_degradation is not None else None),
-        detail=detail,
-    )
-    return payload, issue
 
 
 def run_preset_benchmark(
@@ -1092,44 +806,10 @@ def resolve_preset_run_specs(
 ) -> list[PresetRunSpec]:
     """Resolve requested preset keys into concrete benchmark run specs."""
 
-    keys = list(preset_keys or [])
-    if "all" in keys:
-        keys = ["cpu", "cuda_desktop", "cuda_h100"]
-
-    if not keys:
-        keys = ["custom"] if config_path else ["cpu"]
-
-    resolved: list[PresetRunSpec] = []
-    seen: set[str] = set()
-    for key in keys:
-        if key in seen:
-            continue
-        seen.add(key)
-
-        if key == "custom":
-            if not config_path:
-                raise ValueError("Preset 'custom' requires --config.")
-            config = GeneratorConfig.from_yaml(config_path)
-            preset_key = config.benchmark.preset_name or "custom"
-            resolved.append(
-                PresetRunSpec(key=preset_key, config=config, device=config.runtime.device)
-            )
-            continue
-
-        config_file = DEFAULT_PRESET_CONFIGS.get(key)
-        if not config_file:
-            raise ValueError(f"Unknown benchmark preset key: {key}")
-
-        config = GeneratorConfig.from_yaml(config_file)
-        preset_device = str(
-            config.benchmark.presets.get(key, {}).get("device", config.runtime.device)
-        )
-        if key == "cpu":
-            resolved.extend(_expand_builtin_cpu_run_specs(config, device=preset_device))
-        else:
-            resolved.append(PresetRunSpec(key=key, config=config, device=preset_device))
-
-    return resolved
+    return _resolve_preset_run_specs(
+        preset_keys=preset_keys,
+        config_path=config_path,
+    )
 
 
 def run_benchmark_suite(

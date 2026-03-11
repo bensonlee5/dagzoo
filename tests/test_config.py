@@ -6,6 +6,9 @@ from dagzoo.config import (
     MISSINGNESS_MECHANISM_MCAR,
     MISSINGNESS_MECHANISM_MNAR,
     MISSINGNESS_MECHANISM_NONE,
+    NOISE_MIXTURE_COMPONENT_GAUSSIAN,
+    NOISE_MIXTURE_COMPONENT_LAPLACE,
+    NOISE_MIXTURE_COMPONENT_STUDENT_T,
     GeneratorConfig,
 )
 from dagzoo.io.lineage_schema import validate_metadata_lineage
@@ -35,6 +38,12 @@ def test_load_default_config() -> None:
     assert cfg.dataset.missing_mar_observed_fraction == 0.5
     assert cfg.dataset.missing_mar_logit_scale == 1.0
     assert cfg.dataset.missing_mnar_logit_scale == 1.0
+
+
+def test_config_package_reexports_noise_mixture_component_constants() -> None:
+    assert NOISE_MIXTURE_COMPONENT_GAUSSIAN == "gaussian"
+    assert NOISE_MIXTURE_COMPONENT_LAPLACE == "laplace"
+    assert NOISE_MIXTURE_COMPONENT_STUDENT_T == "student_t"
 
 
 def test_default_config_metadata_is_compatible_with_optional_lineage() -> None:

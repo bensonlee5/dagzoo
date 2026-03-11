@@ -7,6 +7,12 @@ from typing import Literal, Protocol, cast
 
 import torch
 
+from dagzoo.core.execution_sampling_common import (
+    _generator_device as _generator_device_impl,
+    _rand_scalar as _rand_scalar_impl,
+    _randint_scalar as _randint_scalar_impl,
+    _sample_bool as _sample_bool_impl,
+)
 from dagzoo.core.fixed_layout_plan_types import (
     ActivationMatrixPlan,
     CategoricalConverterPlan,
@@ -112,11 +118,15 @@ ConverterSpecsInput = Sequence[ConverterSpecLike] | Sequence[FixedLayoutConverte
 
 
 def _rand_scalar(generator: torch.Generator) -> float:
-    return torch.rand(1, generator=generator, device=generator.device).item()
+    return _rand_scalar_impl(generator)
 
 
 def _randint_scalar(low: int, high: int, generator: torch.Generator) -> int:
-    return int(torch.randint(low, high, (1,), generator=generator, device=generator.device).item())
+    return _randint_scalar_impl(low, high, generator)
+
+
+def _generator_device(generator: torch.Generator) -> str:
+    return _generator_device_impl(generator)
 
 
 def _resolve_sampling_device(
@@ -160,6 +170,10 @@ def _resolve_sampling_root(
     return keyed_rng_from_generator(generator, namespace), resolved_device
 
 
+def _sample_bool(generator: torch.Generator, *, p: float = 0.5) -> bool:
+    return _sample_bool_impl(generator, p=p)
+
+
 def sample_function_family(
     generator: torch.Generator | None = None,
     *,
@@ -198,14 +212,6 @@ def sample_function_family(
         if draw <= cumulative:
             return family
     return positive_families[-1]
-
-
-def _sample_bool(generator: torch.Generator, *, p: float = 0.5) -> bool:
-    return bool(_rand_scalar(generator) < p)
-
-
-def _generator_device(generator: torch.Generator) -> str:
-    return str(generator.device)
 
 
 def _product_component_mix(
