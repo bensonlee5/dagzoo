@@ -5,6 +5,7 @@ Checks all HTML files in a built output directory (for example `site/public/`) a
 fails when:
 - absolute internal links ignore the configured base path
 - internal links point to non-existent files/routes in the built output
+- GitHub source/edit links still point at `/.generated/content/` paths
 """
 
 from __future__ import annotations
@@ -90,6 +91,11 @@ def _resolve_internal_path(output_dir: Path, html_file: Path, target: str) -> tu
     return ("ok", joined)
 
 
+def _is_generated_source_link(target: str) -> bool:
+    parsed = urlparse(target)
+    return bool(parsed.scheme and parsed.netloc and "/.generated/content/" in parsed.path)
+
+
 def _built_target_exists(output_dir: Path, rel_path: str) -> bool:
     if rel_path == "":
         return (output_dir / "index.html").exists()
@@ -134,12 +140,16 @@ def main(argv: Iterable[str] | None = None) -> int:
     prefix_errors: list[tuple[Path, str]] = []
     missing_errors: list[tuple[Path, str]] = []
     escape_errors: list[tuple[Path, str]] = []
+    generated_source_errors: list[tuple[Path, str]] = []
 
     for html_file in _iter_html_files(output_dir):
         text = _read_text(html_file)
         for raw_target in _extract_targets(text):
             target = _normalize_attr_target(raw_target)
             if not target:
+                continue
+            if _is_generated_source_link(target):
+                generated_source_errors.append((html_file, target))
                 continue
 
             status, resolved = _resolve_internal_path(output_dir, html_file, target)
@@ -155,7 +165,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             if status == "ok" and not _built_target_exists(output_dir, resolved):
                 missing_errors.append((html_file, target))
 
-    if prefix_errors or missing_errors or escape_errors:
+    if prefix_errors or missing_errors or escape_errors or generated_source_errors:
         if prefix_errors:
             print("Base-path prefix violations:")
             for html_file, target in prefix_errors:
@@ -166,6 +176,13 @@ def main(argv: Iterable[str] | None = None) -> int:
         if escape_errors:
             print("Links escaping output root:")
             for html_file, target in escape_errors:
+                rel = html_file.relative_to(output_dir)
+                print(f"- {rel} -> {target}")
+            print()
+
+        if generated_source_errors:
+            print("Generated-source GitHub link violations:")
+            for html_file, target in generated_source_errors:
                 rel = html_file.relative_to(output_dir)
                 print(f"- {rel} -> {target}")
             print()

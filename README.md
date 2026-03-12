@@ -98,14 +98,13 @@ dagzoo generate --config configs/default.yaml --num-datasets 10 --out data/run1
 
 Each generate run writes `effective_config.yaml` and `effective_config_trace.yaml`
 in the resolved output directory.
-`dagzoo generate` now uses the canonical fixed-layout engine internally, so all
+`dagzoo generate` samples one internal fixed-layout plan per run, so all
 datasets emitted in the same run share one sampled layout/execution plan.
-Generation no longer runs inline filtering; run `dagzoo filter` as a separate
-stage for acceptance decisions.
+Run `dagzoo filter` as a separate stage for acceptance decisions.
 Deferred filtering now replays strictly from embedded shard metadata; generated
 artifacts must include `metadata.config.dataset.task` and `metadata.config.filter`.
-Parallel generation has been removed; config files must not include
-`runtime.worker_count` or `runtime.worker_index`.
+Generate configs must not include `runtime.worker_count` or
+`runtime.worker_index`.
 
 Run deferred filtering on generated shards:
 
@@ -170,7 +169,7 @@ Start here for end-user workflows and contracts:
 - [Transforms (Math Reference)](https://bensonlee5.github.io/dagzoo/docs/transforms/): Formal transform math, notation, and operator definitions.
 - [Usage Guide](https://bensonlee5.github.io/dagzoo/docs/usage-guide/): Primary workflow hub.
 - [Output Format](https://bensonlee5.github.io/dagzoo/docs/output-format/): Output schema and artifacts.
-- [Request File Contract](https://bensonlee5.github.io/dagzoo/docs/development/request-file-contract/): Public request schema and one-way handoff contract for downstream consumers.
+- [Request File Contract](https://github.com/bensonlee5/dagzoo/blob/main/docs/development/request-file-contract.md): Public request schema and one-way handoff contract for downstream consumers.
 - [Feature Guides](https://bensonlee5.github.io/dagzoo/docs/features/): Diagnostics, missingness, many-class, shift, noise, and benchmark guardrails.
 
 Contributor-facing structure docs:

@@ -34,12 +34,12 @@ dagzoo generate --config configs/default.yaml --num-datasets 10 --out data/run1
 
 Each generate run writes `effective_config.yaml` and `effective_config_trace.yaml`
 under the resolved output directory.
-`dagzoo generate` now samples one internal fixed-layout plan per run, so all
+`dagzoo generate` samples one internal fixed-layout plan per run, so all
 datasets emitted in the same run share one layout signature / plan signature.
-Generation does not run inline filtering; keep `filter.enabled: false` for
-generate flows.
-Parallel generation has been removed. Config files must not include
-`runtime.worker_count` or `runtime.worker_index`.
+Run `dagzoo filter` as a separate stage after generation; keep
+`filter.enabled: false` for generate flows.
+Generate configs must not include `runtime.worker_count` or
+`runtime.worker_index`.
 
 ______________________________________________________________________
 
@@ -73,7 +73,7 @@ When rows mode is active, `dataset.n_test` stays fixed and `n_train` is derived 
 For canonical `generate` runs, `range` and `choices` rows modes are realized
 once per run, not once per dataset.
 
-Historical curriculum shell workflows are retired. To migrate prior train-row stages:
+To migrate prior train-row stages:
 
 - old train range `A..B` with fixed `n_test=T` -> new total-row range `(A+T)..(B+T)`
 - old train choices `a,b,c` with fixed `n_test=T` -> new total-row choices `(a+T),(b+T),(c+T)`
@@ -100,9 +100,8 @@ ______________________________________________________________________
 
 ## 5. Canonical fixed-layout generation
 
-Explicit fixed-layout plan workflows have been removed from the public CLI and
-top-level Python API. Use `dagzoo generate`, `generate_one`, `generate_batch`,
-or `generate_batch_iter`; those entrypoints all run on the canonical
+Use `dagzoo generate`, `generate_one`, `generate_batch`, or
+`generate_batch_iter`; those entrypoints all run on the canonical
 fixed-layout engine internally.
 
 For persisted outputs, replay canonical batch bundles with the shared run seed

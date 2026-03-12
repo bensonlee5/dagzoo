@@ -2,6 +2,7 @@
 """Link checker for source docs and generated Hugo content.
 
 Checks local links in:
+- `README.md`
 - `docs/**`
 - `site/content/**`
 - `site/.generated/content/**`
@@ -27,6 +28,7 @@ SITE_ROOT = REPO_ROOT / "site"
 SITE_CONTENT_ROOT = SITE_ROOT / "content"
 
 DEFAULT_ROOTS = [
+    "README.md",
     "docs",
     "site/content",
     "site/.generated/content",
@@ -67,11 +69,25 @@ def _read_base_path() -> str:
     return "" if path == "/" else path
 
 
+def _read_base_url() -> str:
+    text = _read_text(SITE_ROOT / "hugo.yaml")
+    match = re.search(r"^baseURL:\s*(.+)$", text, re.MULTILINE)
+    if not match:
+        return ""
+    return match.group(1).strip().rstrip("/")
+
+
 BASE_PATH = _read_base_path()
+BASE_URL = _read_base_url()
+BASE_URL_PARSED = urlparse(BASE_URL) if BASE_URL else None
 
 
 def _iter_doc_files(root: Path) -> Iterable[Path]:
     if not root.exists():
+        return
+    if root.is_file():
+        if root.suffix.lower() in {".md", ".html"}:
+            yield root
         return
     for path in root.rglob("*"):
         if path.is_file() and path.suffix.lower() in {".md", ".html"}:
@@ -100,6 +116,25 @@ def _strip_base_path(target: str) -> str | None:
     if target.startswith(prefix):
         return target[len(BASE_PATH) :]
     return None
+
+
+def _normalize_repo_site_target(target: str) -> str:
+    parsed = urlparse(target)
+    if BASE_URL_PARSED is None or not parsed.scheme or not parsed.netloc:
+        return target
+    if parsed.scheme != BASE_URL_PARSED.scheme or parsed.netloc != BASE_URL_PARSED.netloc:
+        return target
+
+    if BASE_PATH:
+        if parsed.path != BASE_PATH and not parsed.path.startswith(f"{BASE_PATH}/"):
+            return target
+
+    normalized = parsed.path or "/"
+    if parsed.query:
+        normalized = f"{normalized}?{parsed.query}"
+    if parsed.fragment:
+        normalized = f"{normalized}#{parsed.fragment}"
+    return normalized
 
 
 def _route_candidates(route: str) -> list[Path]:
@@ -191,10 +226,14 @@ def _scan_file(path: Path) -> list[tuple[int, str]]:
     for lineno, line in enumerate(text.splitlines(), start=1):
         for raw_target in _collect_targets(line, suffix):
             target = _normalize_target(raw_target)
-            if not target or target.startswith(SKIP_PREFIXES) or target.startswith("#"):
+            if not target or target.startswith("#"):
                 continue
             if target.startswith(("{{<", "{{%")):
                 # Hugo shortcode-generated links (e.g. relref) are resolved at render time.
+                continue
+
+            target = _normalize_repo_site_target(target)
+            if target.startswith(SKIP_PREFIXES):
                 continue
 
             target_path = target.split("#", 1)[0].split("?", 1)[0]

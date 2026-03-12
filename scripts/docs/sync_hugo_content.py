@@ -157,6 +157,8 @@ def _slug_title(slug: str) -> str:
 def _front_matter(
     title: str,
     meta: PageMeta,
+    *,
+    extra_params: dict[str, Any] | None = None,
 ) -> str:
     payload: dict[str, Any] = {
         "title": title,
@@ -167,6 +169,8 @@ def _front_matter(
     if meta.aliases:
         payload["aliases"] = list(meta.aliases)
     payload.update(meta.params)
+    if extra_params:
+        payload.update(extra_params)
     text = yaml.safe_dump(payload, sort_keys=False, allow_unicode=False).strip()
     return f"---\n{text}\n---\n\n"
 
@@ -260,7 +264,14 @@ def _sync_user_markdown(route_map: dict[str, str], check: bool, changed: list[Pa
         title = _title_from_markdown(rewritten, fallback=_slug_title(Path(rel).stem))
         rewritten = _strip_matching_h1(rewritten, title=title)
         meta = PAGE_METADATA.get(rel, PageMeta(weight=100))
-        out_text = _front_matter(title=title, meta=meta) + rewritten
+        out_text = (
+            _front_matter(
+                title=title,
+                meta=meta,
+                extra_params={"canonical_repo_path": f"docs/{rel}"},
+            )
+            + rewritten
+        )
 
         dest = CONTENT_DOCS_ROOT / rel
         _sync_text(dest, out_text, check=check, changed=changed)
@@ -277,7 +288,11 @@ def _sync_development_links_page(check: bool, changed: list[Path]) -> None:
         raise FileNotFoundError(f"No development docs found in: {dev_dir}")
 
     lines: list[str] = [
-        _front_matter(title="Development References", meta=PageMeta(weight=90)),
+        _front_matter(
+            title="Development References",
+            meta=PageMeta(weight=90),
+            extra_params={"hide_repo_links": True},
+        ),
         "Phase 1 keeps development docs canonical in repo Markdown and links them directly from the docs site.\n",
         "",
     ]

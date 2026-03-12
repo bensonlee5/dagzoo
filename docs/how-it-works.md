@@ -229,7 +229,7 @@ flowchart TB
     subgraph FilterPath [filter]
         direction TB
         FilterCmd[dagzoo filter] --> Replay[replay ExtraTrees over shards]
-        Replay --> FilterArtifacts[write manifest + summary (+ optional curated shards)]
+        Replay --> FilterArtifacts[write manifest + summary + optional curated shards]
     end
     Bundle --> FilterCmd
 

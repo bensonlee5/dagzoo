@@ -61,12 +61,17 @@ def test_sync_docs_front_matter_includes_aliases_and_page_flags() -> None:
     module = load_script_module("sync_hugo_content", "scripts/docs/sync_hugo_content.py")
     meta = module.PAGE_METADATA["how-it-works.md"]
 
-    front_matter = module._front_matter("How It Works", meta)
+    front_matter = module._front_matter(
+        "How It Works",
+        meta,
+        extra_params={"canonical_repo_path": "docs/how-it-works.md"},
+    )
 
     assert "title: How It Works" in front_matter
     assert "aliases:" in front_matter
     assert "/canonical/how-it-works.html" in front_matter
     assert "mermaid: true" in front_matter
+    assert "canonical_repo_path: docs/how-it-works.md" in front_matter
 
 
 def test_sync_docs_removes_legacy_generated_paths(tmp_path) -> None:
@@ -154,3 +159,73 @@ def test_check_repo_paths_rejects_missing_scan_root(
     assert code == 1
     assert "Missing Markdown scan roots:" in output
     assert "- docs" in output
+
+
+def test_check_links_accepts_repo_site_urls_in_readme(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    module = load_script_module("check_links", "scripts/docs/check_links.py")
+    (tmp_path / "site" / "content" / "docs").mkdir(parents=True)
+    (tmp_path / "site" / "content" / "docs" / "_index.md").write_text(
+        "---\ntitle: Docs\n---\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "site" / "hugo.yaml").write_text(
+        "baseURL: https://example.com/dagzoo/\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text(
+        "[Docs](https://example.com/dagzoo/docs/)\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(module, "SITE_ROOT", tmp_path / "site")
+    monkeypatch.setattr(module, "SITE_CONTENT_ROOT", tmp_path / "site" / "content")
+    monkeypatch.setattr(module, "BASE_PATH", "/dagzoo")
+    monkeypatch.setattr(module, "BASE_URL", "https://example.com/dagzoo")
+    monkeypatch.setattr(module, "BASE_URL_PARSED", module.urlparse("https://example.com/dagzoo"))
+
+    code = module.main(["README.md"])
+
+    assert code == 0
+    assert "Link check passed." in capsys.readouterr().out
+
+
+def test_check_built_output_links_rejects_generated_source_links(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    module = load_script_module(
+        "check_built_output_links",
+        "scripts/docs/check_built_output_links.py",
+    )
+    (tmp_path / "site" / "public" / "docs").mkdir(parents=True)
+    (tmp_path / "site" / "hugo.yaml").write_text(
+        "baseURL: https://example.com/dagzoo/\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "site" / "public" / "docs" / "index.html").write_text(
+        (
+            "<html><body>"
+            '<a href="https://github.com/example/repo/tree/main/.generated/content/docs/page.md">'
+            "View page source"
+            "</a>"
+            "</body></html>"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(module, "SITE_ROOT", tmp_path / "site")
+    monkeypatch.setattr(module, "BASE_PATH", "/dagzoo")
+
+    code = module.main(["site/public"])
+    output = capsys.readouterr().out
+
+    assert code == 1
+    assert "Generated-source GitHub link violations:" in output
+    assert ".generated/content/docs/page.md" in output

@@ -131,9 +131,8 @@ Inspect these `summary.json` fields first:
 - `comparisons[*].datasets_per_minute_delta_pct`
 - `comparisons[*].filter_accepted_datasets_per_minute_delta_pct`
 
-The rewritten audit now persists only `summary.json` and `summary.md`. It no
-longer writes legacy equivalence/local-overlap artifacts or cross-run diversity
-baseline files.
+The rewritten audit persists `summary.json` and `summary.md` as the canonical
+equivalence/local-overlap and cross-run diversity outputs.
 
 ______________________________________________________________________
 
