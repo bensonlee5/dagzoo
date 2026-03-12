@@ -1,0 +1,33 @@
+seed: 22
+
+dataset:
+  task: classification
+  n_train: 128
+  n_test: 32
+  n_features_min: 8
+  n_features_max: 16
+  n_classes_min: 4
+  n_classes_max: 8
+
+graph:
+  n_nodes_min: 8
+  n_nodes_max: 12
+
+mechanism:
+  function_family_mix:
+    piecewise: 0.3
+    linear: 0.7
+
+runtime:
+  device: cpu
+
+output:
+  out_dir: data/run_piecewise_smoke
+  shard_size: 16
+  compression: zstd
+
+diagnostics:
+  enabled: false
+
+filter:
+  enabled: false

@@ -444,13 +444,17 @@ def _stage2_validate_mechanism_constraints(mechanism: MechanismConfig) -> None:
     family_mix = mechanism.function_family_mix
     if family_mix is None:
         return
-    if "product" not in family_mix:
-        return
-    has_product_component = any(family in family_mix for family in _PRODUCT_COMPONENT_FAMILIES)
-    if not has_product_component:
-        supported = ", ".join(sorted(_PRODUCT_COMPONENT_FAMILIES))
+    supported = ", ".join(sorted(_PRODUCT_COMPONENT_FAMILIES))
+    for family in ("product", "piecewise"):
+        if family not in family_mix:
+            continue
+        has_component_family = any(
+            component_family in family_mix for component_family in _PRODUCT_COMPONENT_FAMILIES
+        )
+        if has_component_family:
+            continue
         raise ValueError(
-            "mechanism.function_family_mix assigns positive weight to 'product' but none of its "
+            f"mechanism.function_family_mix assigns positive weight to '{family}' but none of its "
             f"component families are enabled. Add one of: {supported}."
         )
 

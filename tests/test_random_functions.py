@@ -93,7 +93,10 @@ def test_apply_random_function_output_depends_on_generator_root_nonce(
     assert not torch.equal(first, second)
 
 
-@pytest.mark.parametrize("family", ["linear", "quadratic", "discretization", "gp", "em", "product"])
+@pytest.mark.parametrize(
+    "family",
+    ["linear", "quadratic", "discretization", "gp", "em", "product", "piecewise"],
+)
 def test_non_finite_inputs_are_sanitized(family: MechanismFamily) -> None:
     x = torch.tensor(
         [
@@ -114,7 +117,7 @@ def test_non_finite_inputs_are_sanitized(family: MechanismFamily) -> None:
 
 @pytest.mark.parametrize(
     "family",
-    ["nn", "tree", "discretization", "gp", "linear", "quadratic", "em", "product"],
+    ["nn", "tree", "discretization", "gp", "linear", "quadratic", "em", "product", "piecewise"],
 )
 def test_each_family(family: MechanismFamily) -> None:
     g = _make_generator(10)
@@ -201,6 +204,22 @@ def test_product_family_without_enabled_component_raises_when_mix_is_present() -
         )
 
 
+def test_piecewise_family_without_enabled_component_raises_when_mix_is_present() -> None:
+    g = _make_generator(6)
+    x = torch.randn(32, 4, generator=g)
+    with pytest.raises(
+        ValueError,
+        match="enables 'piecewise' but disables all piecewise component",
+    ):
+        apply_random_function(
+            x,
+            g,
+            out_dim=2,
+            function_type="piecewise",
+            function_family_mix={"piecewise": 1.0},  # type: ignore[arg-type]
+        )
+
+
 def test_deterministic_with_family_mix() -> None:
     x = torch.randn(32, 4)
     mix = {"nn": 0.5, "linear": 0.5}
@@ -216,6 +235,49 @@ def test_deterministic_with_family_mix() -> None:
         _make_generator(6),
         out_dim=3,
         mechanism_logit_tilt=0.7,
+        function_family_mix=mix,  # type: ignore[arg-type]
+    )
+    torch.testing.assert_close(y1, y2)
+
+
+def test_default_sampled_family_never_emits_piecewise() -> None:
+    g = _make_generator(16)
+    for _ in range(128):
+        sampled = sample_function_family(
+            g,
+            mechanism_logit_tilt=1.0,
+            function_family_mix=None,
+        )
+        assert sampled != "piecewise"
+
+
+def test_sampled_family_can_emit_piecewise_when_mix_enables_it() -> None:
+    g = _make_generator(17)
+    mix = {"piecewise": 1.0}
+    for _ in range(16):
+        sampled = sample_function_family(
+            g,
+            mechanism_logit_tilt=0.8,
+            function_family_mix=mix,  # type: ignore[arg-type]
+        )
+        assert sampled == "piecewise"
+
+
+def test_piecewise_explicit_family_with_mix_is_deterministic() -> None:
+    x = torch.randn(64, 4, generator=_make_generator(18))
+    mix = {"piecewise": 0.5, "linear": 0.5}
+    y1 = apply_random_function(
+        x.clone(),
+        _make_generator(19),
+        out_dim=3,
+        function_type="piecewise",
+        function_family_mix=mix,  # type: ignore[arg-type]
+    )
+    y2 = apply_random_function(
+        x.clone(),
+        _make_generator(19),
+        out_dim=3,
+        function_type="piecewise",
         function_family_mix=mix,  # type: ignore[arg-type]
     )
     torch.testing.assert_close(y1, y2)

@@ -78,3 +78,32 @@ def test_mechanism_family_mix_accepts_product_with_component_family() -> None:
     assert mix is not None
     assert math.isclose(sum(mix.values()), 1.0, rel_tol=1e-6, abs_tol=1e-6)
     assert set(mix) == {"product", "linear"}
+
+
+@pytest.mark.parametrize(
+    ("family_mix", "family"),
+    [
+        ({"piecewise": 1.0}, "piecewise"),
+        ({"piecewise": 0.7, "nn": 0.3}, "piecewise"),
+    ],
+)
+def test_mechanism_family_mix_rejects_piecewise_without_component_family(
+    family_mix: dict[str, float],
+    family: str,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=rf"assigns positive weight to '{family}' but none of its component families are enabled",
+    ):
+        GeneratorConfig.from_dict({"mechanism": {"function_family_mix": family_mix}})
+
+
+def test_mechanism_family_mix_accepts_piecewise_with_component_family() -> None:
+    cfg = GeneratorConfig.from_dict(
+        {"mechanism": {"function_family_mix": {"piecewise": 3.0, "linear": 1.0}}}
+    )
+    mix = cfg.mechanism.function_family_mix
+    assert mix is not None
+    assert set(mix) == {"piecewise", "linear"}
+    assert mix["piecewise"] == pytest.approx(0.75)
+    assert mix["linear"] == pytest.approx(0.25)

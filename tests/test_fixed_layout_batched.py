@@ -16,6 +16,7 @@ from dagzoo.core.fixed_layout.batched import (
     _lp_distances_to_centers,
     _nearest_lp_center_indices,
     _sample_random_matrix_from_plan_batch,
+    apply_function_plan_batch,
     build_fixed_layout_execution_plan,
     generate_fixed_layout_graph_batch,
     generate_fixed_layout_label_batch,
@@ -34,6 +35,7 @@ from dagzoo.core.fixed_layout.plan_types import (
     NumericConverterGroup,
     NumericConverterPlan,
     ParametricActivationPlan,
+    PiecewiseFunctionPlan,
     RandomPointsNodeSource,
     SingularValuesMatrixPlan,
     WeightsMatrixPlan,
@@ -172,6 +174,38 @@ def test_sample_random_matrix_from_plan_batch_supports_parametric_activation_wit
     )
     assert matrices.shape == (2, 5, 4, 3)
     assert torch.all(torch.isfinite(matrices))
+
+
+def test_apply_function_plan_batch_supports_piecewise() -> None:
+    x = torch.randn(2, 12, 4, generator=torch.Generator(device="cpu").manual_seed(37))
+    plan = PiecewiseFunctionPlan(
+        gate_matrix=GaussianMatrixPlan(),
+        gate_bias=0.2,
+        gate_temperature=3.0,
+        lhs=LinearFunctionPlan(matrix=GaussianMatrixPlan()),
+        rhs=LinearFunctionPlan(matrix=GaussianMatrixPlan()),
+    )
+
+    out_a = apply_function_plan_batch(
+        x,
+        FixedLayoutBatchRng(seed=41, batch_size=2, device="cpu"),
+        plan,
+        out_dim=3,
+        noise_sigma_multiplier=1.0,
+        noise_spec=None,
+    )
+    out_b = apply_function_plan_batch(
+        x,
+        FixedLayoutBatchRng(seed=41, batch_size=2, device="cpu"),
+        plan,
+        out_dim=3,
+        noise_sigma_multiplier=1.0,
+        noise_spec=None,
+    )
+
+    assert out_a.shape == (2, 12, 3)
+    assert torch.all(torch.isfinite(out_a))
+    torch.testing.assert_close(out_a, out_b)
 
 
 def test_fixed_layout_batch_rng_keyed_is_stable_and_flat_equivalent() -> None:

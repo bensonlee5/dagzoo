@@ -47,6 +47,7 @@ USER_MD_SOURCES = [
     "features/shift.md",
     "features/noise.md",
     "features/benchmark-guardrails.md",
+    "features/mechanism-diversity.md",
 ]
 
 
@@ -102,6 +103,10 @@ PAGE_METADATA: dict[str, PageMeta] = {
     "features/benchmark-guardrails.md": PageMeta(
         weight=65,
         description="Automated quality checks for benchmark suite runs.",
+    ),
+    "features/mechanism-diversity.md": PageMeta(
+        weight=66,
+        description="Opt-in mechanism-family rollout workflows and diagnostics checks.",
     ),
 }
 

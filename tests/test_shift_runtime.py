@@ -13,6 +13,7 @@ from dagzoo.config import (
 )
 from dagzoo.core.shift import (
     MECHANISM_FAMILY_ORDER,
+    MECHANISM_FAMILY_SUPPORTED_ORDER,
     mechanism_family_probabilities,
     mechanism_nonlinear_mass,
     resolve_shift_runtime_params,
@@ -161,4 +162,23 @@ def test_mechanism_nonlinear_mass_respects_family_mix() -> None:
     assert mechanism_nonlinear_mass(
         mechanism_logit_tilt=1.0,
         family_weights={"nn": 1.0},
+    ) == pytest.approx(1.0)
+
+
+def test_mechanism_family_probabilities_include_piecewise_only_when_mix_enables_it() -> None:
+    default_probs = mechanism_family_probabilities(mechanism_logit_tilt=0.0)
+    assert "piecewise" not in default_probs
+
+    mixed_probs = mechanism_family_probabilities(
+        mechanism_logit_tilt=0.0,
+        family_weights={"piecewise": 1.0},
+    )
+    assert set(mixed_probs) == set(MECHANISM_FAMILY_SUPPORTED_ORDER)
+    assert mixed_probs["piecewise"] == pytest.approx(1.0)
+    for family in MECHANISM_FAMILY_SUPPORTED_ORDER:
+        if family != "piecewise":
+            assert mixed_probs[family] == pytest.approx(0.0)
+    assert mechanism_nonlinear_mass(
+        mechanism_logit_tilt=0.0,
+        family_weights={"piecewise": 1.0},
     ) == pytest.approx(1.0)

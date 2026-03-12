@@ -23,6 +23,43 @@ def _fmt(value: object, *, digits: int = 2) -> str:
     return str(value)
 
 
+def _mechanism_family_markdown_lines(
+    title: str,
+    summary: object,
+) -> list[str]:
+    if not isinstance(summary, dict):
+        return [f"### {title}", "", "- No realized mechanism-family metadata was recorded.", ""]
+
+    sampled_family_counts = summary.get("sampled_family_counts", {})
+    dataset_presence = summary.get("dataset_presence_rate_by_family", {})
+    lines = [
+        f"### {title}",
+        "",
+        f"- Metadata coverage: `{_fmt(summary.get('metadata_coverage_rate'))}`",
+        f"- Bundles with metadata: `{_fmt(summary.get('bundles_with_metadata'), digits=0)}`",
+        f"- Mean total function plans: `{_fmt(summary.get('mean_total_function_plans'))}`",
+        "",
+    ]
+    if isinstance(sampled_family_counts, dict) and sampled_family_counts:
+        lines.extend(
+            [
+                "| Family | Sampled Count | Dataset Presence Rate |",
+                "|---|---:|---:|",
+            ]
+        )
+        for family in sorted(sampled_family_counts):
+            lines.append(
+                "| "
+                f"{family} | "
+                f"{_fmt(sampled_family_counts.get(family), digits=0)} | "
+                f"{_fmt((dataset_presence or {}).get(family))} |"
+            )
+    else:
+        lines.append("- No realized mechanism families were observed.")
+    lines.append("")
+    return lines
+
+
 def format_effective_diversity_markdown(report: dict[str, Any]) -> str:
     """Render a concise markdown summary for the diversity audit."""
 
@@ -81,6 +118,27 @@ def format_effective_diversity_markdown(report: dict[str, Any]) -> str:
     lines.append(
         "- `summary.json` / `summary.md` are the canonical persisted artifacts for the rewritten audit."
     )
+    lines.extend(
+        [
+            "",
+            "## Mechanism Families",
+            "",
+            *_mechanism_family_markdown_lines(
+                "Baseline",
+                baseline.get("mechanism_family_summary"),
+            ),
+        ]
+    )
+    for variant in variants if isinstance(variants, list) else []:
+        if not isinstance(variant, dict):
+            continue
+        label = str(variant.get("label", "-"))
+        lines.extend(
+            _mechanism_family_markdown_lines(
+                label,
+                variant.get("mechanism_family_summary"),
+            )
+        )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -161,6 +219,28 @@ def format_filter_calibration_markdown(report: dict[str, Any]) -> str:
     lines.append(
         "- `summary.json` / `summary.md` are the canonical persisted artifacts for filter calibration."
     )
+    lines.extend(
+        [
+            "",
+            "## Mechanism Families",
+            "",
+            *_mechanism_family_markdown_lines(
+                "Baseline",
+                baseline.get("mechanism_family_summary"),
+            ),
+        ]
+    )
+    for candidate in candidates if isinstance(candidates, list) else []:
+        if not isinstance(candidate, dict):
+            continue
+        if str(candidate.get("label", "")) == str(baseline.get("label", "")):
+            continue
+        lines.extend(
+            _mechanism_family_markdown_lines(
+                str(candidate.get("label", "-")),
+                candidate.get("mechanism_family_summary"),
+            )
+        )
     return "\n".join(lines).rstrip() + "\n"
 
 

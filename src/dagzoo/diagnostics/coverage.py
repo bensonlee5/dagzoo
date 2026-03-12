@@ -169,6 +169,10 @@ class CoverageAggregator:
         )
         self._num_datasets = 0
         self._task_counts: dict[str, int] = {}
+        self._mechanism_family_bundles_with_metadata = 0
+        self._mechanism_family_total_function_plans = 0
+        self._mechanism_family_sampled_counts: dict[str, int] = {}
+        self._mechanism_family_dataset_presence: dict[str, int] = {}
         self._metrics = {
             name: _MetricAccumulator(
                 sample_limit=self._config.max_values_per_metric,
@@ -188,6 +192,7 @@ class CoverageAggregator:
 
         metrics = extract_dataset_metrics(bundle, include_spearman=self._config.include_spearman)
         self.update_metrics(metrics)
+        self._update_mechanism_families(bundle)
         return metrics
 
     def update_metrics(self, metrics: DatasetMetrics) -> None:
@@ -218,7 +223,64 @@ class CoverageAggregator:
             "histogram_bins": int(self._config.histogram_bins),
             "quantiles": list(self._config.quantiles),
             "max_values_per_metric": self._config.max_values_per_metric,
+            "mechanism_family_summary": self._build_mechanism_family_summary(),
             "metrics": summary_metrics,
+        }
+
+    def _update_mechanism_families(self, bundle: DatasetBundle) -> None:
+        metadata = bundle.metadata.get("mechanism_families")
+        if not isinstance(metadata, dict):
+            return
+        sampled_family_counts = metadata.get("sampled_family_counts")
+        if not isinstance(sampled_family_counts, dict):
+            return
+
+        normalized_counts: dict[str, int] = {}
+        for raw_family, raw_count in sampled_family_counts.items():
+            if isinstance(raw_family, str) and not isinstance(raw_count, bool):
+                if isinstance(raw_count, (int, float)) and math.isfinite(float(raw_count)):
+                    count = max(0, int(raw_count))
+                    if count > 0:
+                        normalized_counts[str(raw_family)] = count
+        self._mechanism_family_bundles_with_metadata += 1
+        for family, count in normalized_counts.items():
+            self._mechanism_family_sampled_counts[family] = (
+                self._mechanism_family_sampled_counts.get(family, 0) + int(count)
+            )
+            self._mechanism_family_dataset_presence[family] = (
+                self._mechanism_family_dataset_presence.get(family, 0) + 1
+            )
+
+        total_function_plans = metadata.get("total_function_plans")
+        if (
+            not isinstance(total_function_plans, bool)
+            and isinstance(total_function_plans, (int, float))
+            and math.isfinite(float(total_function_plans))
+        ):
+            self._mechanism_family_total_function_plans += max(0, int(total_function_plans))
+
+    def _build_mechanism_family_summary(self) -> dict[str, Any]:
+        bundles_with_metadata = int(self._mechanism_family_bundles_with_metadata)
+        num_datasets = int(self._num_datasets)
+        metadata_denominator = num_datasets if num_datasets > 0 else 0
+        mean_total_function_plans = (
+            float(self._mechanism_family_total_function_plans / bundles_with_metadata)
+            if bundles_with_metadata > 0
+            else 0.0
+        )
+        return {
+            "metadata_coverage_rate": (
+                float(bundles_with_metadata / metadata_denominator)
+                if metadata_denominator > 0
+                else 0.0
+            ),
+            "bundles_with_metadata": bundles_with_metadata,
+            "sampled_family_counts": dict(sorted(self._mechanism_family_sampled_counts.items())),
+            "dataset_presence_rate_by_family": {
+                family: (float(count / metadata_denominator) if metadata_denominator > 0 else 0.0)
+                for family, count in sorted(self._mechanism_family_dataset_presence.items())
+            },
+            "mean_total_function_plans": float(mean_total_function_plans),
         }
 
 
@@ -251,6 +313,15 @@ def write_coverage_summary_markdown(summary: dict[str, Any], out_path: str | Pat
     if isinstance(task_counts, dict) and task_counts:
         task_parts = [f"{name}={count}" for name, count in sorted(task_counts.items())]
         lines.append(f"- Task counts: `{', '.join(task_parts)}`")
+    mechanism_family_summary = summary.get("mechanism_family_summary", {})
+    if isinstance(mechanism_family_summary, dict):
+        lines.extend(
+            [
+                f"- Mechanism metadata coverage: `{_fmt(mechanism_family_summary.get('metadata_coverage_rate'))}`",
+                f"- Bundles with mechanism metadata: `{_fmt(mechanism_family_summary.get('bundles_with_metadata'), digits=0)}`",
+                f"- Mean total function plans: `{_fmt(mechanism_family_summary.get('mean_total_function_plans'))}`",
+            ]
+        )
     lines.extend(["", "## Metrics", ""])
     lines.append("| Metric | Min | Max | p50 | Covered Bins | Underrepresented Bins |")
     lines.append("|---|---:|---:|---:|---:|---:|")
@@ -272,6 +343,23 @@ def write_coverage_summary_markdown(summary: dict[str, Any], out_path: str | Pat
                 f"{_fmt((histogram or {}).get('covered_bins'), digits=0)} | "
                 f"{_fmt(len(under_bins), digits=0)} |"
             )
+
+    if isinstance(mechanism_family_summary, dict):
+        lines.extend(["", "## Mechanism Families", ""])
+        sampled_family_counts = mechanism_family_summary.get("sampled_family_counts", {})
+        dataset_presence = mechanism_family_summary.get("dataset_presence_rate_by_family", {})
+        if isinstance(sampled_family_counts, dict) and sampled_family_counts:
+            lines.append("| Family | Sampled Count | Dataset Presence Rate |")
+            lines.append("|---|---:|---:|")
+            for family in sorted(sampled_family_counts):
+                lines.append(
+                    "| "
+                    f"{family} | "
+                    f"{_fmt(sampled_family_counts.get(family), digits=0)} | "
+                    f"{_fmt((dataset_presence or {}).get(family))} |"
+                )
+        else:
+            lines.append("- No realized mechanism-family metadata was observed.")
 
     with path.open("w", encoding="utf-8") as f:
         f.write("\n".join(lines).rstrip() + "\n")
