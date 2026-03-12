@@ -13,6 +13,7 @@ MechanismFamily = Literal[
     "quadratic",
     "em",
     "product",
+    "piecewise",
 ]
 
 MissingnessMechanism = Literal["none", "mcar", "mar", "mnar"]
@@ -85,6 +86,7 @@ _MECHANISM_FAMILY_VALUE_MAP: dict[str, MechanismFamily] = {
     "quadratic": "quadratic",
     "em": "em",
     "product": "product",
+    "piecewise": "piecewise",
 }
 _PRODUCT_COMPONENT_FAMILIES: frozenset[MechanismFamily] = frozenset(
     {"tree", "discretization", "gp", "linear", "quadratic"}

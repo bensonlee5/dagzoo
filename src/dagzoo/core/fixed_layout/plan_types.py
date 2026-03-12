@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias
 
-from dagzoo.core.layout_types import AggregationKind, ConverterKind
+from dagzoo.core.layout_types import AggregationKind, ConverterKind, MechanismFamily
 
 FixedLayoutExecutionContract = Literal["chunk_batched_v1"]
 FixedLayoutRootBaseKind = Literal["normal", "uniform", "unit_ball", "normal_cov"]
@@ -136,6 +136,16 @@ class ProductFunctionPlan:
     family: Literal["product"] = "product"
 
 
+@dataclass(frozen=True, slots=True)
+class PiecewiseFunctionPlan:
+    gate_matrix: FixedLayoutMatrixPlan
+    gate_bias: float
+    gate_temperature: float
+    lhs: FixedLayoutFunctionPlan
+    rhs: FixedLayoutFunctionPlan
+    family: Literal["piecewise"] = "piecewise"
+
+
 FixedLayoutFunctionPlan: TypeAlias = (
     LinearFunctionPlan
     | QuadraticFunctionPlan
@@ -145,6 +155,7 @@ FixedLayoutFunctionPlan: TypeAlias = (
     | GpFunctionPlan
     | EmFunctionPlan
     | ProductFunctionPlan
+    | PiecewiseFunctionPlan
 )
 
 
@@ -455,11 +466,72 @@ def _function_plan_payload(plan: FixedLayoutFunctionPlan) -> dict[str, Any]:
             "m_val": int(plan.m_val),
             "linear_matrix": _matrix_plan_payload(plan.linear_matrix),
         }
+    if isinstance(plan, PiecewiseFunctionPlan):
+        return {
+            "family": "piecewise",
+            "gate_matrix": _matrix_plan_payload(plan.gate_matrix),
+            "gate_bias": float(plan.gate_bias),
+            "gate_temperature": float(plan.gate_temperature),
+            "lhs": _function_plan_payload(plan.lhs),
+            "rhs": _function_plan_payload(plan.rhs),
+        }
     return {
         "family": "product",
         "lhs": _function_plan_payload(plan.lhs),
         "rhs": _function_plan_payload(plan.rhs),
     }
+
+
+def function_plan_family_counts(plan: FixedLayoutFunctionPlan) -> dict[MechanismFamily, int]:
+    """Count realized mechanism families within one function plan tree."""
+
+    counts: dict[MechanismFamily, int] = {}
+
+    def _increment(family: MechanismFamily) -> None:
+        counts[family] = int(counts.get(family, 0)) + 1
+
+    if isinstance(plan, ProductFunctionPlan):
+        _increment("product")
+        for nested_plan in (plan.lhs, plan.rhs):
+            for family, count in function_plan_family_counts(nested_plan).items():
+                counts[family] = int(counts.get(family, 0)) + int(count)
+        return counts
+    if isinstance(plan, PiecewiseFunctionPlan):
+        _increment("piecewise")
+        for nested_plan in (plan.lhs, plan.rhs):
+            for family, count in function_plan_family_counts(nested_plan).items():
+                counts[family] = int(counts.get(family, 0)) + int(count)
+        return counts
+
+    _increment(plan.family)
+    return counts
+
+
+def execution_plan_family_counts(
+    execution_plan: FixedLayoutExecutionPlan,
+) -> dict[MechanismFamily, int]:
+    """Count realized mechanism families across one fixed-layout execution plan."""
+
+    counts: dict[MechanismFamily, int] = {}
+
+    def _merge(plan: FixedLayoutFunctionPlan | None) -> None:
+        if plan is None:
+            return
+        for family, count in function_plan_family_counts(plan).items():
+            counts[family] = int(counts.get(family, 0)) + int(count)
+
+    for node_plan in execution_plan.node_plans:
+        source = node_plan.source
+        if isinstance(source, (RandomPointsNodeSource, ConcatNodeSource)):
+            _merge(source.function)
+        else:
+            for plan in source.parent_functions:
+                _merge(plan)
+        for converter_plan in node_plan.converter_plans:
+            if isinstance(converter_plan, CategoricalConverterPlan):
+                _merge(converter_plan.function)
+
+    return {family: int(counts[family]) for family in sorted(counts)}
 
 
 def _matrix_plan_payload(plan: FixedLayoutMatrixPlan) -> dict[str, Any]:
@@ -517,6 +589,7 @@ __all__ = [
     "NumericConverterGroup",
     "NumericConverterPlan",
     "ParametricActivationPlan",
+    "PiecewiseFunctionPlan",
     "ProductFunctionPlan",
     "QuadraticFunctionPlan",
     "RandomPointsNodeSource",
@@ -524,6 +597,8 @@ __all__ = [
     "StackedNodeSource",
     "TreeFunctionPlan",
     "WeightsMatrixPlan",
+    "execution_plan_family_counts",
     "fixed_layout_converter_groups",
     "fixed_layout_signature_payloads",
+    "function_plan_family_counts",
 ]

@@ -10,6 +10,29 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.9.6] - 2026-03-11
+
+### Added
+
+- Added an opt-in `piecewise` mechanism family to the fixed-layout sampler and
+  batched execution path. It is available only through
+  `mechanism.function_family_mix.piecewise` in this release, paired with at
+  least one explicit branch family; the default sampler order is unchanged.
+- Added curated mechanism-diversity smoke presets plus a dedicated feature
+  guide for `piecewise` generate, diversity-audit, and filter-calibration
+  workflows.
+
+### Changed
+
+- Fixed-layout bundle metadata now emits `mechanism_families` with realized
+  sampled family counts, families present, and total realized function-plan
+  count for each dataset bundle.
+- Coverage summaries, diversity-audit reports, and filter-calibration reports
+  now emit `mechanism_family_summary` in `summary.json` and render the same
+  realized mechanism-family usage in `summary.md`.
+- Fixed-layout metadata schema version is now `5` to reflect the new
+  `mechanism_families` payload on generated bundles.
+
 ## [0.9.5] - 2026-03-11
 
 ### Added

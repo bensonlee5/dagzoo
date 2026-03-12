@@ -137,6 +137,7 @@ def _candidate_entry(
         "filter_rejected_datasets_measured": entry.get("filter_rejected_datasets_measured"),
         "filter_acceptance_rate_dataset_level": entry.get("filter_acceptance_rate_dataset_level"),
         "filter_rejection_rate_dataset_level": entry.get("filter_rejection_rate_dataset_level"),
+        "mechanism_family_summary": entry.get("mechanism_family_summary"),
         "diversity_status": str(diversity_status),
         "diversity_composite_shift_pct": comparison_payload.get("diversity_composite_shift_pct"),
         "diversity_metric_shift_pct": comparison_payload.get("diversity_metric_shift_pct"),

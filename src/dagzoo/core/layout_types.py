@@ -18,6 +18,7 @@ MechanismFamily = Literal[
     "quadratic",
     "em",
     "product",
+    "piecewise",
 ]
 AggregationKind = Literal["sum", "product", "max", "logsumexp"]
 

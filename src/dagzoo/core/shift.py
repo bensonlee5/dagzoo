@@ -29,6 +29,10 @@ MECHANISM_FAMILY_ORDER: tuple[MechanismFamily, ...] = (
     "em",
     "product",
 )
+MECHANISM_FAMILY_SUPPORTED_ORDER: tuple[MechanismFamily, ...] = (
+    *MECHANISM_FAMILY_ORDER,
+    "piecewise",
+)
 
 MECHANISM_FAMILY_BASE_LOGITS: dict[MechanismFamily, float] = {
     "nn": 0.7,
@@ -39,6 +43,7 @@ MECHANISM_FAMILY_BASE_LOGITS: dict[MechanismFamily, float] = {
     "quadratic": -0.6,
     "em": -0.3,
     "product": 0.9,
+    "piecewise": 0.8,
 }
 NONLINEAR_MECHANISM_FAMILIES: tuple[MechanismFamily, ...] = (
     "nn",
@@ -46,6 +51,7 @@ NONLINEAR_MECHANISM_FAMILIES: tuple[MechanismFamily, ...] = (
     "discretization",
     "gp",
     "product",
+    "piecewise",
 )
 
 _MODE_DEFAULT_SCALES: dict[str, tuple[float, float, float]] = {
@@ -87,11 +93,15 @@ def centered_mechanism_family_logits(
 def mechanism_family_probabilities(
     *,
     mechanism_logit_tilt: float,
-    families: tuple[MechanismFamily, ...] = MECHANISM_FAMILY_ORDER,
+    families: tuple[MechanismFamily, ...] | None = None,
     family_weights: dict[MechanismFamily, float] | None = None,
 ) -> dict[MechanismFamily, float]:
     """Resolve mechanism family probabilities for a given tilt value."""
 
+    if families is None:
+        families = (
+            MECHANISM_FAMILY_ORDER if family_weights is None else MECHANISM_FAMILY_SUPPORTED_ORDER
+        )
     if not families:
         return {}
 
@@ -145,12 +155,16 @@ def mechanism_family_probabilities(
 def mechanism_nonlinear_mass(
     *,
     mechanism_logit_tilt: float,
-    families: tuple[MechanismFamily, ...] = MECHANISM_FAMILY_ORDER,
+    families: tuple[MechanismFamily, ...] | None = None,
     nonlinear_families: tuple[MechanismFamily, ...] = NONLINEAR_MECHANISM_FAMILIES,
     family_weights: dict[MechanismFamily, float] | None = None,
 ) -> float:
     """Return probability mass over nonlinear mechanism families."""
 
+    if families is None:
+        families = (
+            MECHANISM_FAMILY_ORDER if family_weights is None else MECHANISM_FAMILY_SUPPORTED_ORDER
+        )
     if not families:
         return 0.0
     probs = mechanism_family_probabilities(
@@ -210,6 +224,7 @@ def resolve_shift_runtime_params(config: GeneratorConfig) -> ShiftRuntimeParams:
 __all__ = [
     "MECHANISM_FAMILY_BASE_LOGITS",
     "MECHANISM_FAMILY_ORDER",
+    "MECHANISM_FAMILY_SUPPORTED_ORDER",
     "NONLINEAR_MECHANISM_FAMILIES",
     "ShiftRuntimeParams",
     "centered_mechanism_family_logits",

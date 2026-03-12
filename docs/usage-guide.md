@@ -176,7 +176,41 @@ Detailed guide: [Noise Diversification](features/noise.md)
 
 ______________________________________________________________________
 
-## 10. Benchmark workflows and guardrails
+## 10. Mechanism-diversity workflows
+
+Use mechanism-diversity workflows when you want to stage opt-in mechanism
+families through the existing `mechanism.function_family_mix` surface and
+verify realized family usage plus diversity lift before any broader rollout.
+
+```bash
+dagzoo generate \
+  --config configs/preset_mechanism_piecewise_generate_smoke.yaml \
+  --num-datasets 10 \
+  --device cpu \
+  --hardware-policy none \
+  --out data/run_piecewise_smoke_local
+
+dagzoo diversity-audit \
+  --baseline-config configs/preset_mechanism_baseline_benchmark_smoke.yaml \
+  --variant-config configs/preset_mechanism_piecewise_benchmark_smoke.yaml \
+  --suite smoke \
+  --num-datasets 10 \
+  --warmup 0 \
+  --device cpu \
+  --out-dir benchmarks/results/diversity_audit_piecewise
+
+dagzoo filter-calibration \
+  --config configs/preset_mechanism_piecewise_filter_smoke.yaml \
+  --suite smoke \
+  --device cpu \
+  --out-dir benchmarks/results/filter_calibration_piecewise
+```
+
+Detailed guide: [Mechanism Diversity](features/mechanism-diversity.md)
+
+______________________________________________________________________
+
+## 11. Benchmark workflows and guardrails
 
 Use benchmark workflows for smoke checks, feature guardrails, and regression
 gating.
@@ -214,7 +248,7 @@ accepted-throughput and diversity-shift comparisons.
 
 ______________________________________________________________________
 
-## 11. Request-file handoff workflows
+## 12. Request-file handoff workflows
 
 Use `dagzoo request` when a downstream repo such as `tab-foundry` needs a small
 request-file contract instead of the full internal config surface.

@@ -29,6 +29,13 @@ def _coverage_summary(*, mean: float, p25: float, p50: float, p75: float) -> dic
     }
     return {
         "num_datasets": 4,
+        "mechanism_family_summary": {
+            "metadata_coverage_rate": 1.0,
+            "bundles_with_metadata": 4,
+            "sampled_family_counts": {"linear": 4},
+            "dataset_presence_rate_by_family": {"linear": 1.0},
+            "mean_total_function_plans": 4.0,
+        },
         "metrics": metrics,
     }
 
@@ -150,6 +157,7 @@ def test_run_effective_diversity_audit_aggregates_variant_results(
     assert report["summary"]["status_counts"]["pass"] == 1
     assert report["summary"]["status_counts"]["fail"] == 1
     assert [item["label"] for item in report["variants"]] == ["variant", "variant_2"]
+    assert report["baseline"]["mechanism_family_summary"]["sampled_family_counts"] == {"linear": 4}
     assert report["comparisons"][1][
         "filter_accepted_datasets_per_minute_delta_pct"
     ] == pytest.approx(-50.0)
@@ -165,8 +173,26 @@ def test_effective_diversity_artifact_writer(tmp_path) -> None:
             "datasets_per_minute": 123.0,
             "filter_accepted_datasets_per_minute": 45.0,
             "filter_acceptance_rate_dataset_level": 0.5,
+            "mechanism_family_summary": {
+                "metadata_coverage_rate": 1.0,
+                "bundles_with_metadata": 25,
+                "sampled_family_counts": {"linear": 25},
+                "dataset_presence_rate_by_family": {"linear": 1.0},
+                "mean_total_function_plans": 3.0,
+            },
         },
-        "variants": [{"label": "variant"}],
+        "variants": [
+            {
+                "label": "variant",
+                "mechanism_family_summary": {
+                    "metadata_coverage_rate": 1.0,
+                    "bundles_with_metadata": 25,
+                    "sampled_family_counts": {"piecewise": 25, "linear": 25},
+                    "dataset_presence_rate_by_family": {"piecewise": 1.0, "linear": 1.0},
+                    "mean_total_function_plans": 6.0,
+                },
+            }
+        ],
         "comparisons": [
             {
                 "variant_label": "variant",
@@ -193,6 +219,8 @@ def test_effective_diversity_artifact_writer(tmp_path) -> None:
     assert payload["schema_name"] == "dagzoo_diversity_audit_report"
     assert "summary.json` / `summary.md` are the canonical persisted artifacts" in markdown
     assert "Probe num datasets" in markdown
+    assert "## Mechanism Families" in markdown
+    assert "piecewise" in markdown
 
 
 def test_run_effective_diversity_audit_smoke_filter_disabled(tmp_path) -> None:

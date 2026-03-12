@@ -1,0 +1,53 @@
+seed: 24
+
+dataset:
+  task: regression
+  n_train: 128
+  n_test: 32
+  n_features_min: 8
+  n_features_max: 16
+
+graph:
+  n_nodes_min: 8
+  n_nodes_max: 12
+
+mechanism:
+  function_family_mix:
+    piecewise: 0.3
+    linear: 0.7
+
+runtime:
+  device: cpu
+
+output:
+  out_dir: benchmarks/results/smoke_mechanism_piecewise_filter
+  shard_size: 16
+  compression: zstd
+
+diagnostics:
+  enabled: false
+
+benchmark:
+  preset_name: mechanism_piecewise_filter_smoke
+  suite: smoke
+  num_datasets: 20
+  warmup_datasets: 0
+  warn_threshold_pct: 10.0
+  fail_threshold_pct: 20.0
+  collect_memory: false
+  collect_reproducibility: false
+  reproducibility_num_datasets: 1
+  latency_num_samples: 5
+  presets:
+    mechanism_piecewise_filter_smoke:
+      device: cpu
+      num_datasets: 20
+      warmup_datasets: 0
+
+filter:
+  enabled: true
+  n_estimators: 25
+  max_depth: 6
+  threshold: 0.2
+  max_attempts: 3
+  n_jobs: -1

@@ -45,6 +45,7 @@ from dagzoo.core.fixed_layout.plan_types import (
     NeuralNetFunctionPlan,
     NumericConverterPlan,
     ParametricActivationPlan,
+    PiecewiseFunctionPlan,
     ProductFunctionPlan,
     QuadraticFunctionPlan,
     RandomPointsNodeSource,
@@ -55,7 +56,11 @@ from dagzoo.core.fixed_layout.plan_types import (
     fixed_layout_converter_groups,
 )
 from dagzoo.core.layout_types import AggregationKind, ConverterKind, MechanismFamily
-from dagzoo.core.shift import MECHANISM_FAMILY_ORDER, mechanism_family_probabilities
+from dagzoo.core.shift import (
+    MECHANISM_FAMILY_ORDER,
+    MECHANISM_FAMILY_SUPPORTED_ORDER,
+    mechanism_family_probabilities,
+)
 from dagzoo.functions.activations import fixed_activation_names
 from dagzoo.math import log_uniform as _log_uniform
 from dagzoo.rng import KeyedRng, keyed_rng_from_generator
@@ -186,6 +191,7 @@ def sample_function_family(
     keyed_rng: KeyedRng | None = None,
     mechanism_logit_tilt: float,
     function_family_mix: dict[MechanismFamily, float] | None = None,
+    families: Sequence[MechanismFamily] | None = None,
     device: str | None = None,
 ) -> MechanismFamily:
     """Sample one mechanism family with optional logit tilt."""
@@ -197,17 +203,28 @@ def sample_function_family(
         namespace="sample_function_family",
     )
     generator = keyed_rng.torch_rng(device=resolved_device)
+    family_order = tuple(
+        families
+        if families is not None
+        else (
+            MECHANISM_FAMILY_SUPPORTED_ORDER
+            if function_family_mix is not None
+            else MECHANISM_FAMILY_ORDER
+        )
+    )
+    if not family_order:
+        raise ValueError("At least one mechanism family must be available for sampling.")
     if mechanism_logit_tilt <= 0.0 and function_family_mix is None:
-        idx = _randint_scalar(0, len(MECHANISM_FAMILY_ORDER), generator)
-        return MECHANISM_FAMILY_ORDER[int(idx)]
+        idx = _randint_scalar(0, len(family_order), generator)
+        return family_order[int(idx)]
 
     probs_by_family = mechanism_family_probabilities(
         mechanism_logit_tilt=mechanism_logit_tilt,
-        families=MECHANISM_FAMILY_ORDER,
+        families=family_order,
         family_weights=function_family_mix,
     )
     positive_families = [
-        family for family in MECHANISM_FAMILY_ORDER if float(probs_by_family.get(family, 0.0)) > 0.0
+        family for family in family_order if float(probs_by_family.get(family, 0.0)) > 0.0
     ]
     if not positive_families:
         raise ValueError("No eligible mechanism families are available for sampling.")
@@ -220,7 +237,8 @@ def sample_function_family(
     return positive_families[-1]
 
 
-def _product_component_mix(
+def _higher_order_component_mix(
+    family: Literal["product", "piecewise"],
     function_family_mix: dict[MechanismFamily, float] | None,
 ) -> dict[MechanismFamily, float]:
     if function_family_mix is None:
@@ -232,7 +250,7 @@ def _product_component_mix(
     }
     if not filtered:
         raise ValueError(
-            "mechanism.function_family_mix enables 'product' but disables all product "
+            f"mechanism.function_family_mix enables '{family}' but disables all {family} "
             "component families for fixed-layout plan sampling."
         )
     return filtered
@@ -252,16 +270,41 @@ def _sample_product_component_family(
         device=device,
         namespace="sample_product_component_family",
     )
-    component_mix = _product_component_mix(function_family_mix)
+    component_mix = _higher_order_component_mix("product", function_family_mix)
     family = sample_function_family(
         keyed_rng=keyed_rng,
         mechanism_logit_tilt=mechanism_logit_tilt,
         function_family_mix=component_mix,
+        families=_PRODUCT_COMPONENT_FAMILIES,
         device=resolved_device,
     )
     if family == "product":
         raise ValueError("Product subplans must resolve to non-product mechanism families.")
     return family
+
+
+def _sample_piecewise_component_family(
+    generator: torch.Generator | None = None,
+    *,
+    keyed_rng: KeyedRng | None = None,
+    mechanism_logit_tilt: float,
+    function_family_mix: dict[MechanismFamily, float] | None,
+    device: str | None = None,
+) -> MechanismFamily:
+    keyed_rng, resolved_device = _resolve_sampling_root(
+        generator=generator,
+        keyed_rng=keyed_rng,
+        device=device,
+        namespace="sample_piecewise_component_family",
+    )
+    component_mix = _higher_order_component_mix("piecewise", function_family_mix)
+    return sample_function_family(
+        keyed_rng=keyed_rng,
+        mechanism_logit_tilt=mechanism_logit_tilt,
+        function_family_mix=component_mix,
+        families=_PRODUCT_COMPONENT_FAMILIES,
+        device=resolved_device,
+    )
 
 
 def sample_activation_plan(
@@ -499,6 +542,56 @@ def sample_function_plan_for_family(
             device=resolved_device,
         )
         return ProductFunctionPlan(
+            lhs=sample_function_plan_for_family(
+                keyed_rng=lhs_root.keyed("plan"),
+                family=lhs_family,
+                out_dim=out_dim,
+                mechanism_logit_tilt=mechanism_logit_tilt,
+                function_family_mix=function_family_mix,
+                device=resolved_device,
+            ),
+            rhs=sample_function_plan_for_family(
+                keyed_rng=rhs_root.keyed("plan"),
+                family=rhs_family,
+                out_dim=out_dim,
+                mechanism_logit_tilt=mechanism_logit_tilt,
+                function_family_mix=function_family_mix,
+                device=resolved_device,
+            ),
+        )
+    if family == "piecewise":
+        lhs_root = keyed_rng.keyed("lhs")
+        rhs_root = keyed_rng.keyed("rhs")
+        lhs_family = _sample_piecewise_component_family(
+            keyed_rng=lhs_root.keyed("family"),
+            mechanism_logit_tilt=mechanism_logit_tilt,
+            function_family_mix=function_family_mix,
+            device=resolved_device,
+        )
+        rhs_family = _sample_piecewise_component_family(
+            keyed_rng=rhs_root.keyed("family"),
+            mechanism_logit_tilt=mechanism_logit_tilt,
+            function_family_mix=function_family_mix,
+            device=resolved_device,
+        )
+        gate_temperature = float(
+            _log_uniform(
+                keyed_rng.keyed("gate_temperature").torch_rng(device=resolved_device),
+                2.0,
+                16.0,
+                resolved_device,
+            )
+        )
+        gate_bias_generator = keyed_rng.keyed("gate_bias").torch_rng(device=resolved_device)
+        gate_bias = (2.0 * _rand_scalar(gate_bias_generator)) - 1.0
+        gate_bias *= 1.5
+        return PiecewiseFunctionPlan(
+            gate_matrix=sample_matrix_plan(
+                keyed_rng=keyed_rng.keyed("gate_matrix"),
+                device=resolved_device,
+            ),
+            gate_bias=gate_bias,
+            gate_temperature=gate_temperature,
             lhs=sample_function_plan_for_family(
                 keyed_rng=lhs_root.keyed("plan"),
                 family=lhs_family,

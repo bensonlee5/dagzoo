@@ -350,6 +350,20 @@ def test_generate_one_shift_metadata_respects_mechanism_family_mix() -> None:
     assert bundle.metadata["config"]["mechanism"]["function_family_mix"] == {"linear": 1.0}
 
 
+def test_generate_one_emits_realized_mechanism_family_metadata() -> None:
+    cfg = _tiny_regression_config()
+    cfg.mechanism.function_family_mix = {"piecewise": 0.3, "linear": 0.7}
+
+    bundle = generate_one(cfg, seed=18836, device="cpu")
+    mechanism_families = bundle.metadata["mechanism_families"]
+
+    assert mechanism_families["total_function_plans"] >= 1
+    assert set(mechanism_families["sampled_family_counts"]).issubset({"piecewise", "linear"})
+    assert set(mechanism_families["families_present"]).issubset({"piecewise", "linear"})
+    assert "piecewise" in mechanism_families["sampled_family_counts"]
+    assert "piecewise" in mechanism_families["families_present"]
+
+
 def test_generate_one_noise_metadata_emits_gaussian_defaults() -> None:
     cfg = _tiny_regression_config()
     cfg.noise.family = "gaussian"

@@ -54,6 +54,7 @@ from .plan_types import (
     NeuralNetFunctionPlan,
     NumericConverterGroup,
     NumericConverterPlan,
+    PiecewiseFunctionPlan,
     ProductFunctionPlan,
     QuadraticFunctionPlan,
     RandomPointsNodeSource,
@@ -210,6 +211,38 @@ def apply_function_plan_batch(
             standardize_input=True,
         )
         return lhs * rhs
+    if isinstance(plan, PiecewiseFunctionPlan):
+        gate_matrix = _sample_random_matrix_from_plan_batch(
+            plan.gate_matrix,
+            out_dim=1,
+            in_dim=int(y.shape[2]),
+            rng=rng.keyed("piecewise", "gate_matrix"),
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+        )
+        gate_projection = torch.einsum("bni,boi->bno", y, gate_matrix)
+        gate = torch.sigmoid(
+            (gate_projection + float(plan.gate_bias)) * float(plan.gate_temperature)
+        )
+        lhs = apply_function_plan_batch(
+            y,
+            rng.keyed("piecewise", "lhs"),
+            plan.lhs,
+            out_dim=out_dim,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+            standardize_input=True,
+        )
+        rhs = apply_function_plan_batch(
+            y,
+            rng.keyed("piecewise", "rhs"),
+            plan.rhs,
+            out_dim=out_dim,
+            noise_sigma_multiplier=noise_sigma_multiplier,
+            noise_spec=noise_spec,
+            standardize_input=True,
+        )
+        return gate * lhs + (1.0 - gate) * rhs
     raise ValueError(f"Unsupported fixed-layout function plan: {plan!r}")
 
 

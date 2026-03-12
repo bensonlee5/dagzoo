@@ -37,6 +37,7 @@ from dagzoo.core.fixed_layout.plan_types import (
     LinearFunctionPlan,
     NeuralNetFunctionPlan,
     NumericConverterPlan,
+    PiecewiseFunctionPlan,
     ProductFunctionPlan,
     QuadraticFunctionPlan,
     RandomPointsNodeSource,
@@ -94,6 +95,16 @@ class ConverterSpec:
         (
             "product",
             ProductFunctionPlan(
+                lhs=LinearFunctionPlan(matrix=GaussianMatrixPlan()),
+                rhs=QuadraticFunctionPlan(matrix=GaussianMatrixPlan()),
+            ),
+        ),
+        (
+            "piecewise",
+            PiecewiseFunctionPlan(
+                gate_matrix=GaussianMatrixPlan(),
+                gate_bias=0.25,
+                gate_temperature=4.0,
                 lhs=LinearFunctionPlan(matrix=GaussianMatrixPlan()),
                 rhs=QuadraticFunctionPlan(matrix=GaussianMatrixPlan()),
             ),
@@ -289,6 +300,62 @@ def test_keyed_product_rhs_sampling_is_independent_of_lhs_draw_count(
         return rhs_tokens[0]
 
     assert rhs_probe(32) == rhs_probe(1)
+
+
+def test_sample_function_plan_for_piecewise_uses_non_product_branch_families(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mix = {"piecewise": 0.2, "linear": 0.4, "quadratic": 0.4}
+    sampled_families = iter(["linear", "quadratic"])
+    seen_mixes: list[dict[str, float] | None] = []
+
+    def fake_sample_piecewise_component_family(*args, **kwargs):
+        seen_mixes.append(kwargs.get("function_family_mix"))
+        return next(sampled_families)
+
+    monkeypatch.setattr(
+        execution_semantics_mod,
+        "_sample_piecewise_component_family",
+        fake_sample_piecewise_component_family,
+    )
+    monkeypatch.setattr(
+        execution_semantics_mod,
+        "sample_matrix_plan",
+        lambda *args, **kwargs: GaussianMatrixPlan(),
+    )
+    monkeypatch.setattr(execution_semantics_mod, "_log_uniform", lambda *_args: 4.0)
+    monkeypatch.setattr(execution_semantics_mod, "_rand_scalar", lambda *_args: 0.75)
+
+    plan = execution_semantics_mod.sample_function_plan_for_family(
+        keyed_rng=KeyedRng(129),
+        family="piecewise",
+        out_dim=3,
+        mechanism_logit_tilt=0.0,
+        function_family_mix=mix,
+        device="cpu",
+    )
+
+    assert isinstance(plan, PiecewiseFunctionPlan)
+    assert plan.gate_temperature == pytest.approx(4.0)
+    assert plan.gate_bias == pytest.approx(0.75)
+    assert isinstance(plan.lhs, LinearFunctionPlan)
+    assert isinstance(plan.rhs, QuadraticFunctionPlan)
+    assert seen_mixes == [mix, mix]
+
+
+def test_sample_function_plan_for_piecewise_requires_enabled_component_family() -> None:
+    with pytest.raises(
+        ValueError,
+        match="enables 'piecewise' but disables all piecewise component families",
+    ):
+        execution_semantics_mod.sample_function_plan_for_family(
+            keyed_rng=KeyedRng(129),
+            family="piecewise",
+            out_dim=3,
+            mechanism_logit_tilt=0.0,
+            function_family_mix={"piecewise": 1.0},
+            device="cpu",
+        )
 
 
 def test_keyed_sample_function_plan_preserves_product_subroots(

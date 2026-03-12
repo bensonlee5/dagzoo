@@ -231,5 +231,11 @@ def test_generate_no_write_with_coverage_enabled_emits_artifacts(
     assert md_path.exists()
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["num_datasets"] == 1
+    assert "mechanism_family_summary" in payload
     assert "linearity_proxy" in payload["metrics"]
     assert "shift_edge_odds_multiplier" in payload["metrics"]
+    mechanism_summary = payload["mechanism_family_summary"]
+    assert "metadata_coverage_rate" in mechanism_summary
+    assert "sampled_family_counts" in mechanism_summary
+    markdown = md_path.read_text(encoding="utf-8")
+    assert "## Mechanism Families" in markdown
