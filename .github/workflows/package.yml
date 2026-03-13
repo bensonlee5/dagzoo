@@ -67,7 +67,7 @@ jobs:
           retention-days: 30
 
   publish-pypi:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     environment: pypi
@@ -85,7 +85,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && startsWith(github.ref, 'refs/tags/v')
     needs:
       - build
       - publish-pypi
