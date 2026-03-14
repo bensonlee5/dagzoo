@@ -179,7 +179,13 @@ def test_write_packed_parquet_shards_stream_preserves_canonical_replay_metadata(
     assert [int(payload["dataset_index"]) for payload in metadata] == [0, 1]
     assert [int(payload["run_num_datasets"]) for payload in metadata] == [2, 2]
     dataset_seeds = [int(payload["dataset_seed"]) for payload in metadata]
+    dataset_ids = [str(payload["dataset_id"]) for payload in metadata]
+    request_run_groups = [str(payload["split_groups"]["request_run"]) for payload in metadata]
+    layout_plan_groups = [str(payload["split_groups"]["layout_plan"]) for payload in metadata]
     assert len(set(dataset_seeds)) == 2
+    assert len(set(dataset_ids)) == 2
+    assert len(set(request_run_groups)) == 1
+    assert len(set(layout_plan_groups)) == 1
 
 
 def test_write_packed_parquet_shards_stream_preserves_float_targets(tmp_path) -> None:

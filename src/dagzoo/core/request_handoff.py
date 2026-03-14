@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from collections.abc import Mapping
@@ -11,6 +10,7 @@ from time import time_ns
 from typing import Any, cast
 
 from dagzoo.config import RequestFileConfig
+from dagzoo.core.identity import stable_blake2s_hex
 from dagzoo.core.staged_artifacts import cleanup_path, promote_staged_path, staged_output_path
 from dagzoo.io.lineage_artifact import sha256_hex
 from dagzoo.math import sanitize_json
@@ -91,16 +91,6 @@ def _read_sha256(path: str | Path) -> str:
     return sha256_hex(Path(path).read_bytes())
 
 
-def _stable_blake2s_hex(payload: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        sanitize_json(dict(payload)),
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.blake2s(encoded, digest_size=16).hexdigest()
-
-
 def _relative_posix_path(path: str | Path, *, start: str | Path) -> str:
     return Path(path).resolve().relative_to(Path(start).resolve()).as_posix()
 
@@ -148,7 +138,7 @@ def build_request_handoff_manifest(
     effective_config_trace_sha256 = _read_sha256(effective_config_trace_path)
     filter_manifest_sha256 = _read_sha256(filter_manifest_path)
     filter_summary_sha256 = _read_sha256(filter_summary_path)
-    request_run_id = _stable_blake2s_hex(
+    request_run_id = stable_blake2s_hex(
         {
             "request_payload": request.to_dict(),
             "effective_config_sha256": effective_config_sha256,
@@ -157,13 +147,13 @@ def build_request_handoff_manifest(
             "hardware_policy": str(hardware_policy),
         }
     )
-    generated_corpus_id = _stable_blake2s_hex(
+    generated_corpus_id = stable_blake2s_hex(
         {
             "request_run_id": request_run_id,
             "corpus_kind": "generated",
         }
     )
-    curated_corpus_id = _stable_blake2s_hex(
+    curated_corpus_id = stable_blake2s_hex(
         {
             "request_run_id": request_run_id,
             "corpus_kind": "curated",

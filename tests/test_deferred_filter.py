@@ -13,6 +13,8 @@ def _bundle_with_embedded_config(
     *,
     dataset_seed: int | None = None,
     dataset_index: int | None = None,
+    dataset_id: str | None = None,
+    split_groups: dict[str, str] | None = None,
 ) -> DatasetBundle:
     metadata = {
         "seed": seed,
@@ -26,6 +28,10 @@ def _bundle_with_embedded_config(
         metadata["dataset_seed"] = int(dataset_seed)
     if dataset_index is not None:
         metadata["dataset_index"] = int(dataset_index)
+    if dataset_id is not None:
+        metadata["dataset_id"] = str(dataset_id)
+    if split_groups is not None:
+        metadata["split_groups"] = dict(split_groups)
 
     return DatasetBundle(
         X_train=np.array(
@@ -224,9 +230,21 @@ def test_run_deferred_filter_writes_curated_output_for_accepted_only(
     out_dir = tmp_path / "filter_out"
     curated_out = tmp_path / "curated"
     bundles = [
-        _bundle_with_embedded_config(201),
-        _bundle_with_embedded_config(202),
-        _bundle_with_embedded_config(203),
+        _bundle_with_embedded_config(
+            201,
+            dataset_id="dataset-201",
+            split_groups={"request_run": "run-group-a", "layout_plan": "layout-group-x"},
+        ),
+        _bundle_with_embedded_config(
+            202,
+            dataset_id="dataset-202",
+            split_groups={"request_run": "run-group-a", "layout_plan": "layout-group-x"},
+        ),
+        _bundle_with_embedded_config(
+            203,
+            dataset_id="dataset-203",
+            split_groups={"request_run": "run-group-a", "layout_plan": "layout-group-x"},
+        ),
     ]
     _ = write_packed_parquet_shards_stream(bundles, in_dir, shard_size=3, compression="zstd")
 
@@ -244,8 +262,24 @@ def test_run_deferred_filter_writes_curated_output_for_accepted_only(
 
     shard_dir = curated_out / "shard_00000"
     assert shard_dir.exists()
+    input_metadata_records = _load_ndjson(in_dir / "shard_00000" / "metadata.ndjson")
     metadata_records = _load_ndjson(shard_dir / "metadata.ndjson")
     assert [int(record["dataset_index"]) for record in metadata_records] == [0, 2]
+    input_metadata_by_index = {
+        int(record["dataset_index"]): record["metadata"] for record in input_metadata_records
+    }
+    curated_metadata_by_index = {
+        int(record["dataset_index"]): record["metadata"] for record in metadata_records
+    }
+    for dataset_index in (0, 2):
+        assert (
+            curated_metadata_by_index[dataset_index]["dataset_id"]
+            == input_metadata_by_index[dataset_index]["dataset_id"]
+        )
+        assert (
+            curated_metadata_by_index[dataset_index]["split_groups"]
+            == input_metadata_by_index[dataset_index]["split_groups"]
+        )
 
     train_table = pyarrow_parquet.read_table(shard_dir / "train.parquet")
     dataset_indices = {int(value) for value in train_table.column("dataset_index").to_pylist()}

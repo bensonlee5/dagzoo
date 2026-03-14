@@ -55,6 +55,14 @@ def _request_payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
+def _load_ndjson(path: Path) -> list[dict[str, object]]:
+    payload: list[dict[str, object]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            payload.append(json.loads(line))
+    return payload
+
+
 @pytest.mark.parametrize(
     "resource_name",
     [
@@ -313,13 +321,26 @@ def test_request_cli_end_to_end_writes_generated_filter_and_curated_outputs(
         isinstance(item, dict) and item.get("source") == "request.smoke_rows_cap"
         for item in trace_payload
     )
-    assert (output_root / "generated" / "shard_00000" / "metadata.ndjson").exists()
+    generated_metadata_path = output_root / "generated" / "shard_00000" / "metadata.ndjson"
+    assert generated_metadata_path.exists()
     assert (output_root / "filter" / "filter_manifest.ndjson").exists()
     summary = json.loads((output_root / "filter" / "filter_summary.json").read_text("utf-8"))
     assert summary["total_datasets"] == 1
     assert summary["accepted_datasets"] == 1
     assert summary["rejected_datasets"] == 0
-    assert (output_root / "curated" / "shard_00000" / "metadata.ndjson").exists()
+    curated_metadata_path = output_root / "curated" / "shard_00000" / "metadata.ndjson"
+    assert curated_metadata_path.exists()
+    generated_metadata = _load_ndjson(generated_metadata_path)
+    curated_metadata = _load_ndjson(curated_metadata_path)
+    assert len(generated_metadata) == 1
+    assert len(curated_metadata) == 1
+    generated_record = generated_metadata[0]["metadata"]
+    curated_record = curated_metadata[0]["metadata"]
+    assert isinstance(generated_record, dict)
+    assert isinstance(curated_record, dict)
+    assert isinstance(generated_record.get("dataset_id"), str)
+    assert generated_record["split_groups"] == curated_record["split_groups"]
+    assert generated_record["dataset_id"] == curated_record["dataset_id"]
     handoff = json.loads((output_root / "handoff_manifest.json").read_text(encoding="utf-8"))
     validate_request_handoff_manifest(handoff)
     assert handoff["schema_name"] == REQUEST_HANDOFF_SCHEMA_NAME
@@ -472,9 +493,21 @@ def test_request_handoff_identity_is_stable_after_request_run_directory_move(
     moved_manifest_path = moved_root / "handoff_manifest.json"
     moved_manifest = json.loads(moved_manifest_path.read_text(encoding="utf-8"))
     validate_request_handoff_manifest(moved_manifest)
+    original_generated_records = _load_ndjson(
+        output_root / "generated" / "shard_00000" / "metadata.ndjson"
+    )
+    moved_generated_records = _load_ndjson(
+        moved_root / "generated" / "shard_00000" / "metadata.ndjson"
+    )
+    original_curated_records = _load_ndjson(
+        output_root / "curated" / "shard_00000" / "metadata.ndjson"
+    )
+    moved_curated_records = _load_ndjson(moved_root / "curated" / "shard_00000" / "metadata.ndjson")
 
     assert moved_manifest["identity"] == original_manifest["identity"]
     assert moved_manifest["checksums"] == original_manifest["checksums"]
+    assert moved_generated_records == original_generated_records
+    assert moved_curated_records == original_curated_records
     for key, relative_path in moved_manifest["artifacts_relative"].items():
         resolved = (moved_root / relative_path).resolve()
         if key == "run_root":

@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from typing import Any
 
 from dagzoo.config import GeneratorConfig
 from dagzoo.core.fixed_layout.runtime import (
     _generate_batch_with_plan_iter,
     prepare_canonical_fixed_layout_run,
+)
+from dagzoo.core.identity import (
+    canonical_dataset_id,
+    canonical_layout_plan_split_group,
+    canonical_request_run_split_group,
 )
 from dagzoo.rng import KeyedRng
 from dagzoo.types import DatasetBundle
@@ -29,6 +35,13 @@ def _validate_public_generation_config(config: GeneratorConfig) -> None:
         )
 
 
+def _require_metadata_string(metadata: Mapping[str, Any], *, key: str) -> str:
+    value = metadata.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Canonical generation metadata is missing required string field {key!r}.")
+    return value
+
+
 def _annotate_canonical_batch_metadata(
     bundle: DatasetBundle,
     *,
@@ -45,10 +58,36 @@ def _annotate_canonical_batch_metadata(
     if not isinstance(keyed_replay, dict):
         keyed_replay = {}
     keyed_replay["dataset_root_path"] = ["dataset", int(dataset_index)]
+    layout_signature = _require_metadata_string(bundle.metadata, key="layout_signature")
+    layout_plan_signature = _require_metadata_string(bundle.metadata, key="layout_plan_signature")
+    layout_execution_contract = _require_metadata_string(
+        bundle.metadata,
+        key="layout_execution_contract",
+    )
+    split_groups = {
+        "request_run": canonical_request_run_split_group(
+            seed=int(run_seed),
+            run_num_datasets=int(run_num_datasets),
+            layout_signature=layout_signature,
+            layout_plan_signature=layout_plan_signature,
+        ),
+        "layout_plan": canonical_layout_plan_split_group(
+            layout_signature=layout_signature,
+            layout_plan_signature=layout_plan_signature,
+            layout_execution_contract=layout_execution_contract,
+        ),
+    }
     bundle.metadata["seed"] = int(run_seed)
     bundle.metadata["dataset_seed"] = int(dataset_seed)
     bundle.metadata["dataset_index"] = int(dataset_index)
+    bundle.metadata["dataset_id"] = canonical_dataset_id(
+        request_run_split_group=split_groups["request_run"],
+        layout_plan_split_group=split_groups["layout_plan"],
+        dataset_index=int(dataset_index),
+        dataset_seed=int(dataset_seed),
+    )
     bundle.metadata["run_num_datasets"] = int(run_num_datasets)
+    bundle.metadata["split_groups"] = split_groups
     bundle.metadata["keyed_replay"] = keyed_replay
     return bundle
 

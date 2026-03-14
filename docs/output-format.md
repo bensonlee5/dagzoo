@@ -200,48 +200,67 @@ Each line contains:
 
 ### Top-level keys
 
-| Key                          | Type        | Description                                                                                         |
-| ---------------------------- | ----------- | --------------------------------------------------------------------------------------------------- |
-| `backend`                    | str         | Always `"torch"`                                                                                    |
-| `device`                     | str         | Compute device (e.g., `"cpu"`, `"cuda"`)                                                            |
-| `requested_device`           | str         | Requested runtime device after CLI/config normalization (for example `auto`, `cpu`, `cuda`, `mps`)  |
-| `resolved_device`            | str         | Runtime backend selected from the requested device for generation                                   |
-| `device_fallback_reason`     | str or null | Reserved field retained for artifact-contract stability; currently always `null`                    |
-| `compute_backend`            | str         | Implementation variant identifier                                                                   |
-| `n_features`                 | int         | Number of features                                                                                  |
-| `n_categorical_features`     | int         | Number of categorical features                                                                      |
-| `n_classes`                  | int or null | Realized class count in emitted labels (null for regression)                                        |
-| `graph_nodes`                | int         | Number of nodes in the DAG                                                                          |
-| `graph_edges`                | int         | Number of edges in the DAG                                                                          |
-| `graph_depth_nodes`          | int         | Longest path length in the DAG                                                                      |
-| `graph_edge_density`         | float       | Edge count / max possible edges                                                                     |
-| `seed`                       | int         | Replay seed recorded by the emitting API. Canonical generation stores the shared run seed here.     |
-| `dataset_seed`               | int         | Optional canonical per-dataset child seed derived from `seed`; used for deferred replay/diagnostics |
-| `dataset_index`              | int         | Optional canonical dataset position within the run (0-based)                                        |
-| `run_num_datasets`           | int         | Optional canonical run length used to replay the saved bundle                                       |
-| `attempt_used`               | int         | Generation attempt index (0-based)                                                                  |
-| `lineage`                    | object      | DAG lineage record (see Lineage below)                                                              |
-| `shift`                      | object      | Resolved shift settings and realized observability signals                                          |
-| `noise_distribution`         | object      | Resolved noise-family selection and effective sampling params                                       |
-| `config`                     | object      | Full serialized generator configuration                                                             |
-| `filter`                     | object      | Filter results (see below)                                                                          |
-| `class_structure`            | object      | Present only for classification (see below)                                                         |
-| `missingness`                | object      | Present only when missingness is enabled                                                            |
-| `layout_mode`                | str         | Optional canonical layout metadata (`"fixed"` for canonical generation outputs)                     |
-| `layout_plan_seed`           | int         | Optional internal seed used to sample the shared per-run layout                                     |
-| `layout_signature`           | str         | Optional deterministic fingerprint for the shared sampled layout                                    |
-| `layout_plan_signature`      | str         | Optional deterministic fingerprint for the internal frozen node execution payload                   |
-| `layout_plan_schema_version` | int         | Optional internal metadata version for the canonical shared-layout payload                          |
-| `layout_execution_contract`  | str         | Optional internal execution contract identifier for canonical determinism                           |
-| `keyed_replay`               | object      | Optional exact keyed subtree replay paths for canonical layout, execution, and dataset roots        |
-| `mechanism_families`         | object      | Optional realized mechanism-family and mechanism-variant coverage for canonical fixed-layout runs   |
+| Key                          | Type        | Description                                                                                           |
+| ---------------------------- | ----------- | ----------------------------------------------------------------------------------------------------- |
+| `backend`                    | str         | Always `"torch"`                                                                                      |
+| `device`                     | str         | Compute device (e.g., `"cpu"`, `"cuda"`)                                                              |
+| `requested_device`           | str         | Requested runtime device after CLI/config normalization (for example `auto`, `cpu`, `cuda`, `mps`)    |
+| `resolved_device`            | str         | Runtime backend selected from the requested device for generation                                     |
+| `device_fallback_reason`     | str or null | Reserved field retained for artifact-contract stability; currently always `null`                      |
+| `compute_backend`            | str         | Implementation variant identifier                                                                     |
+| `n_features`                 | int         | Number of features                                                                                    |
+| `n_categorical_features`     | int         | Number of categorical features                                                                        |
+| `n_classes`                  | int or null | Realized class count in emitted labels (null for regression)                                          |
+| `graph_nodes`                | int         | Number of nodes in the DAG                                                                            |
+| `graph_edges`                | int         | Number of edges in the DAG                                                                            |
+| `graph_depth_nodes`          | int         | Longest path length in the DAG                                                                        |
+| `graph_edge_density`         | float       | Edge count / max possible edges                                                                       |
+| `seed`                       | int         | Replay seed recorded by the emitting API. Canonical generation stores the shared run seed here.       |
+| `dataset_seed`               | int         | Optional canonical per-dataset child seed derived from `seed`; used for deferred replay/diagnostics   |
+| `dataset_index`              | int         | Optional canonical dataset position within the run (0-based)                                          |
+| `dataset_id`                 | str         | Optional stable canonical dataset identifier derived from run/layout grouping plus dataset provenance |
+| `run_num_datasets`           | int         | Optional canonical run length used to replay the saved bundle                                         |
+| `attempt_used`               | int         | Generation attempt index (0-based)                                                                    |
+| `lineage`                    | object      | DAG lineage record (see Lineage below)                                                                |
+| `shift`                      | object      | Resolved shift settings and realized observability signals                                            |
+| `noise_distribution`         | object      | Resolved noise-family selection and effective sampling params                                         |
+| `config`                     | object      | Full serialized generator configuration                                                               |
+| `filter`                     | object      | Filter results (see below)                                                                            |
+| `class_structure`            | object      | Present only for classification (see below)                                                           |
+| `missingness`                | object      | Present only when missingness is enabled                                                              |
+| `layout_mode`                | str         | Optional canonical layout metadata (`"fixed"` for canonical generation outputs)                       |
+| `layout_plan_seed`           | int         | Optional internal seed used to sample the shared per-run layout                                       |
+| `layout_signature`           | str         | Optional deterministic fingerprint for the shared sampled layout                                      |
+| `layout_plan_signature`      | str         | Optional deterministic fingerprint for the internal frozen node execution payload                     |
+| `layout_plan_schema_version` | int         | Optional internal metadata version for the canonical shared-layout payload                            |
+| `layout_execution_contract`  | str         | Optional internal execution contract identifier for canonical determinism                             |
+| `split_groups`               | object      | Optional stable canonical grouping keys for downstream split assignment                               |
+| `keyed_replay`               | object      | Optional exact keyed subtree replay paths for canonical layout, execution, and dataset roots          |
+| `mechanism_families`         | object      | Optional realized mechanism-family and mechanism-variant coverage for canonical fixed-layout runs     |
 
 For canonical generation (`generate_one`, `generate_batch`, `generate_batch_iter`,
 and `dagzoo generate`), replay later bundles with the shared `seed`,
 `run_num_datasets`, and `dataset_index` by regenerating the canonical batch and
 selecting that index. `dataset_seed` preserves the per-bundle child seed for
-deferred replay and diagnostics. Exact keyed subtree replay uses `seed`
-together with the `keyed_replay` paths.
+deferred replay and diagnostics. `dataset_id` is stable across copies of the
+same generated corpus because it is derived from canonical run, layout-plan,
+and dataset provenance rather than filesystem location. Exact keyed subtree
+replay uses `seed` together with the `keyed_replay` paths.
+
+For downstream train/validation/test assignment, use
+`split_groups.request_run` or `split_groups.layout_plan` instead of
+reconstructing groups from raw layout metadata. `request_run` keeps all
+datasets from one canonical run together; `layout_plan` keeps all datasets that
+share the same fixed-layout execution plan together.
+
+### `split_groups` sub-object
+
+Present for canonical generation outputs.
+
+| Key           | Type | Description                                                              |
+| ------------- | ---- | ------------------------------------------------------------------------ |
+| `request_run` | str  | Stable grouping key for all datasets emitted by one canonical run        |
+| `layout_plan` | str  | Stable grouping key for datasets sharing one fixed-layout execution plan |
 
 ### `keyed_replay` sub-object
 
@@ -347,20 +366,24 @@ Present for all canonical generation outputs. These bundles share one sampled
 layout per run and preserve emitted column alignment (feature count, column
 order, and lineage feature-to-node mapping) within that run.
 
-| Key                          | Type   | Description                                                         |
-| ---------------------------- | ------ | ------------------------------------------------------------------- |
-| `layout_mode`                | str    | `"fixed"`                                                           |
-| `layout_plan_seed`           | int    | Internal seed used to sample the shared per-run layout              |
-| `layout_signature`           | str    | Stable fingerprint for the shared sampled layout                    |
-| `layout_plan_signature`      | str    | Stable fingerprint for the frozen internal node payload             |
-| `layout_plan_schema_version` | int    | Internal canonical layout metadata version                          |
-| `layout_execution_contract`  | str    | Internal execution contract (`chunk_batched_v1`)                    |
-| `keyed_replay`               | object | Exact keyed subtree replay paths for layout/execution/dataset roots |
+| Key                          | Type   | Description                                                            |
+| ---------------------------- | ------ | ---------------------------------------------------------------------- |
+| `layout_mode`                | str    | `"fixed"`                                                              |
+| `layout_plan_seed`           | int    | Internal seed used to sample the shared per-run layout                 |
+| `layout_signature`           | str    | Stable fingerprint for the shared sampled layout                       |
+| `layout_plan_signature`      | str    | Stable fingerprint for the frozen internal node payload                |
+| `layout_plan_schema_version` | int    | Internal canonical layout metadata version                             |
+| `layout_execution_contract`  | str    | Internal execution contract (`chunk_batched_v1`)                       |
+| `dataset_id`                 | str    | Stable dataset identifier derived from canonical run/layout provenance |
+| `split_groups`               | object | Stable downstream grouping keys for request-run and layout-plan splits |
+| `keyed_replay`               | object | Exact keyed subtree replay paths for layout/execution/dataset roots    |
 
 Under `chunk_batched_v1`, canonical fixed-layout outputs are deterministic for
 the same run seed and realized run shape. Internal plan metadata records the
 shared sampled layout and execution-plan fingerprint used for that run, while
-`keyed_replay` records the exact keyed subtree roots needed for internal replay.
+`dataset_id` and `split_groups` provide the public path-independent grouping
+surface for downstream consumers, and `keyed_replay` records the exact keyed
+subtree roots needed for internal replay.
 
 ### Missingness sub-object (optional)
 

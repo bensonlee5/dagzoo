@@ -66,7 +66,7 @@ Use them to predict which runtime paths are likely to move when a hot module cha
 ### `dagzoo.core.dataset`
 
 - Path: `src/dagzoo/core/dataset.py`
-- Imports: `dagzoo.config`, `dagzoo.core.fixed_layout.runtime`, `dagzoo.rng`, `dagzoo.types`
+- Imports: `dagzoo.config`, `dagzoo.core.fixed_layout.runtime`, `dagzoo.core.identity`, `dagzoo.rng`, `dagzoo.types`
 - Direct downstream modules: `dagzoo`, `dagzoo.bench.guardrails`, `dagzoo.bench.micro`, `dagzoo.bench.runtime_support`, `dagzoo.bench.suite`, `dagzoo.bench.throughput`, `dagzoo.cli`, `dagzoo.core`
 - Transitive downstream modules: `dagzoo`, `dagzoo.__main__`, `dagzoo.bench`, `dagzoo.bench.collectors`, `dagzoo.bench.corpus_probe`, `dagzoo.bench.guardrails`, `dagzoo.bench.micro`, `dagzoo.bench.runtime_support`, `dagzoo.bench.suite`, `dagzoo.bench.throughput`, `dagzoo.cli`, `dagzoo.cli.commands.benchmark`, `dagzoo.cli.commands.diagnostics`, `dagzoo.cli.entrypoint`, `dagzoo.cli.parser`, `dagzoo.core`, `dagzoo.diagnostics.effective_diversity`, `dagzoo.diagnostics.effective_diversity.artifacts`, `dagzoo.diagnostics.effective_diversity.calibration`, `dagzoo.diagnostics.effective_diversity.runner`
 - Downstream package areas: `dagzoo.bench`, `dagzoo.cli`, `dagzoo.diagnostics`
