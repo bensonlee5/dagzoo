@@ -245,15 +245,17 @@ selecting that index. `dataset_seed` preserves the per-bundle child seed for
 deferred replay and diagnostics. `dataset_id` is stable across copies of the
 same generated corpus because it is derived from canonical run provenance,
 layout-plan provenance, and dataset provenance rather than filesystem
-location. `split_groups.request_run` includes stable non-plan run provenance
-that can change emitted data, while `split_groups.layout_plan` intentionally
-remains the narrower fixed-layout execution-plan grouping key. Exact keyed
-subtree replay uses `seed` together with the `keyed_replay` paths.
+location. `split_groups.request_run` includes stable non-plan run provenance,
+including the effective canonical run batch size when fixed-layout chunking can
+change emitted data, while `split_groups.layout_plan` intentionally remains the
+narrower fixed-layout execution-plan grouping key. Exact keyed subtree replay
+uses `seed` together with the `keyed_replay` paths.
 
 For downstream train/validation/test assignment, use
 `split_groups.request_run` or `split_groups.layout_plan` instead of
 reconstructing groups from raw layout metadata. `request_run` keeps all
-datasets from one canonical run together; `layout_plan` keeps all datasets that
+datasets from one canonical run together and changes when effective fixed-layout
+batching changes the emitted outputs; `layout_plan` keeps all datasets that
 share the same fixed-layout execution plan together.
 
 ### `split_groups` sub-object

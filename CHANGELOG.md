@@ -10,7 +10,7 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
-## [0.9.11] - 2026-03-14
+## [0.9.10] - 2026-03-14
 
 ### Changed
 
@@ -21,6 +21,9 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
   non-plan run provenance that changes when emitted data changes outside the
   fixed-layout execution plan, while `layout_plan` remains the narrower
   shared-plan grouping key.
+- Canonical `request_run` and `dataset_id` identity hashing now includes the
+  effective fixed-layout run batch size, so changing resolved chunking no
+  longer reuses identities when batching changes the emitted datasets.
 - Shared identity hashing now lives under `src/dagzoo/core/identity.py`, so
   request handoff identity and canonical dataset metadata use the same stable
   JSON normalization rules.

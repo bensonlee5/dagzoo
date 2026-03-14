@@ -165,6 +165,7 @@ def canonical_request_run_split_group(
     *,
     seed: int,
     run_num_datasets: int,
+    run_batch_size: int,
     layout_signature: str,
     layout_plan_signature: str,
     request_run_provenance: Mapping[str, Any],
@@ -175,6 +176,7 @@ def canonical_request_run_split_group(
         {
             "seed": int(seed),
             "run_num_datasets": int(run_num_datasets),
+            "run_batch_size": int(run_batch_size),
             "layout_signature": str(layout_signature),
             "layout_plan_signature": str(layout_plan_signature),
             "request_run_provenance": dict(request_run_provenance),

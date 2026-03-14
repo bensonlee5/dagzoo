@@ -125,7 +125,7 @@ wheels = [
 
 [[package]]
 name = "dagzoo"
-version = "0.9.11"
+version = "0.9.10"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },

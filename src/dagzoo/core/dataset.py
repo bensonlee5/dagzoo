@@ -49,6 +49,7 @@ def _annotate_canonical_batch_metadata(
     run_seed: int,
     dataset_index: int,
     run_num_datasets: int,
+    run_batch_size: int,
 ) -> DatasetBundle:
     """Rewrite canonical bundle metadata to preserve run-level replay information."""
 
@@ -70,6 +71,7 @@ def _annotate_canonical_batch_metadata(
         "request_run": canonical_request_run_split_group(
             seed=int(run_seed),
             run_num_datasets=int(run_num_datasets),
+            run_batch_size=int(run_batch_size),
             layout_signature=layout_signature,
             layout_plan_signature=layout_plan_signature,
             request_run_provenance=request_run_provenance,
@@ -166,4 +168,5 @@ def generate_batch_iter(
             run_seed=prepared.run_seed,
             dataset_index=dataset_index,
             run_num_datasets=num_datasets,
+            run_batch_size=prepared.batch_size,
         )

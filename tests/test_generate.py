@@ -1169,6 +1169,97 @@ def test_generate_batch_request_run_identity_is_run_stable_for_mixture_noise() -
     assert len(set(request_run_groups)) == 1
 
 
+def test_generate_batch_request_run_identity_changes_with_effective_batch_size() -> None:
+    baseline = _tiny_regression_config()
+    drifted = deepcopy(baseline)
+    baseline.runtime.fixed_layout_target_cells = 1_000_000_000
+    drifted.runtime.fixed_layout_target_cells = 1
+
+    prepared_base = prepare_canonical_fixed_layout_run(
+        baseline,
+        num_datasets=4,
+        seed=1234,
+        device="cpu",
+    )
+    prepared_drifted = prepare_canonical_fixed_layout_run(
+        drifted,
+        num_datasets=4,
+        seed=1234,
+        device="cpu",
+    )
+    assert int(prepared_base.batch_size) == 4
+    assert int(prepared_drifted.batch_size) == 1
+
+    batch_base = generate_batch(baseline, num_datasets=4, seed=1234, device="cpu")
+    batch_drifted = generate_batch(drifted, num_datasets=4, seed=1234, device="cpu")
+
+    assert all(
+        bundle.metadata["split_groups"]["layout_plan"]
+        == replayed.metadata["split_groups"]["layout_plan"]
+        for bundle, replayed in zip(batch_base, batch_drifted, strict=True)
+    )
+    assert (
+        batch_base[0].metadata["split_groups"]["request_run"]
+        != batch_drifted[0].metadata["split_groups"]["request_run"]
+    )
+    assert batch_base[0].metadata["dataset_id"] != batch_drifted[0].metadata["dataset_id"]
+    assert any(
+        not np.array_equal(np.asarray(bundle.X_train), np.asarray(replayed.X_train))
+        or not np.array_equal(np.asarray(bundle.X_test), np.asarray(replayed.X_test))
+        or not np.array_equal(np.asarray(bundle.y_train), np.asarray(replayed.y_train))
+        or not np.array_equal(np.asarray(bundle.y_test), np.asarray(replayed.y_test))
+        for bundle, replayed in zip(batch_base, batch_drifted, strict=True)
+    )
+
+
+def test_generate_one_request_run_identity_ignores_irrelevant_batching_config_changes() -> None:
+    baseline = _tiny_regression_config()
+    drifted = deepcopy(baseline)
+    baseline.runtime.fixed_layout_target_cells = 1_000_000_000
+    drifted.runtime.fixed_layout_target_cells = 1
+
+    prepared_base = prepare_canonical_fixed_layout_run(
+        baseline,
+        num_datasets=1,
+        seed=1234,
+        device="cpu",
+    )
+    prepared_drifted = prepare_canonical_fixed_layout_run(
+        drifted,
+        num_datasets=1,
+        seed=1234,
+        device="cpu",
+    )
+    assert int(prepared_base.batch_size) == 1
+    assert int(prepared_drifted.batch_size) == 1
+
+    bundle_base = generate_one(baseline, seed=1234, device="cpu")
+    bundle_drifted = generate_one(drifted, seed=1234, device="cpu")
+
+    np.testing.assert_allclose(
+        np.asarray(bundle_base.X_train),
+        np.asarray(bundle_drifted.X_train),
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(bundle_base.X_test),
+        np.asarray(bundle_drifted.X_test),
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(bundle_base.y_train),
+        np.asarray(bundle_drifted.y_train),
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(bundle_base.y_test),
+        np.asarray(bundle_drifted.y_test),
+        atol=1e-6,
+    )
+    assert bundle_base.metadata["split_groups"] == bundle_drifted.metadata["split_groups"]
+    assert bundle_base.metadata["dataset_id"] == bundle_drifted.metadata["dataset_id"]
+
+
 def test_generate_batch_bundle_replays_from_run_metadata() -> None:
     cfg = _tiny_regression_config()
 
