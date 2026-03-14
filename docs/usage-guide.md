@@ -36,8 +36,9 @@ Each generate run writes `effective_config.yaml` and `effective_config_trace.yam
 under the resolved output directory.
 `dagzoo generate` samples one internal fixed-layout plan per run, so all
 datasets emitted in the same run share one layout signature / plan signature.
-Run `dagzoo filter` as a separate stage after generation; keep
-`filter.enabled: false` for generate flows.
+Filtering is temporarily unsupported, so generated outputs are the only
+supported corpus artifact for now. Keep `filter.enabled: false` for generate
+flows.
 Generate configs must not include `runtime.worker_count` or
 `runtime.worker_index`.
 
@@ -45,16 +46,14 @@ ______________________________________________________________________
 
 ## 2. Deferred filtering (`dagzoo filter`)
 
-Run acceptance filtering as a separate CPU stage over persisted shards:
+Deferred filtering is temporarily unsupported.
 
 ```bash
 dagzoo filter --in data/run1 --out data/run1_filter
-dagzoo filter --in data/run1 --out data/run1_filter --curated-out data/run1_curated
 ```
 
-Deferred filtering replays strictly from embedded shard metadata; current
-generated outputs include the required task and filter config under
-`metadata.config`.
+The command remains present so existing workflows fail with a clear error
+message instead of silently producing partially supported artifacts.
 
 ______________________________________________________________________
 
@@ -210,11 +209,6 @@ dagzoo diversity-audit \
   --device cpu \
   --out-dir benchmarks/results/diversity_audit_piecewise_control
 
-dagzoo filter-calibration \
-  --config configs/preset_mechanism_gp_filter_smoke.yaml \
-  --suite smoke \
-  --device cpu \
-  --out-dir benchmarks/results/filter_calibration_gp
 ```
 
 Detailed guide: [Mechanism Diversity](features/mechanism-diversity.md)
@@ -242,8 +236,9 @@ dagzoo benchmark \
 values in one command, set device selection in each preset/config instead of
 passing a shared CLI device override.
 
-For filter-enabled benchmark flows, inspect accepted-corpus throughput together
-with dataset-level accept/reject yield in the benchmark summary artifacts.
+Artifact-producing deferred filtering is disabled, but filter-enabled benchmark
+configs and `dagzoo diversity-audit` runs still replay filter metrics
+analytically.
 
 Detailed guide: [Benchmark Workflows and Guardrails](features/benchmark-guardrails.md)
 
@@ -252,10 +247,7 @@ When you need to compare accepted-corpus diversity between configs, use
 `--variant-config` values. The audit writes `summary.json` and `summary.md`
 with per-variant diversity status and throughput deltas.
 
-When you need to tune one filter-enabled config, use
-`dagzoo filter-calibration --config configs/preset_filter_benchmark_smoke.yaml`.
-That workflow writes `summary.json` and `summary.md` with per-threshold
-accepted-throughput and diversity-shift comparisons.
+`dagzoo filter-calibration` is also temporarily unsupported.
 
 ______________________________________________________________________
 
@@ -286,15 +278,13 @@ That command writes:
 
 - `requests/tab_foundry_smoke/handoff_manifest.json`
 - `requests/tab_foundry_smoke/generated/`
-- `requests/tab_foundry_smoke/filter/`
-- `requests/tab_foundry_smoke/curated/`
 
 Downstream consumption should start from `handoff_manifest.json`. The manifest
-surfaces the filtered corpus path, effective-config artifacts, filter summary,
-and accepted/rejected counts in one versioned JSON file:
+surfaces the generated corpus path and effective-config artifacts in one
+versioned JSON file:
 
 ```bash
-./.venv/bin/python -c "import json; from pathlib import Path; payload=json.loads(Path('requests/tab_foundry_smoke/handoff_manifest.json').read_text()); print(payload['artifacts']['filtered_corpus_dir']); print(payload['summary']['accepted_datasets'])"
+./.venv/bin/python -c "import json; from pathlib import Path; payload=json.loads(Path('requests/tab_foundry_smoke/handoff_manifest.json').read_text()); print(payload['artifacts']['generated_dir']); print(payload['summary']['generated_datasets'])"
 ```
 
 Closed-loop feedback from downstream predictions is still out of scope for this

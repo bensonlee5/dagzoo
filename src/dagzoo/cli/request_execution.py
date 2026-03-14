@@ -18,7 +18,7 @@ from dagzoo.core.request_handoff import (
     REQUEST_HANDOFF_MANIFEST_FILENAME,
     write_request_handoff_manifest,
 )
-from dagzoo.filtering import DeferredFilterRunResult
+from dagzoo.filtering.availability import FILTERING_UNSUPPORTED_MESSAGE
 from dagzoo.filtering.deferred_filter import MANIFEST_FILENAME, SUMMARY_FILENAME
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 
@@ -38,28 +38,27 @@ class RequestRunResult:
     request_path: Path
     run_root: Path
     generated_dir: Path
-    filter_dir: Path
-    curated_dir: Path
     effective_config_path: Path
     effective_config_trace_path: Path
     handoff_manifest_path: Path
     generated_datasets: int
-    filter_result: DeferredFilterRunResult
 
 
-def _request_output_dirs(run_root: Path) -> tuple[Path, Path, Path]:
-    """Return the fixed request-run artifact directories."""
+def _request_generated_dir(run_root: Path) -> Path:
+    """Return the fixed request-run generated artifact directory."""
 
-    return run_root / "generated", run_root / "filter", run_root / "curated"
+    return run_root / "generated"
 
 
-def _ensure_request_run_output_safe(run_root: Path) -> tuple[Path, Path, Path]:
+def _ensure_request_run_output_safe(run_root: Path) -> Path:
     """Fail fast when one request-run output root already holds prior artifacts."""
 
     if run_root.exists() and not run_root.is_dir():
         raise RuntimeError(f"Request output_root must be a directory path: {run_root}")
 
-    generated_dir, filter_dir, curated_dir = _request_output_dirs(run_root)
+    generated_dir = _request_generated_dir(run_root)
+    filter_dir = run_root / "filter"
+    curated_dir = run_root / "curated"
     for path in (generated_dir, filter_dir, curated_dir):
         if path.exists() and not path.is_dir():
             raise RuntimeError(f"Request artifact path must be a directory: {path}")
@@ -93,7 +92,7 @@ def _ensure_request_run_output_safe(run_root: Path) -> tuple[Path, Path, Path]:
             f"{handoff_manifest_path}. Remove the existing manifest or choose a new output_root."
         )
 
-    return generated_dir, filter_dir, curated_dir
+    return generated_dir
 
 
 def run_request_execution(
@@ -105,11 +104,15 @@ def run_request_execution(
     print_effective_config_flag: bool,
     print_resolution_trace_flag: bool,
 ) -> RequestRunResult:
-    """Resolve and execute one request-file run through canonical generate->filter."""
+    """Resolve and execute one request-file run through canonical generate-only handoff."""
 
     request_file = RequestFileConfig.from_yaml(request_path)
+    if n_jobs_override is not None:
+        raise ValueError(
+            f"{FILTERING_UNSUPPORTED_MESSAGE} `dagzoo request --n-jobs` is unavailable."
+        )
     run_root = Path(request_file.output_root)
-    generated_dir, filter_dir, curated_dir = _ensure_request_run_output_safe(run_root)
+    generated_dir = _ensure_request_run_output_safe(run_root)
     resolved = resolve_request_config(
         request=request_file,
         device_override=device_override,
@@ -138,10 +141,7 @@ def run_request_execution(
         device=resolved.requested_device,
     )
     if bool(config.filter.enabled):
-        raise ValueError(
-            "Inline filtering has been removed from request execution. "
-            "Request runs must resolve to filter.enabled=false and use deferred filtering."
-        )
+        raise ValueError(f"{FILTERING_UNSUPPORTED_MESSAGE} Set filter.enabled=false.")
 
     append_config_diff_events(
         pre_realization_config,
@@ -183,31 +183,15 @@ def run_request_execution(
         compression=config.output.compression,
     )
     generation_elapsed_seconds = perf_counter() - generation_started_at
-    filter_started_at = perf_counter()
-    filter_result = cli_api.run_deferred_filter(
-        in_dir=generated_dir,
-        out_dir=filter_dir,
-        curated_out_dir=curated_dir,
-        n_jobs_override=n_jobs_override,
-    )
-    filter_elapsed_seconds = perf_counter() - filter_started_at
     handoff_manifest_path = write_request_handoff_manifest(
         request_path=request_path,
         request=request_file,
         run_root=run_root,
         generated_dir=generated_dir,
-        filter_dir=filter_dir,
-        filtered_corpus_dir=curated_dir,
         effective_config_path=effective_config_path,
         effective_config_trace_path=effective_config_trace_path,
-        filter_manifest_path=filter_result.manifest_path,
-        filter_summary_path=filter_result.summary_path,
         generated_datasets=int(written),
         generation_elapsed_seconds=float(generation_elapsed_seconds),
-        filter_total_datasets=int(filter_result.total_datasets),
-        filter_accepted_datasets=int(filter_result.accepted_datasets),
-        filter_rejected_datasets=int(filter_result.rejected_datasets),
-        filter_elapsed_seconds=float(filter_elapsed_seconds),
         requested_device=str(resolved.requested_device),
         resolved_device=str(resolved_device),
         hardware_backend=str(resolved.hardware.backend),
@@ -220,11 +204,8 @@ def run_request_execution(
         request_path=Path(request_path),
         run_root=run_root,
         generated_dir=generated_dir,
-        filter_dir=filter_dir,
-        curated_dir=curated_dir,
         effective_config_path=effective_config_path,
         effective_config_trace_path=effective_config_trace_path,
         handoff_manifest_path=handoff_manifest_path,
         generated_datasets=int(written),
-        filter_result=filter_result,
     )

@@ -253,10 +253,21 @@ def test_diversity_audit_cli_rejects_swapped_warn_and_fail_thresholds() -> None:
     assert int(exc.value.code) == 2
 
 
-def test_filter_calibration_cli_rejects_filter_disabled_config(tmp_path) -> None:
+def test_filter_calibration_cli_reports_unsupported_when_runner_raises(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cfg = load_repo_config()
     cfg.filter.enabled = False
     config_path = write_config(tmp_path, cfg, "filter_disabled.yaml")
+    monkeypatch.setattr(
+        "dagzoo.cli.run_filter_calibration",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            NotImplementedError(
+                "Deferred filtering is temporarily disabled; generated outputs are the only supported corpus artifact for now."
+            )
+        ),
+    )
 
     with pytest.raises(SystemExit) as exc:
         main(
@@ -360,42 +371,31 @@ def test_filter_cli_rejects_invalid_n_jobs() -> None:
     assert int(exc.value.code) == 2
 
 
-def test_filter_cli_invokes_deferred_runner(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, object] = {}
-
-    class _Result:
-        manifest_path = Path("manifest.ndjson")
-        summary_path = Path("summary.json")
-        total_datasets = 2
-        accepted_datasets = 1
-        rejected_datasets = 1
-        datasets_per_minute = 42.0
-        curated_out_dir = None
-        curated_accepted_datasets = 0
-
-    def _stub_run_deferred_filter(**kwargs):
-        captured.update(kwargs)
-        return _Result()
-
-    monkeypatch.setattr("dagzoo.cli.run_deferred_filter", _stub_run_deferred_filter)
-    out_dir = tmp_path / "filter_out"
-    code = main(
-        [
-            "filter",
-            "--in",
-            "input_shards",
-            "--out",
-            str(out_dir),
-            "--n-jobs",
-            "4",
-        ]
+def test_filter_cli_reports_unsupported_when_runner_raises(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "dagzoo.cli.run_deferred_filter",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            NotImplementedError(
+                "Deferred filtering is temporarily disabled; generated outputs are the only supported corpus artifact for now."
+            )
+        ),
     )
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "filter",
+                "--in",
+                "input_shards",
+                "--out",
+                str(tmp_path / "filter_out"),
+                "--n-jobs",
+                "4",
+            ]
+        )
 
-    assert code == 0
-    assert captured["in_dir"] == "input_shards"
-    assert str(captured["out_dir"]) == str(out_dir)
-    assert captured["n_jobs_override"] == 4
-    assert "config" not in captured
+    assert int(exc.value.code) == 2
 
 
 def test_filter_cli_rejects_removed_config_flag() -> None:
@@ -414,6 +414,86 @@ def test_filter_cli_rejects_removed_config_flag() -> None:
     assert int(exc.value.code) == 2
 
 
+def test_benchmark_cli_accepts_filter_enabled_config(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = load_repo_config()
+    cfg.filter.enabled = True
+    config_path = write_config(tmp_path, cfg, "filter_enabled_benchmark.yaml")
+    captured: dict[str, object] = {}
+
+    def _stub_run_benchmark_suite(preset_specs, **kwargs):
+        captured["filter_enabled"] = bool(preset_specs[0].config.filter.enabled)
+        captured["suite"] = kwargs["suite"]
+        return {"preset_results": [], "regression": {"status": "pass", "issues": []}}
+
+    monkeypatch.setattr("dagzoo.cli.run_benchmark_suite", _stub_run_benchmark_suite)
+    monkeypatch.setattr("dagzoo.cli.write_suite_json", lambda _summary, path: Path(path))
+
+    code = main(
+        [
+            "benchmark",
+            "--config",
+            str(config_path),
+            "--preset",
+            "custom",
+            "--suite",
+            "smoke",
+            "--json-out",
+            str(tmp_path / "summary.json"),
+            "--no-memory",
+        ]
+    )
+
+    assert code == 0
+    assert captured == {"filter_enabled": True, "suite": "smoke"}
+
+
+def test_diversity_audit_cli_accepts_filter_enabled_configs(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline = load_repo_config()
+    baseline.filter.enabled = True
+    baseline_path = write_config(tmp_path, baseline, "baseline_filter_enabled.yaml")
+    variant = load_repo_config()
+    variant.filter.enabled = True
+    variant_path = write_config(tmp_path, variant, "variant_filter_enabled.yaml")
+    captured: dict[str, object] = {}
+
+    def _stub_run_effective_diversity_audit(**kwargs):
+        captured["baseline_filter_enabled"] = bool(kwargs["baseline_config"].filter.enabled)
+        captured["variant_filters_enabled"] = [
+            bool(config.filter.enabled) for config in kwargs["variant_configs"]
+        ]
+        return {"summary": {"overall_status": "pass", "num_variants": 1}}
+
+    monkeypatch.setattr(
+        "dagzoo.cli.run_effective_diversity_audit", _stub_run_effective_diversity_audit
+    )
+    monkeypatch.setattr(
+        "dagzoo.cli.write_effective_diversity_artifacts",
+        lambda _report, out_dir: {"summary_json": Path(out_dir) / "summary.json"},
+    )
+
+    code = main(
+        [
+            "diversity-audit",
+            "--baseline-config",
+            str(baseline_path),
+            "--variant-config",
+            str(variant_path),
+            "--out-dir",
+            str(tmp_path / "diversity"),
+        ]
+    )
+
+    assert code == 0
+    assert captured == {
+        "baseline_filter_enabled": True,
+        "variant_filters_enabled": [True],
+    }
+
+
 def test_request_cli_rejects_missing_request_file(tmp_path) -> None:
     with pytest.raises(SystemExit) as exc:
         main(
@@ -425,6 +505,41 @@ def test_request_cli_rejects_missing_request_file(tmp_path) -> None:
         )
 
     assert int(exc.value.code) == 2
+
+
+def test_request_cli_rejects_n_jobs_when_deferred_filtering_is_disabled(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    request_path = tmp_path / "request.yaml"
+    request_path.write_text(
+        yaml.safe_dump(
+            {
+                "version": "v1",
+                "task": "classification",
+                "dataset_count": 2,
+                "rows": 1024,
+                "profile": "default",
+                "output_root": str(tmp_path / "requests" / "out"),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "request",
+                "--request",
+                str(request_path),
+                "--n-jobs",
+                "4",
+            ]
+        )
+
+    assert int(exc.value.code) == 2
+    captured = capsys.readouterr()
+    assert "Deferred filtering is temporarily disabled" in captured.err
+    assert "`dagzoo request --n-jobs` is unavailable." in captured.err
 
 
 def test_request_cli_rejects_invalid_request_payload(tmp_path) -> None:

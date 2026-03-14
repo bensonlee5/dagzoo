@@ -6,6 +6,7 @@ import math
 from typing import Any, Sequence
 
 from dagzoo.config import GeneratorConfig, clone_generator_config
+from dagzoo.filtering.availability import raise_filtering_unsupported
 
 from .runner import run_effective_diversity_audit
 
@@ -170,6 +171,8 @@ def run_filter_calibration(
     fail_threshold_pct: float,
 ) -> dict[str, Any]:
     """Run threshold-only filter calibration against the rewritten audit engine."""
+
+    raise_filtering_unsupported()
 
     if not bool(config.filter.enabled):
         raise ValueError("filter-calibration requires filter.enabled: true in the resolved config.")

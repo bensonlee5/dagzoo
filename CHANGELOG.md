@@ -10,16 +10,21 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
-## [0.9.12] - 2026-03-14
+## [0.9.13] - 2026-03-14
 
 ### Changed
 
 - **BREAKING:** `dagzoo filter` and `dagzoo filter-calibration` now fail with
   an explicit unsupported-feature error while deferred filtering is temporarily
   disabled.
+- Filter-enabled `dagzoo benchmark` and `dagzoo diversity-audit` workflows
+  remain supported because they replay filter metrics analytically rather than
+  producing deferred-filter artifacts.
 - **BREAKING:** `dagzoo request` is now a generate-only workflow. Request runs
   write generated shards, effective-config artifacts, and a handoff manifest,
   but no longer produce `filter/` or `curated/` artifacts.
+- **BREAKING:** `dagzoo request --n-jobs` now fails fast because request runs
+  no longer execute deferred filtering.
 - **BREAKING:** request handoff manifests now use schema version `3` and point
   downstream consumers at `generated_dir` as the canonical training artifact.
 - Canonical `dataset_id` and `split_groups.request_run` now incorporate the

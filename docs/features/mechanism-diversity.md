@@ -13,8 +13,8 @@ ______________________________________________________________________
   `piecewise` control or the widened `gp` candidate path.
 - You need realized mechanism-family and mechanism-variant counts in bundle
   metadata and audit reports.
-- You want diversity-audit and filter-calibration evidence before treating a
-  new mechanism path as stable.
+- You want diversity-audit evidence before treating a new mechanism path as
+  stable. Deferred filter calibration is temporarily unsupported.
 
 ______________________________________________________________________
 
@@ -108,25 +108,10 @@ ______________________________________________________________________
 
 ## Filter-calibration workflow
 
-Use the GP filter-enabled preset to check accepted-corpus throughput and yield
-against diversity shift:
-
-```bash
-dagzoo filter-calibration \
-  --config configs/preset_mechanism_gp_filter_smoke.yaml \
-  --suite smoke \
-  --device cpu \
-  --out-dir benchmarks/results/filter_calibration_gp
-```
-
-Inspect `summary.json` and `summary.md` for:
-
-- `summary.best_overall_threshold_requested`
-- `candidates[*].filter_accepted_datasets_per_minute`
-- `candidates[*].diversity_status`
-- `candidates[*].mechanism_family_summary`
-- `candidates[*].mechanism_family_summary.sampled_variant_counts`
-- `candidates[*].mechanism_family_summary.dataset_presence_rate_by_variant`
+`dagzoo filter-calibration` is temporarily unsupported while deferred
+filtering is disabled. Use `dagzoo diversity-audit` for current filter-enabled
+mechanism comparisons; that workflow still replays accepted-corpus metrics
+without requiring deferred-filter artifacts.
 
 ______________________________________________________________________
 

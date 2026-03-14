@@ -50,55 +50,42 @@ def test_generate_cli_prints_effective_config_and_resolution_trace(
 def test_filter_cli_prints_curated_output_summary(
     tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    class _Result:
-        manifest_path = Path("manifest.ndjson")
-        summary_path = Path("summary.json")
-        total_datasets = 2
-        accepted_datasets = 1
-        rejected_datasets = 1
-        datasets_per_minute = 42.0
-        curated_out_dir = Path("curated")
-        curated_accepted_datasets = 1
-
-    monkeypatch.setattr("dagzoo.cli.run_deferred_filter", lambda **kwargs: _Result())
-
-    code = main(
-        [
-            "filter",
-            "--in",
-            "input_shards",
-            "--out",
-            str(tmp_path / "filter_out"),
-            "--curated-out",
-            str(tmp_path / "curated_out"),
-        ]
+    monkeypatch.setattr(
+        "dagzoo.cli.run_deferred_filter",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            NotImplementedError(
+                "Deferred filtering is temporarily disabled; generated outputs are the only supported corpus artifact for now."
+            )
+        ),
     )
 
-    assert code == 0
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "filter",
+                "--in",
+                "input_shards",
+                "--out",
+                str(tmp_path / "filter_out"),
+                "--curated-out",
+                str(tmp_path / "curated_out"),
+            ]
+        )
+
+    assert int(exc.value.code) == 2
     captured = capsys.readouterr()
-    assert "Wrote curated accepted-only shards:" in captured.out
+    assert "Deferred filtering is temporarily disabled" in captured.err
 
 
 def test_request_cli_prints_request_execution_summary(
     tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    class _FilterResult:
-        manifest_path = Path("filter_manifest.ndjson")
-        summary_path = Path("filter_summary.json")
-        total_datasets = 2
-        accepted_datasets = 1
-        rejected_datasets = 1
-        datasets_per_minute = 42.0
-        curated_out_dir = Path("curated")
-        curated_accepted_datasets = 1
-
     class _Result:
         effective_config_path = Path("effective_config.yaml")
         effective_config_trace_path = Path("effective_config_trace.yaml")
         handoff_manifest_path = Path("handoff_manifest.json")
         generated_dir = Path("generated")
         generated_datasets = 2
-        filter_result = _FilterResult()
 
     monkeypatch.setattr("dagzoo.cli.run_request_execution", lambda **kwargs: _Result())
 
@@ -125,9 +112,7 @@ def test_request_cli_prints_request_execution_summary(
     captured = capsys.readouterr()
     assert "Wrote effective config:" in captured.out
     assert "Wrote handoff manifest:" in captured.out
-    assert "Wrote filter manifest:" in captured.out
-    assert "Deferred filter summary:" in captured.out
-    assert "Wrote curated accepted-only shards:" in captured.out
+    assert "Wrote 2 datasets to: generated" in captured.out
 
 
 def test_benchmark_cli_prints_configs_and_writes_baseline(
@@ -249,76 +234,32 @@ def test_diversity_audit_cli_fail_on_regression_treats_insufficient_metrics_as_e
     assert code == 1
 
 
-def test_filter_calibration_cli_writes_summary_and_status(
+def test_filter_calibration_cli_reports_unsupported_status(
     tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         "dagzoo.cli.run_filter_calibration",
-        lambda **_kwargs: {
-            "summary": {
-                "overall_status": "warn",
-                "best_overall_threshold_requested": 0.804,
-                "best_overall_diversity_status": "warn",
-                "best_passing_threshold_requested": 0.801,
-                "num_candidates": 5,
-            }
-        },
-    )
-    monkeypatch.setattr(
-        "dagzoo.cli.write_filter_calibration_artifacts",
-        lambda _report, out_dir: {"summary_json": Path(out_dir) / "summary.json"},
+        lambda **_kwargs: (_ for _ in ()).throw(
+            NotImplementedError(
+                "Deferred filtering is temporarily disabled; generated outputs are the only supported corpus artifact for now."
+            )
+        ),
     )
 
-    code = main(
-        [
-            "filter-calibration",
-            "--config",
-            "configs/preset_filter_benchmark_smoke.yaml",
-            "--out-dir",
-            str(tmp_path / "filter_calibration"),
-        ]
-    )
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "filter-calibration",
+                "--config",
+                "configs/preset_filter_benchmark_smoke.yaml",
+                "--out-dir",
+                str(tmp_path / "filter_calibration"),
+            ]
+        )
 
-    assert code == 0
+    assert int(exc.value.code) == 2
     captured = capsys.readouterr()
-    assert "Wrote filter calibration artifact [summary_json]:" in captured.out
-    assert "Filter calibration status=warn best_overall=0.804 best_passing=0.801 candidates=5" in (
-        captured.out
-    )
-
-
-def test_filter_calibration_cli_fail_on_regression_uses_best_overall_status(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "dagzoo.cli.run_filter_calibration",
-        lambda **_kwargs: {
-            "summary": {
-                "overall_status": "warn",
-                "best_overall_threshold_requested": 0.8,
-                "best_overall_diversity_status": "fail",
-                "best_passing_threshold_requested": None,
-                "num_candidates": 5,
-            }
-        },
-    )
-    monkeypatch.setattr(
-        "dagzoo.cli.write_filter_calibration_artifacts",
-        lambda _report, out_dir: {"summary_json": Path(out_dir) / "summary.json"},
-    )
-
-    code = main(
-        [
-            "filter-calibration",
-            "--config",
-            "configs/preset_filter_benchmark_smoke.yaml",
-            "--fail-on-regression",
-            "--out-dir",
-            str(tmp_path / "filter_calibration"),
-        ]
-    )
-
-    assert code == 1
+    assert "Deferred filtering is temporarily disabled" in captured.err
 
 
 def test_hardware_cli_prints_detected_hardware(

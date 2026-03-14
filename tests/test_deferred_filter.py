@@ -8,6 +8,13 @@ from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 from dagzoo.types import DatasetBundle
 
 
+@pytest.fixture(autouse=True)
+def _allow_deferred_filter_impl(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "dagzoo.filtering.deferred_filter.raise_filtering_unsupported", lambda: None
+    )
+
+
 def _bundle_with_embedded_config(
     seed: int,
     *,

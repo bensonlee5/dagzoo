@@ -27,7 +27,6 @@ from dagzoo.core.request_handoff import (
     REQUEST_HANDOFF_SCHEMA_NAME,
     validate_request_handoff_manifest,
 )
-from dagzoo.filtering import DeferredFilterRunResult
 from dagzoo.hardware import HardwareInfo
 
 
@@ -270,9 +269,8 @@ def test_resolve_request_config_applies_missingness_profile_without_task_leakage
     )
 
 
-def test_request_cli_end_to_end_writes_generated_filter_and_curated_outputs(
+def test_request_cli_end_to_end_writes_generated_outputs_and_handoff_manifest(
     tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     output_root = tmp_path / "request_run"
     request_path = write_yaml(
@@ -285,13 +283,6 @@ def test_request_cli_end_to_end_writes_generated_filter_and_curated_outputs(
             profile=REQUEST_PROFILE_SMOKE,
             output_root=str(output_root),
         ),
-    )
-
-    def _stub_filter(*_args, **_kwargs):
-        return True, {"wins_ratio": 1.0, "n_valid_oob": 128}
-
-    monkeypatch.setattr(
-        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy", _stub_filter
     )
 
     code = main(
@@ -323,41 +314,25 @@ def test_request_cli_end_to_end_writes_generated_filter_and_curated_outputs(
     )
     generated_metadata_path = output_root / "generated" / "shard_00000" / "metadata.ndjson"
     assert generated_metadata_path.exists()
-    assert (output_root / "filter" / "filter_manifest.ndjson").exists()
-    summary = json.loads((output_root / "filter" / "filter_summary.json").read_text("utf-8"))
-    assert summary["total_datasets"] == 1
-    assert summary["accepted_datasets"] == 1
-    assert summary["rejected_datasets"] == 0
-    curated_metadata_path = output_root / "curated" / "shard_00000" / "metadata.ndjson"
-    assert curated_metadata_path.exists()
     generated_metadata = _load_ndjson(generated_metadata_path)
-    curated_metadata = _load_ndjson(curated_metadata_path)
     assert len(generated_metadata) == 1
-    assert len(curated_metadata) == 1
     generated_record = generated_metadata[0]["metadata"]
-    curated_record = curated_metadata[0]["metadata"]
     assert isinstance(generated_record, dict)
-    assert isinstance(curated_record, dict)
     assert isinstance(generated_record.get("dataset_id"), str)
-    assert generated_record["split_groups"] == curated_record["split_groups"]
-    assert generated_record["dataset_id"] == curated_record["dataset_id"]
     handoff = json.loads((output_root / "handoff_manifest.json").read_text(encoding="utf-8"))
     validate_request_handoff_manifest(handoff)
     assert handoff["schema_name"] == REQUEST_HANDOFF_SCHEMA_NAME
-    assert handoff["artifacts"]["filtered_corpus_dir"] == str((output_root / "curated").resolve())
-    assert handoff["artifacts"]["filter_summary_path"] == str(
-        (output_root / "filter" / "filter_summary.json").resolve()
-    )
-    assert handoff["artifacts_relative"]["filtered_corpus_dir"] == "curated"
-    assert handoff["defaults"]["recommended_training_corpus"] == "curated"
-    assert handoff["defaults"]["curation_policy"] == "accepted_only"
+    assert handoff["artifacts"]["generated_dir"] == str((output_root / "generated").resolve())
+    assert handoff["artifacts_relative"]["generated_dir"] == "generated"
+    assert handoff["defaults"]["recommended_training_corpus"] == "generated"
+    assert handoff["defaults"]["curation_policy"] == "none"
     assert handoff["identity"]["source_family"] == "dagzoo.fixed_layout_scm"
-    assert len(handoff["checksums"]["filter_summary_sha256"]) == 64
-    assert handoff["summary"]["accepted_datasets"] == 1
+    assert len(handoff["checksums"]["effective_config_sha256"]) == 64
+    assert handoff["summary"]["generated_datasets"] == 1
     assert handoff["diversity_artifacts"]["summary_json_path"] is None
 
 
-def test_request_execution_manifest_uses_wall_clock_filter_timing(
+def test_request_execution_manifest_uses_wall_clock_generation_timing(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -374,7 +349,7 @@ def test_request_execution_manifest_uses_wall_clock_filter_timing(
         ),
     )
 
-    perf_counter_values = iter((10.0, 16.0, 20.0, 50.0))
+    perf_counter_values = iter((10.0, 16.0))
     monkeypatch.setattr(
         "dagzoo.cli.request_execution.perf_counter", lambda: next(perf_counter_values)
     )
@@ -391,32 +366,6 @@ def test_request_execution_manifest_uses_wall_clock_filter_timing(
         out_dir.mkdir(parents=True, exist_ok=True)
         return 2
 
-    def _stub_run_deferred_filter(**kwargs) -> DeferredFilterRunResult:
-        assert kwargs["in_dir"] == output_root / "generated"
-        assert kwargs["out_dir"] == output_root / "filter"
-        assert kwargs["curated_out_dir"] == output_root / "curated"
-        kwargs["out_dir"].mkdir(parents=True, exist_ok=True)
-        kwargs["curated_out_dir"].mkdir(parents=True, exist_ok=True)
-        (kwargs["out_dir"] / "filter_manifest.ndjson").write_text(
-            '{"dataset_index": 0, "accepted": true}\n',
-            encoding="utf-8",
-        )
-        (kwargs["out_dir"] / "filter_summary.json").write_text(
-            '{"accepted_datasets": 1, "rejected_datasets": 1}\n',
-            encoding="utf-8",
-        )
-        return DeferredFilterRunResult(
-            manifest_path=output_root / "filter" / "filter_manifest.ndjson",
-            summary_path=output_root / "filter" / "filter_summary.json",
-            total_datasets=2,
-            accepted_datasets=1,
-            rejected_datasets=1,
-            elapsed_seconds=0.5,
-            datasets_per_minute=999.0,
-            curated_out_dir=output_root / "curated",
-            curated_accepted_datasets=1,
-        )
-
     monkeypatch.setattr(
         "dagzoo.cli.request_execution.write_packed_parquet_shards_stream",
         _stub_write_packed_parquet_shards_stream,
@@ -425,7 +374,6 @@ def test_request_execution_manifest_uses_wall_clock_filter_timing(
         "dagzoo.cli.request_execution.get_cli_public_api",
         lambda: SimpleNamespace(
             generate_batch_iter=lambda *_args, **_kwargs: iter(()),
-            run_deferred_filter=_stub_run_deferred_filter,
         ),
     )
 
@@ -442,13 +390,10 @@ def test_request_execution_manifest_uses_wall_clock_filter_timing(
     validate_request_handoff_manifest(handoff)
     assert handoff["throughput"]["generation_stage"]["elapsed_seconds"] == pytest.approx(6.0)
     assert handoff["throughput"]["generation_stage"]["datasets_per_minute"] == pytest.approx(20.0)
-    assert handoff["throughput"]["filter_stage"]["elapsed_seconds"] == pytest.approx(30.0)
-    assert handoff["throughput"]["filter_stage"]["datasets_per_minute"] == pytest.approx(4.0)
 
 
 def test_request_handoff_identity_is_stable_after_request_run_directory_move(
     tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     output_root = tmp_path / "request_run"
     request_path = write_yaml(
@@ -462,13 +407,6 @@ def test_request_handoff_identity_is_stable_after_request_run_directory_move(
             output_root=str(output_root),
             seed=7,
         ),
-    )
-
-    def _stub_filter(*_args, **_kwargs):
-        return True, {"wins_ratio": 1.0, "n_valid_oob": 128}
-
-    monkeypatch.setattr(
-        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy", _stub_filter
     )
 
     code = main(
@@ -499,15 +437,10 @@ def test_request_handoff_identity_is_stable_after_request_run_directory_move(
     moved_generated_records = _load_ndjson(
         moved_root / "generated" / "shard_00000" / "metadata.ndjson"
     )
-    original_curated_records = _load_ndjson(
-        output_root / "curated" / "shard_00000" / "metadata.ndjson"
-    )
-    moved_curated_records = _load_ndjson(moved_root / "curated" / "shard_00000" / "metadata.ndjson")
 
     assert moved_manifest["identity"] == original_manifest["identity"]
     assert moved_manifest["checksums"] == original_manifest["checksums"]
     assert moved_generated_records == original_generated_records
-    assert moved_curated_records == original_curated_records
     for key, relative_path in moved_manifest["artifacts_relative"].items():
         resolved = (moved_root / relative_path).resolve()
         if key == "run_root":

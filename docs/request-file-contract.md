@@ -8,7 +8,7 @@ artifacts that `dagzoo request` produces, reference
 [Output Format](output-format.md).
 
 `dagzoo request --request <path>` resolves this public request contract into
-canonical `generate -> filter` execution and publishes
+canonical generate-only execution and publishes
 `handoff_manifest.json` at the request `output_root`.
 
 ## v1 goals
@@ -61,9 +61,6 @@ and writes these artifacts:
   downstream consumers
 - `generated/`: raw generated shard outputs plus
   `effective_config.yaml` and `effective_config_trace.yaml`
-- `filter/`: deferred-filter artifacts
-  (`filter_manifest.ndjson` and `filter_summary.json`)
-- `curated/`: accepted-only curated shard outputs
 
 ## Handoff Manifest
 
@@ -71,28 +68,23 @@ and writes these artifacts:
 corpus handoff. It is a JSON document with:
 
 - `schema_name: dagzoo_request_handoff_manifest`
-- `schema_version: 2`
+- `schema_version: 3`
 - `identity`: stable request-run and corpus identifiers plus source-family tag
 - `request`: request-file echo (`path` plus normalized public `payload`)
-- `artifacts`: absolute paths for the request-run root, generated output,
-  filtered corpus, filter summary/manifest, and effective-config artifacts
+- `artifacts`: absolute paths for the request-run root, generated output, and
+  effective-config artifacts
 - `artifacts_relative`: manifest-relative paths for portable downstream use
-- `checksums`: SHA-256 digests for the effective-config and filter artifacts
-- `summary`: generated / accepted / rejected dataset counts plus acceptance rate
-- `throughput`: generation-stage and filter-stage elapsed time plus
-  datasets-per-minute context
+- `checksums`: SHA-256 digests for the effective-config artifacts
+- `summary`: generated dataset count
+- `throughput`: generation-stage elapsed time plus datasets-per-minute context
 - `hardware`: requested/resolved device context and the applied hardware policy
 - `diversity_artifacts`: nullable paths for request-associated diversity reports
-- `defaults`: canonical downstream-consumption defaults, including the
-  accepted-only curated corpus recommendation
-
-The manifest `throughput` block uses request-run wall-clock stage timing.
-`filter/filter_summary.json` remains the underlying deferred-filter artifact and
-keeps its own timing semantics.
+- `defaults`: canonical downstream-consumption defaults, with generated shards
+  as the current training target
 
 Downstream consumers should treat `artifacts_relative` as the portable contract
-surface and `defaults.recommended_training_corpus=curated` as the canonical
-training target for mainline research runs.
+surface and `defaults.recommended_training_corpus=generated` as the canonical
+training target for mainline research runs while filtering is disabled.
 
 `dagzoo request` does not run `dagzoo diversity-audit` implicitly, so the
 `diversity_artifacts` paths are currently `null` unless a separate workflow
@@ -111,8 +103,8 @@ controls. In particular, v1 does not allow:
 
 ## Mapping Intent
 
-The public request contract resolves onto canonical `generate -> filter` runs
-plus one machine-readable handoff manifest.
+The public request contract resolves onto canonical generate-only runs plus one
+machine-readable handoff manifest.
 
 - `profile` maps to a stable internal config choice without exposing config
   file names as the public contract.

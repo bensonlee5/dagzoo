@@ -27,8 +27,8 @@ quality and realism controls.
    missingness.
 1. Emit `DatasetBundle` outputs; optionally persist shards and
    diagnostics.
-1. Optionally run `dagzoo filter` as a deferred acceptance stage over
-   shards.
+1. Deferred filtering remains reserved for future support; generated
+   shards are the only supported corpus artifact for now.
 
 ## Core Concepts
 
@@ -105,7 +105,7 @@ KeyedRng(run_seed)
   -> keyed("dataset", i, "attempt", attempt, "missingness")
 ```
 
-### 3. Split validity retries and deferred filter stage {#3-split-validity-retries-and-deferred-filter-stage}
+### 3. Split validity retries and reserved deferred-filter metadata {#3-split-validity-retries-and-deferred-filter-stage}
 
 Generation retries cover split-validity and generation exceptions only.
 
@@ -116,14 +116,12 @@ Generation retries cover split-validity and generation exceptions only.
 - Generated outputs mark `metadata.filter.mode=deferred` and
   `metadata.filter.status=not_run`.
 
-Data-quality acceptance is a separate stage:
+Data-quality acceptance remains reserved for future support:
 
-- Run `dagzoo filter --in <shard_dir> --out <out_dir>`.
-- Backend: CPU ExtraTrees-based wins-ratio filter.
-- Replay config is taken from embedded shard metadata; artifacts without the
-  required embedded metadata are rejected.
-- Deferred runs emit acceptance/rejection artifacts and optional curated
-  shards.
+- Generated outputs still carry deferred-filter metadata for traceability.
+- `dagzoo filter` and `dagzoo filter-calibration` currently fail fast with an
+  unsupported-feature error.
+- Request-driven handoff currently publishes generated shards only.
 
 ### 4. Effective config and traceability {#4-effective-config-and-traceability}
 

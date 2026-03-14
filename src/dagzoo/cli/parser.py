@@ -137,7 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     r = sub.add_parser(
         "request",
-        help="Resolve a public request file into canonical generate and deferred filter runs.",
+        help="Resolve a public request file into canonical generate-only handoff artifacts.",
     )
     r.set_defaults(handler=run_request_command)
     r.add_argument("--request", required=True, help="Path to v1 request YAML.")
@@ -157,7 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--n-jobs",
         type=filter_n_jobs,
         default=None,
-        help="Optional override for deferred-filter ExtraTrees worker count (-1 or >= 1).",
+        help="Reserved compatibility flag; request runs do not support deferred-filter worker overrides.",
     )
     r.add_argument(
         "--print-effective-config",
@@ -172,7 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     f = sub.add_parser(
         "filter",
-        help="Run deferred CPU filtering on existing shard outputs.",
+        help="Deferred filtering is temporarily unsupported.",
     )
     f.set_defaults(handler=run_filter_command)
     f.add_argument(
@@ -189,7 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument(
         "--curated-out",
         default=None,
-        help="Optional output directory for accepted-only curated shards.",
+        help="Reserved output directory flag; filtering is temporarily unsupported.",
     )
     f.add_argument(
         "--n-jobs",
@@ -363,7 +363,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser(
         "filter-calibration",
-        help="Sweep filter thresholds and compare accepted-corpus throughput vs diversity shift.",
+        help="Filter calibration is temporarily unsupported while deferred filtering is disabled.",
     )
     c.set_defaults(handler=run_filter_calibration_command)
     c.add_argument("--config", required=True, help="Filter-enabled generator config YAML path.")

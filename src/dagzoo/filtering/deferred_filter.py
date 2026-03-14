@@ -16,6 +16,7 @@ from dagzoo.config import FilterConfig
 from dagzoo.core.staged_artifacts import cleanup_path as _cleanup_path
 from dagzoo.core.staged_artifacts import promote_staged_path as _promote_staged_path
 from dagzoo.core.staged_artifacts import staged_output_path as _staged_output_path
+from dagzoo.filtering.availability import raise_filtering_unsupported
 from dagzoo.filtering.deferred_filter_artifacts import (
     _close_curated_shard_writer,
     _consume_expected_split,
@@ -326,6 +327,8 @@ def run_deferred_filter(
     n_jobs_override: int | None = None,
 ) -> DeferredFilterRunResult:
     """Replay ExtraTrees filter over persisted shard outputs."""
+
+    raise_filtering_unsupported()
 
     _require_pyarrow()
 

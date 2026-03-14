@@ -33,18 +33,21 @@ def run_diversity_audit_command(args: argparse.Namespace) -> int:
         for variant_config in variant_configs:
             variant_config.runtime.device = str(args.device)
 
-    report = cli_api.run_effective_diversity_audit(
-        baseline_config=baseline_config,
-        baseline_config_path=str(args.baseline_config),
-        variant_configs=variant_configs,
-        variant_config_paths=variant_config_paths,
-        suite=str(args.suite),
-        num_datasets=args.num_datasets,
-        warmup=args.warmup,
-        device=args.device,
-        warn_threshold_pct=warn_threshold_pct,
-        fail_threshold_pct=fail_threshold_pct,
-    )
+    try:
+        report = cli_api.run_effective_diversity_audit(
+            baseline_config=baseline_config,
+            baseline_config_path=str(args.baseline_config),
+            variant_configs=variant_configs,
+            variant_config_paths=variant_config_paths,
+            suite=str(args.suite),
+            num_datasets=args.num_datasets,
+            warmup=args.warmup,
+            device=args.device,
+            warn_threshold_pct=warn_threshold_pct,
+            fail_threshold_pct=fail_threshold_pct,
+        )
+    except NotImplementedError as exc:
+        raise_usage_error(str(exc))
 
     out_dir = Path(args.out_dir)
     artifact_paths = cli_api.write_effective_diversity_artifacts(report, out_dir=out_dir)
@@ -78,29 +81,27 @@ def run_filter_calibration_command(args: argparse.Namespace) -> int:
     config = load_config_or_usage_error(str(args.config))
     if args.device is not None:
         config.runtime.device = str(args.device)
-    if not bool(config.filter.enabled):
-        raise_usage_error(
-            "filter-calibration requires filter.enabled: true in the resolved config."
-        )
     try:
-        validate_filter_calibration_threshold(
-            config.filter.threshold,
-            field_name="filter.threshold",
+        if bool(config.filter.enabled):
+            validate_filter_calibration_threshold(
+                config.filter.threshold,
+                field_name="filter.threshold",
+            )
+        report = cli_api.run_filter_calibration(
+            config=config,
+            config_path=str(args.config),
+            thresholds=args.thresholds,
+            suite=str(args.suite),
+            num_datasets=args.num_datasets,
+            warmup=args.warmup,
+            device=args.device,
+            warn_threshold_pct=warn_threshold_pct,
+            fail_threshold_pct=fail_threshold_pct,
         )
+    except NotImplementedError as exc:
+        raise_usage_error(str(exc))
     except ValueError as exc:
         raise_usage_error(str(exc))
-
-    report = cli_api.run_filter_calibration(
-        config=config,
-        config_path=str(args.config),
-        thresholds=args.thresholds,
-        suite=str(args.suite),
-        num_datasets=args.num_datasets,
-        warmup=args.warmup,
-        device=args.device,
-        warn_threshold_pct=warn_threshold_pct,
-        fail_threshold_pct=fail_threshold_pct,
-    )
 
     out_dir = Path(args.out_dir)
     artifact_paths = cli_api.write_filter_calibration_artifacts(report, out_dir=out_dir)

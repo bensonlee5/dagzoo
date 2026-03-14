@@ -78,9 +78,16 @@ def test_validate_filter_calibration_threshold_rejects_invalid_values(value: flo
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), -0.1, 2.0])
-def test_run_filter_calibration_rejects_invalid_baseline_config_threshold(value: float) -> None:
+def test_run_filter_calibration_rejects_invalid_baseline_config_threshold(
+    value: float,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cfg = GeneratorConfig.from_yaml("configs/preset_filter_benchmark_smoke.yaml")
     cfg.filter.threshold = value
+    monkeypatch.setattr(
+        "dagzoo.diagnostics.effective_diversity.calibration.raise_filtering_unsupported",
+        lambda: None,
+    )
 
     with pytest.raises(
         ValueError, match=r"filter.threshold must be a finite value in \[0.0, 1.5\]"
@@ -103,6 +110,10 @@ def test_run_filter_calibration_ranks_best_overall_and_best_passing(
 ) -> None:
     cfg = GeneratorConfig.from_yaml("configs/preset_filter_benchmark_smoke.yaml")
     captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "dagzoo.diagnostics.effective_diversity.calibration.raise_filtering_unsupported",
+        lambda: None,
+    )
 
     def _stub_run_effective_diversity_audit(**kwargs):
         captured["variant_labels"] = kwargs["variant_labels"]
@@ -186,6 +197,10 @@ def test_run_filter_calibration_keeps_fine_grained_threshold_candidates_distinct
 ) -> None:
     cfg = GeneratorConfig.from_yaml("configs/preset_filter_benchmark_smoke.yaml")
     captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "dagzoo.diagnostics.effective_diversity.calibration.raise_filtering_unsupported",
+        lambda: None,
+    )
 
     def _stub_run_effective_diversity_audit(**kwargs):
         captured["variant_labels"] = kwargs["variant_labels"]

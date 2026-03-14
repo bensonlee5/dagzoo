@@ -19,6 +19,7 @@ from dagzoo.diagnostics import (
     write_coverage_summary_markdown,
 )
 from dagzoo.diagnostics_targets import build_diagnostics_aggregation_config
+from dagzoo.filtering.availability import FILTERING_UNSUPPORTED_MESSAGE
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 
 from ..common import get_cli_public_api, load_config_or_usage_error, raise_usage_error
@@ -71,10 +72,7 @@ def run_generate_command(args: argparse.Namespace) -> int:
         device=resolved.requested_device,
     )
     if bool(config.filter.enabled):
-        raise_usage_error(
-            "Inline filtering has been removed from generate. Set filter.enabled=false and run "
-            "`dagzoo filter --in <shard_dir> --out <out_dir>` after generation."
-        )
+        raise_usage_error(f"{FILTERING_UNSUPPORTED_MESSAGE} Set filter.enabled=false.")
     hw = resolved.hardware
     trace_events = list(resolved.trace_events)
     append_config_diff_events(

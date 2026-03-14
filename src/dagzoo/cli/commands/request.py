@@ -31,18 +31,4 @@ def run_request_command(args: argparse.Namespace) -> int:
     print(f"Wrote effective config trace: {result.effective_config_trace_path}")
     print(f"Wrote handoff manifest: {result.handoff_manifest_path}")
     print(f"Wrote {result.generated_datasets} datasets to: {result.generated_dir}")
-    print(f"Wrote filter manifest: {result.filter_result.manifest_path}")
-    print(f"Wrote filter summary: {result.filter_result.summary_path}")
-    print(
-        "Deferred filter summary: "
-        f"total={result.filter_result.total_datasets} "
-        f"accepted={result.filter_result.accepted_datasets} "
-        f"rejected={result.filter_result.rejected_datasets} "
-        f"dpm={result.filter_result.datasets_per_minute:.2f}"
-    )
-    if result.filter_result.curated_out_dir is not None:
-        print(
-            f"Wrote curated accepted-only shards: {result.filter_result.curated_out_dir} "
-            f"(datasets={result.filter_result.curated_accepted_datasets})"
-        )
     return 0

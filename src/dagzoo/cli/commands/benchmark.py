@@ -242,24 +242,27 @@ def run_benchmark_command(args: argparse.Namespace) -> int:
 
     baseline_payload = load_baseline(args.baseline) if args.baseline else None
 
-    summary = cli_api.run_benchmark_suite(
-        preset_specs,
-        suite=suite,
-        warn_threshold_pct=warn_pct,
-        fail_threshold_pct=fail_pct,
-        baseline_payload=baseline_payload,
-        num_datasets_override=args.num_datasets,
-        warmup_override=args.warmup,
-        collect_memory=not bool(args.no_memory),
-        collect_reproducibility=(
-            bool(args.collect_reproducibility)
-            or bool(default_cfg.benchmark.collect_reproducibility)
-        ),
-        collect_diagnostics=bool(args.diagnostics),
-        diagnostics_root_dir=diagnostics_root_dir,
-        fail_on_regression=bool(args.fail_on_regression),
-        hardware_policy=str(args.hardware_policy),
-    )
+    try:
+        summary = cli_api.run_benchmark_suite(
+            preset_specs,
+            suite=suite,
+            warn_threshold_pct=warn_pct,
+            fail_threshold_pct=fail_pct,
+            baseline_payload=baseline_payload,
+            num_datasets_override=args.num_datasets,
+            warmup_override=args.warmup,
+            collect_memory=not bool(args.no_memory),
+            collect_reproducibility=(
+                bool(args.collect_reproducibility)
+                or bool(default_cfg.benchmark.collect_reproducibility)
+            ),
+            collect_diagnostics=bool(args.diagnostics),
+            diagnostics_root_dir=diagnostics_root_dir,
+            fail_on_regression=bool(args.fail_on_regression),
+            hardware_policy=str(args.hardware_policy),
+        )
+    except NotImplementedError as exc:
+        raise_usage_error(str(exc))
     if args.print_effective_config:
         for result in summary.get("preset_results", []):
             if not isinstance(result, dict):

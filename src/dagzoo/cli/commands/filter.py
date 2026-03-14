@@ -18,6 +18,8 @@ def run_filter_command(args: argparse.Namespace) -> int:
             curated_out_dir=args.curated_out,
             n_jobs_override=args.n_jobs,
         )
+    except NotImplementedError as exc:
+        raise_usage_error(str(exc))
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         raise_usage_error(str(exc))
     print(f"Wrote filter manifest: {result.manifest_path}")
