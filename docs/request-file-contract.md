@@ -71,19 +71,28 @@ and writes these artifacts:
 corpus handoff. It is a JSON document with:
 
 - `schema_name: dagzoo_request_handoff_manifest`
-- `schema_version: 1`
+- `schema_version: 2`
+- `identity`: stable request-run and corpus identifiers plus source-family tag
 - `request`: request-file echo (`path` plus normalized public `payload`)
 - `artifacts`: absolute paths for the request-run root, generated output,
   filtered corpus, filter summary/manifest, and effective-config artifacts
+- `artifacts_relative`: manifest-relative paths for portable downstream use
+- `checksums`: SHA-256 digests for the effective-config and filter artifacts
 - `summary`: generated / accepted / rejected dataset counts plus acceptance rate
 - `throughput`: generation-stage and filter-stage elapsed time plus
   datasets-per-minute context
 - `hardware`: requested/resolved device context and the applied hardware policy
 - `diversity_artifacts`: nullable paths for request-associated diversity reports
+- `defaults`: canonical downstream-consumption defaults, including the
+  accepted-only curated corpus recommendation
 
 The manifest `throughput` block uses request-run wall-clock stage timing.
 `filter/filter_summary.json` remains the underlying deferred-filter artifact and
 keeps its own timing semantics.
+
+Downstream consumers should treat `artifacts_relative` as the portable contract
+surface and `defaults.recommended_training_corpus=curated` as the canonical
+training target for mainline research runs.
 
 `dagzoo request` does not run `dagzoo diversity-audit` implicitly, so the
 `diversity_artifacts` paths are currently `null` unless a separate workflow

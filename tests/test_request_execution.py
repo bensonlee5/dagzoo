@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,7 +23,10 @@ from dagzoo.config import (
 )
 from dagzoo.config.io import load_packaged_generator_config
 from dagzoo.core.config_resolution import resolve_request_config, serialize_resolution_events
-from dagzoo.core.request_handoff import REQUEST_HANDOFF_SCHEMA_NAME
+from dagzoo.core.request_handoff import (
+    REQUEST_HANDOFF_SCHEMA_NAME,
+    validate_request_handoff_manifest,
+)
 from dagzoo.filtering import DeferredFilterRunResult
 from dagzoo.hardware import HardwareInfo
 
@@ -317,11 +321,17 @@ def test_request_cli_end_to_end_writes_generated_filter_and_curated_outputs(
     assert summary["rejected_datasets"] == 0
     assert (output_root / "curated" / "shard_00000" / "metadata.ndjson").exists()
     handoff = json.loads((output_root / "handoff_manifest.json").read_text(encoding="utf-8"))
+    validate_request_handoff_manifest(handoff)
     assert handoff["schema_name"] == REQUEST_HANDOFF_SCHEMA_NAME
     assert handoff["artifacts"]["filtered_corpus_dir"] == str((output_root / "curated").resolve())
     assert handoff["artifacts"]["filter_summary_path"] == str(
         (output_root / "filter" / "filter_summary.json").resolve()
     )
+    assert handoff["artifacts_relative"]["filtered_corpus_dir"] == "curated"
+    assert handoff["defaults"]["recommended_training_corpus"] == "curated"
+    assert handoff["defaults"]["curation_policy"] == "accepted_only"
+    assert handoff["identity"]["source_family"] == "dagzoo.fixed_layout_scm"
+    assert len(handoff["checksums"]["filter_summary_sha256"]) == 64
     assert handoff["summary"]["accepted_datasets"] == 1
     assert handoff["diversity_artifacts"]["summary_json_path"] is None
 
@@ -364,6 +374,16 @@ def test_request_execution_manifest_uses_wall_clock_filter_timing(
         assert kwargs["in_dir"] == output_root / "generated"
         assert kwargs["out_dir"] == output_root / "filter"
         assert kwargs["curated_out_dir"] == output_root / "curated"
+        kwargs["out_dir"].mkdir(parents=True, exist_ok=True)
+        kwargs["curated_out_dir"].mkdir(parents=True, exist_ok=True)
+        (kwargs["out_dir"] / "filter_manifest.ndjson").write_text(
+            '{"dataset_index": 0, "accepted": true}\n',
+            encoding="utf-8",
+        )
+        (kwargs["out_dir"] / "filter_summary.json").write_text(
+            '{"accepted_datasets": 1, "rejected_datasets": 1}\n',
+            encoding="utf-8",
+        )
         return DeferredFilterRunResult(
             manifest_path=output_root / "filter" / "filter_manifest.ndjson",
             summary_path=output_root / "filter" / "filter_summary.json",
@@ -398,7 +418,66 @@ def test_request_execution_manifest_uses_wall_clock_filter_timing(
     )
 
     handoff = json.loads((output_root / "handoff_manifest.json").read_text(encoding="utf-8"))
+    validate_request_handoff_manifest(handoff)
     assert handoff["throughput"]["generation_stage"]["elapsed_seconds"] == pytest.approx(6.0)
     assert handoff["throughput"]["generation_stage"]["datasets_per_minute"] == pytest.approx(20.0)
     assert handoff["throughput"]["filter_stage"]["elapsed_seconds"] == pytest.approx(30.0)
     assert handoff["throughput"]["filter_stage"]["datasets_per_minute"] == pytest.approx(4.0)
+
+
+def test_request_handoff_identity_is_stable_after_request_run_directory_move(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_root = tmp_path / "request_run"
+    request_path = write_yaml(
+        tmp_path,
+        "request.yaml",
+        _request_payload(
+            task=REQUEST_TASK_REGRESSION,
+            dataset_count=1,
+            rows=1024,
+            profile=REQUEST_PROFILE_SMOKE,
+            output_root=str(output_root),
+            seed=7,
+        ),
+    )
+
+    def _stub_filter(*_args, **_kwargs):
+        return True, {"wins_ratio": 1.0, "n_valid_oob": 128}
+
+    monkeypatch.setattr(
+        "dagzoo.filtering.deferred_filter._apply_extra_trees_filter_numpy", _stub_filter
+    )
+
+    code = main(
+        [
+            "request",
+            "--request",
+            str(request_path),
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
+        ]
+    )
+
+    assert code == 0
+    original_manifest_path = output_root / "handoff_manifest.json"
+    original_manifest = json.loads(original_manifest_path.read_text(encoding="utf-8"))
+    validate_request_handoff_manifest(original_manifest)
+
+    moved_root = tmp_path / "request_run_copy"
+    shutil.copytree(output_root, moved_root)
+    moved_manifest_path = moved_root / "handoff_manifest.json"
+    moved_manifest = json.loads(moved_manifest_path.read_text(encoding="utf-8"))
+    validate_request_handoff_manifest(moved_manifest)
+
+    assert moved_manifest["identity"] == original_manifest["identity"]
+    assert moved_manifest["checksums"] == original_manifest["checksums"]
+    for key, relative_path in moved_manifest["artifacts_relative"].items():
+        resolved = (moved_root / relative_path).resolve()
+        if key == "run_root":
+            assert resolved == moved_root.resolve()
+        else:
+            assert resolved.exists()

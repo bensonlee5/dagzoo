@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections.abc import Mapping
@@ -11,11 +12,16 @@ from typing import Any, cast
 
 from dagzoo.config import RequestFileConfig
 from dagzoo.core.staged_artifacts import cleanup_path, promote_staged_path, staged_output_path
+from dagzoo.io.lineage_artifact import sha256_hex
 from dagzoo.math import sanitize_json
 
 REQUEST_HANDOFF_MANIFEST_FILENAME = "handoff_manifest.json"
 REQUEST_HANDOFF_SCHEMA_NAME = "dagzoo_request_handoff_manifest"
-REQUEST_HANDOFF_SCHEMA_VERSION = 1
+REQUEST_HANDOFF_SCHEMA_VERSION = 2
+REQUEST_HANDOFF_SOURCE_FAMILY = "dagzoo.fixed_layout_scm"
+REQUEST_HANDOFF_RECOMMENDED_TRAINING_CORPUS = "curated"
+_BLAKE2S_HEX_LENGTH = 32
+_SHA256_HEX_LENGTH = 64
 
 
 def _raise(path: str, message: str) -> None:
@@ -38,6 +44,13 @@ def _require_optional_string(value: object, *, path: str) -> str | None:
     if value is None:
         return None
     return _require_non_empty_string(value, path=path)
+
+
+def _require_hex_string(value: object, *, path: str, expected_length: int) -> str:
+    text = _require_non_empty_string(value, path=path)
+    if len(text) != expected_length or any(ch not in "0123456789abcdef" for ch in text):
+        _raise(path, f"must be a {expected_length}-character lowercase hexadecimal string")
+    return text
 
 
 def _require_int(value: object, *, path: str) -> int:
@@ -72,6 +85,24 @@ def _resolve_optional_path_str(path: str | Path | None) -> str | None:
     if path is None:
         return None
     return _resolve_path_str(path)
+
+
+def _read_sha256(path: str | Path) -> str:
+    return sha256_hex(Path(path).read_bytes())
+
+
+def _stable_blake2s_hex(payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        sanitize_json(dict(payload)),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.blake2s(encoded, digest_size=16).hexdigest()
+
+
+def _relative_posix_path(path: str | Path, *, start: str | Path) -> str:
+    return Path(path).resolve().relative_to(Path(start).resolve()).as_posix()
 
 
 def _datasets_per_minute(*, datasets: int, elapsed_seconds: float) -> float:
@@ -113,9 +144,41 @@ def build_request_handoff_manifest(
     acceptance_rate = (
         float(filter_accepted_datasets) / float(total_datasets) if total_datasets > 0 else None
     )
+    effective_config_sha256 = _read_sha256(effective_config_path)
+    effective_config_trace_sha256 = _read_sha256(effective_config_trace_path)
+    filter_manifest_sha256 = _read_sha256(filter_manifest_path)
+    filter_summary_sha256 = _read_sha256(filter_summary_path)
+    request_run_id = _stable_blake2s_hex(
+        {
+            "request_payload": request.to_dict(),
+            "effective_config_sha256": effective_config_sha256,
+            "requested_device": str(requested_device),
+            "resolved_device": str(resolved_device),
+            "hardware_policy": str(hardware_policy),
+        }
+    )
+    generated_corpus_id = _stable_blake2s_hex(
+        {
+            "request_run_id": request_run_id,
+            "corpus_kind": "generated",
+        }
+    )
+    curated_corpus_id = _stable_blake2s_hex(
+        {
+            "request_run_id": request_run_id,
+            "corpus_kind": "curated",
+            "filter_summary_sha256": filter_summary_sha256,
+        }
+    )
     payload: dict[str, Any] = {
         "schema_name": REQUEST_HANDOFF_SCHEMA_NAME,
         "schema_version": REQUEST_HANDOFF_SCHEMA_VERSION,
+        "identity": {
+            "source_family": REQUEST_HANDOFF_SOURCE_FAMILY,
+            "request_run_id": request_run_id,
+            "generated_corpus_id": generated_corpus_id,
+            "curated_corpus_id": curated_corpus_id,
+        },
         "request": {
             "path": _resolve_path_str(request_path),
             "payload": request.to_dict(),
@@ -129,6 +192,24 @@ def build_request_handoff_manifest(
             "effective_config_trace_path": _resolve_path_str(effective_config_trace_path),
             "filter_manifest_path": _resolve_path_str(filter_manifest_path),
             "filter_summary_path": _resolve_path_str(filter_summary_path),
+        },
+        "artifacts_relative": {
+            "run_root": ".",
+            "generated_dir": _relative_posix_path(generated_dir, start=run_root),
+            "filter_dir": _relative_posix_path(filter_dir, start=run_root),
+            "filtered_corpus_dir": _relative_posix_path(filtered_corpus_dir, start=run_root),
+            "effective_config_path": _relative_posix_path(effective_config_path, start=run_root),
+            "effective_config_trace_path": _relative_posix_path(
+                effective_config_trace_path, start=run_root
+            ),
+            "filter_manifest_path": _relative_posix_path(filter_manifest_path, start=run_root),
+            "filter_summary_path": _relative_posix_path(filter_summary_path, start=run_root),
+        },
+        "checksums": {
+            "effective_config_sha256": effective_config_sha256,
+            "effective_config_trace_sha256": effective_config_trace_sha256,
+            "filter_manifest_sha256": filter_manifest_sha256,
+            "filter_summary_sha256": filter_summary_sha256,
         },
         "summary": {
             "generated_datasets": int(generated_datasets),
@@ -168,6 +249,11 @@ def build_request_handoff_manifest(
             "summary_json_path": _resolve_optional_path_str(diversity_summary_json_path),
             "summary_md_path": _resolve_optional_path_str(diversity_summary_md_path),
         },
+        "defaults": {
+            "recommended_training_corpus": REQUEST_HANDOFF_RECOMMENDED_TRAINING_CORPUS,
+            "recommended_training_artifact_key": "filtered_corpus_dir",
+            "curation_policy": "accepted_only",
+        },
     }
     validate_request_handoff_manifest(payload)
     return payload
@@ -196,6 +282,32 @@ def validate_request_handoff_manifest(payload: Mapping[str, Any]) -> None:
             f"must equal {REQUEST_HANDOFF_SCHEMA_VERSION}",
         )
 
+    identity = _require_mapping(root.get("identity"), path="handoff_manifest.identity")
+    source_family = _require_non_empty_string(
+        identity.get("source_family"),
+        path="handoff_manifest.identity.source_family",
+    )
+    if source_family != REQUEST_HANDOFF_SOURCE_FAMILY:
+        _raise(
+            "handoff_manifest.identity.source_family",
+            f"must equal {REQUEST_HANDOFF_SOURCE_FAMILY!r}",
+        )
+    _require_hex_string(
+        identity.get("request_run_id"),
+        path="handoff_manifest.identity.request_run_id",
+        expected_length=_BLAKE2S_HEX_LENGTH,
+    )
+    _require_hex_string(
+        identity.get("generated_corpus_id"),
+        path="handoff_manifest.identity.generated_corpus_id",
+        expected_length=_BLAKE2S_HEX_LENGTH,
+    )
+    _require_hex_string(
+        identity.get("curated_corpus_id"),
+        path="handoff_manifest.identity.curated_corpus_id",
+        expected_length=_BLAKE2S_HEX_LENGTH,
+    )
+
     request = _require_mapping(root.get("request"), path="handoff_manifest.request")
     _require_non_empty_string(request.get("path"), path="handoff_manifest.request.path")
     request_payload = _require_mapping(
@@ -221,6 +333,43 @@ def validate_request_handoff_manifest(payload: Mapping[str, Any]) -> None:
         _require_non_empty_string(
             artifacts.get(key),
             path=f"handoff_manifest.artifacts.{key}",
+        )
+
+    artifacts_relative = _require_mapping(
+        root.get("artifacts_relative"),
+        path="handoff_manifest.artifacts_relative",
+    )
+    run_root_relative = _require_non_empty_string(
+        artifacts_relative.get("run_root"),
+        path="handoff_manifest.artifacts_relative.run_root",
+    )
+    if run_root_relative != ".":
+        _raise("handoff_manifest.artifacts_relative.run_root", "must equal '.'")
+    for key in (
+        "generated_dir",
+        "filter_dir",
+        "filtered_corpus_dir",
+        "effective_config_path",
+        "effective_config_trace_path",
+        "filter_manifest_path",
+        "filter_summary_path",
+    ):
+        _require_non_empty_string(
+            artifacts_relative.get(key),
+            path=f"handoff_manifest.artifacts_relative.{key}",
+        )
+
+    checksums = _require_mapping(root.get("checksums"), path="handoff_manifest.checksums")
+    for key in (
+        "effective_config_sha256",
+        "effective_config_trace_sha256",
+        "filter_manifest_sha256",
+        "filter_summary_sha256",
+    ):
+        _require_hex_string(
+            checksums.get(key),
+            path=f"handoff_manifest.checksums.{key}",
+            expected_length=_SHA256_HEX_LENGTH,
         )
 
     summary = _require_mapping(root.get("summary"), path="handoff_manifest.summary")
@@ -307,6 +456,35 @@ def validate_request_handoff_manifest(payload: Mapping[str, Any]) -> None:
         diversity_artifacts.get("summary_md_path"),
         path="handoff_manifest.diversity_artifacts.summary_md_path",
     )
+
+    defaults = _require_mapping(root.get("defaults"), path="handoff_manifest.defaults")
+    recommended_training_corpus = _require_non_empty_string(
+        defaults.get("recommended_training_corpus"),
+        path="handoff_manifest.defaults.recommended_training_corpus",
+    )
+    if recommended_training_corpus != REQUEST_HANDOFF_RECOMMENDED_TRAINING_CORPUS:
+        _raise(
+            "handoff_manifest.defaults.recommended_training_corpus",
+            f"must equal {REQUEST_HANDOFF_RECOMMENDED_TRAINING_CORPUS!r}",
+        )
+    recommended_artifact_key = _require_non_empty_string(
+        defaults.get("recommended_training_artifact_key"),
+        path="handoff_manifest.defaults.recommended_training_artifact_key",
+    )
+    if recommended_artifact_key != "filtered_corpus_dir":
+        _raise(
+            "handoff_manifest.defaults.recommended_training_artifact_key",
+            "must equal 'filtered_corpus_dir'",
+        )
+    curation_policy = _require_non_empty_string(
+        defaults.get("curation_policy"),
+        path="handoff_manifest.defaults.curation_policy",
+    )
+    if curation_policy != "accepted_only":
+        _raise(
+            "handoff_manifest.defaults.curation_policy",
+            "must equal 'accepted_only'",
+        )
 
 
 def write_request_handoff_manifest(

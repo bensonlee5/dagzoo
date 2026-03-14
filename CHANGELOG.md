@@ -10,6 +10,18 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
+## [0.9.9] - 2026-03-14
+
+### Changed
+
+- **BREAKING:** `dagzoo request` handoff manifests now use schema version `2`
+  and add stable request-run and corpus identity, manifest-relative artifact
+  paths, checksum metadata, and explicit curated-corpus defaults for downstream
+  consumers.
+- Request handoff docs now direct portable downstream consumers to the new
+  relative artifact contract and clarify that the accepted-only curated corpus
+  is the canonical training target.
+
 ## [0.9.8] - 2026-03-13
 
 ### Changed
