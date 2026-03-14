@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -22,12 +23,151 @@ def stable_blake2s_hex(payload: Mapping[str, Any], *, digest_size: int = 16) -> 
     return hashlib.blake2s(encoded, digest_size=int(digest_size)).hexdigest()
 
 
+def _require_mapping(value: object, *, path: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{path} must be a mapping.")
+    return value
+
+
+def _require_string(value: object, *, path: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{path} must be a non-empty string.")
+    return value
+
+
+def _require_int(value: object, *, path: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{path} must be an integer.")
+    return int(value)
+
+
+def _require_number(value: object, *, path: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{path} must be a finite number.")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{path} must be a finite number.")
+    return number
+
+
+def _normalized_float_mapping(value: object, *, path: str) -> dict[str, float]:
+    mapping = _require_mapping(value, path=path)
+    normalized: dict[str, float] = {}
+    for key in sorted(mapping):
+        normalized[str(key)] = _require_number(mapping[key], path=f"{path}.{key}")
+    return normalized
+
+
+def canonical_request_run_provenance(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the canonical run-level provenance payload used for dataset identities."""
+
+    config = _require_mapping(metadata.get("config"), path="metadata.config")
+    dataset = _require_mapping(config.get("dataset"), path="metadata.config.dataset")
+    runtime = _require_mapping(config.get("runtime"), path="metadata.config.runtime")
+    noise_distribution = _require_mapping(
+        metadata.get("noise_distribution"),
+        path="metadata.noise_distribution",
+    )
+    shift = _require_mapping(metadata.get("shift"), path="metadata.shift")
+
+    missing_rate = _require_number(
+        dataset.get("missing_rate"),
+        path="metadata.config.dataset.missing_rate",
+    )
+    missing_mechanism = _require_string(
+        dataset.get("missing_mechanism"),
+        path="metadata.config.dataset.missing_mechanism",
+    )
+    if missing_rate <= 0.0:
+        missing_mechanism = "none"
+    missingness_payload: dict[str, Any] = {
+        "missing_rate": missing_rate,
+        "missing_mechanism": missing_mechanism,
+    }
+    if missing_mechanism == "mar":
+        missingness_payload["missing_mar_observed_fraction"] = _require_number(
+            dataset.get("missing_mar_observed_fraction"),
+            path="metadata.config.dataset.missing_mar_observed_fraction",
+        )
+        missingness_payload["missing_mar_logit_scale"] = _require_number(
+            dataset.get("missing_mar_logit_scale"),
+            path="metadata.config.dataset.missing_mar_logit_scale",
+        )
+    elif missing_mechanism == "mnar":
+        missingness_payload["missing_mnar_logit_scale"] = _require_number(
+            dataset.get("missing_mnar_logit_scale"),
+            path="metadata.config.dataset.missing_mnar_logit_scale",
+        )
+
+    noise_family = _require_string(
+        noise_distribution.get("family_requested"),
+        path="metadata.noise_distribution.family_requested",
+    )
+    noise_payload: dict[str, Any] = {
+        "family_requested": noise_family,
+        "base_scale": _require_number(
+            noise_distribution.get("base_scale"),
+            path="metadata.noise_distribution.base_scale",
+        ),
+    }
+    if noise_family == "student_t":
+        noise_payload["student_t_df"] = _require_number(
+            noise_distribution.get("student_t_df"),
+            path="metadata.noise_distribution.student_t_df",
+        )
+    elif noise_family == "mixture":
+        noise_payload["mixture_weights"] = _normalized_float_mapping(
+            noise_distribution.get("mixture_weights"),
+            path="metadata.noise_distribution.mixture_weights",
+        )
+
+    return {
+        "dataset": {
+            "task": _require_string(
+                dataset.get("task"),
+                path="metadata.config.dataset.task",
+            ),
+            "n_train": _require_int(
+                dataset.get("n_train"),
+                path="metadata.config.dataset.n_train",
+            ),
+            "n_test": _require_int(
+                dataset.get("n_test"),
+                path="metadata.config.dataset.n_test",
+            ),
+            "missingness": missingness_payload,
+        },
+        "noise": noise_payload,
+        "shift": {
+            "variance_sigma_multiplier": _require_number(
+                shift.get("variance_sigma_multiplier"),
+                path="metadata.shift.variance_sigma_multiplier",
+            )
+        },
+        "runtime": {
+            "resolved_device": _require_string(
+                metadata.get("resolved_device"),
+                path="metadata.resolved_device",
+            ),
+            "compute_backend": _require_string(
+                metadata.get("compute_backend"),
+                path="metadata.compute_backend",
+            ),
+            "torch_dtype": _require_string(
+                runtime.get("torch_dtype"),
+                path="metadata.config.runtime.torch_dtype",
+            ),
+        },
+    }
+
+
 def canonical_request_run_split_group(
     *,
     seed: int,
     run_num_datasets: int,
     layout_signature: str,
     layout_plan_signature: str,
+    request_run_provenance: Mapping[str, Any],
 ) -> str:
     """Return a stable split-group key for one canonical request run."""
 
@@ -37,6 +177,7 @@ def canonical_request_run_split_group(
             "run_num_datasets": int(run_num_datasets),
             "layout_signature": str(layout_signature),
             "layout_plan_signature": str(layout_plan_signature),
+            "request_run_provenance": dict(request_run_provenance),
         }
     )
 
@@ -80,6 +221,7 @@ def canonical_dataset_id(
 __all__ = [
     "canonical_dataset_id",
     "canonical_layout_plan_split_group",
+    "canonical_request_run_provenance",
     "canonical_request_run_split_group",
     "stable_blake2s_hex",
 ]

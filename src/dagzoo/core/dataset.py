@@ -13,6 +13,7 @@ from dagzoo.core.fixed_layout.runtime import (
 from dagzoo.core.identity import (
     canonical_dataset_id,
     canonical_layout_plan_split_group,
+    canonical_request_run_provenance,
     canonical_request_run_split_group,
 )
 from dagzoo.rng import KeyedRng
@@ -64,12 +65,14 @@ def _annotate_canonical_batch_metadata(
         bundle.metadata,
         key="layout_execution_contract",
     )
+    request_run_provenance = canonical_request_run_provenance(bundle.metadata)
     split_groups = {
         "request_run": canonical_request_run_split_group(
             seed=int(run_seed),
             run_num_datasets=int(run_num_datasets),
             layout_signature=layout_signature,
             layout_plan_signature=layout_plan_signature,
+            request_run_provenance=request_run_provenance,
         ),
         "layout_plan": canonical_layout_plan_split_group(
             layout_signature=layout_signature,

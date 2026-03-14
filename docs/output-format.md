@@ -243,9 +243,12 @@ and `dagzoo generate`), replay later bundles with the shared `seed`,
 `run_num_datasets`, and `dataset_index` by regenerating the canonical batch and
 selecting that index. `dataset_seed` preserves the per-bundle child seed for
 deferred replay and diagnostics. `dataset_id` is stable across copies of the
-same generated corpus because it is derived from canonical run, layout-plan,
-and dataset provenance rather than filesystem location. Exact keyed subtree
-replay uses `seed` together with the `keyed_replay` paths.
+same generated corpus because it is derived from canonical run provenance,
+layout-plan provenance, and dataset provenance rather than filesystem
+location. `split_groups.request_run` includes stable non-plan run provenance
+that can change emitted data, while `split_groups.layout_plan` intentionally
+remains the narrower fixed-layout execution-plan grouping key. Exact keyed
+subtree replay uses `seed` together with the `keyed_replay` paths.
 
 For downstream train/validation/test assignment, use
 `split_groups.request_run` or `split_groups.layout_plan` instead of
@@ -257,10 +260,10 @@ share the same fixed-layout execution plan together.
 
 Present for canonical generation outputs.
 
-| Key           | Type | Description                                                              |
-| ------------- | ---- | ------------------------------------------------------------------------ |
-| `request_run` | str  | Stable grouping key for all datasets emitted by one canonical run        |
-| `layout_plan` | str  | Stable grouping key for datasets sharing one fixed-layout execution plan |
+| Key           | Type | Description                                                                  |
+| ------------- | ---- | ---------------------------------------------------------------------------- |
+| `request_run` | str  | Stable grouping key for one canonical run, including non-plan run provenance |
+| `layout_plan` | str  | Stable grouping key for datasets sharing one fixed-layout execution plan     |
 
 ### `keyed_replay` sub-object
 
@@ -382,8 +385,10 @@ Under `chunk_batched_v1`, canonical fixed-layout outputs are deterministic for
 the same run seed and realized run shape. Internal plan metadata records the
 shared sampled layout and execution-plan fingerprint used for that run, while
 `dataset_id` and `split_groups` provide the public path-independent grouping
-surface for downstream consumers, and `keyed_replay` records the exact keyed
-subtree roots needed for internal replay.
+surface for downstream consumers: `request_run` includes non-plan run
+provenance, while `layout_plan` stays scoped to the shared fixed-layout
+execution plan. `keyed_replay` records the exact keyed subtree roots needed
+for internal replay.
 
 ### Missingness sub-object (optional)
 
