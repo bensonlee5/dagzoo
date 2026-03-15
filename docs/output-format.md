@@ -60,52 +60,69 @@ Default: 128 datasets per shard.
 
 ______________________________________________________________________
 
-## Request-run layout (`dagzoo request`)
+## Generate handoff layout (`dagzoo generate --handoff-root`)
 
-Request-driven runs use `output_root` as a stable handoff root:
+Generate handoff runs use the supplied handoff root as a stable downstream
+entrypoint:
 
 ```
-output_root/
+handoff_root/
   handoff_manifest.json
   generated/
     shard_00000/
     effective_config.yaml
     effective_config_trace.yaml
-  filter/
-    filter_manifest.ndjson
-    filter_summary.json
-  curated/
-    shard_00000/
 ```
 
-`generated/`, `filter/`, and `curated/` reuse the same shard and summary
-contracts documented on this page. `handoff_manifest.json` is the downstream
-entrypoint for consumers such as `tab-foundry`.
+`generated/` reuses the same shard and metadata contracts documented on this
+page. `handoff_manifest.json` is the downstream entrypoint for consumers such
+as `tab-foundry`.
 
-### Request handoff manifest JSON
+### Generate handoff manifest JSON
 
 `handoff_manifest.json` uses this versioned top-level contract:
 
 | Key                   | Type   | Description                                                                       |
 | --------------------- | ------ | --------------------------------------------------------------------------------- |
-| `schema_name`         | str    | Exact string `dagzoo_request_handoff_manifest`                                    |
-| `schema_version`      | int    | Exact integer `3`                                                                 |
-| `identity`            | object | Stable request-run and corpus ids plus source-family tag                          |
-| `request`             | object | Request-file echo with `path` and normalized public `payload`                     |
+| `schema_name`         | str    | Exact string `dagzoo_generate_handoff_manifest`                                   |
+| `schema_version`      | int    | Exact integer `1`                                                                 |
+| `identity`            | object | Stable generate-run and corpus ids plus source-family tag                         |
+| `generate_invocation` | object | Config path plus structured user-supplied CLI overrides                           |
 | `artifacts`           | object | Absolute paths for the run root, generated output, and effective-config artifacts |
 | `artifacts_relative`  | object | Manifest-relative artifact paths for portable downstream consumption              |
 | `checksums`           | object | SHA-256 digests for effective-config artifacts                                    |
 | `summary`             | object | Generated dataset count                                                           |
 | `throughput`          | object | Generation-stage elapsed time plus datasets-per-minute context                    |
 | `hardware`            | object | Requested/resolved device context plus applied hardware policy                    |
-| `diversity_artifacts` | object | Nullable paths for request-associated diversity report artifacts                  |
+| `diversity_artifacts` | object | Nullable paths for handoff-associated diversity report artifacts                  |
 | `defaults`            | object | Canonical downstream-consumption defaults                                         |
 
 Current `identity` keys:
 
 - `source_family`
-- `request_run_id`
+- `generate_run_id`
 - `generated_corpus_id`
+
+`generate_invocation` contains:
+
+- `config_path`
+- `overrides`
+
+Current `generate_invocation.overrides` keys:
+
+- `num_datasets`
+- `seed`
+- `rows`
+- `device`
+- `hardware_policy`
+- `missing_rate`
+- `missing_mechanism`
+- `missing_mar_observed_fraction`
+- `missing_mar_logit_scale`
+- `missing_mnar_logit_scale`
+- `diagnostics`
+- `diagnostics_out_dir`
+- `handoff_root`
 
 Current `artifacts` keys:
 
@@ -137,17 +154,17 @@ Current `defaults` keys:
 - `recommended_training_artifact_key`
 - `curation_policy`
 
-`throughput.generation_stage` reports request-run wall-clock timing from the
-generate-only `dagzoo request` workflow.
+`throughput.generation_stage` reports wall-clock timing from
+`dagzoo generate --handoff-root`.
 
-`dagzoo request` does not run a diversity audit automatically, so the
-`diversity_artifacts` values are currently `null` unless a separate workflow
-persists request-associated diversity outputs alongside the run.
+`dagzoo generate --handoff-root` does not run a diversity audit automatically,
+so the `diversity_artifacts` values are currently `null` unless a separate
+workflow persists handoff-associated diversity outputs alongside the run.
 
 Downstream consumers should prefer `artifacts_relative` over absolute-path
 `artifacts` when portability matters, and should treat
 `defaults.recommended_training_corpus=generated` as the canonical training
-target while filtering is disabled.
+target while deferred filtering remains disabled.
 
 ______________________________________________________________________
 

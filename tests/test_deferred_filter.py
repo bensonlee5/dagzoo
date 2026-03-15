@@ -3,12 +3,14 @@ import json
 import numpy as np
 import pytest
 
-from dagzoo.filtering.deferred_filter import _iter_packed_split_datasets, run_deferred_filter
+from dagzoo.filtering.deferred_filter import (
+    _iter_packed_split_datasets,
+    run_deferred_filter,
+)
 from dagzoo.io.parquet_writer import write_packed_parquet_shards_stream
 from dagzoo.types import DatasetBundle
 
 
-@pytest.fixture(autouse=True)
 def _allow_deferred_filter_impl(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "dagzoo.filtering.deferred_filter.raise_filtering_unsupported", lambda: None
@@ -187,6 +189,7 @@ def test_run_deferred_filter_writes_manifest_and_summary(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_deferred_filter_impl(monkeypatch)
     pytest.importorskip("pyarrow.parquet")
 
     in_dir = tmp_path / "input"
@@ -231,6 +234,7 @@ def test_run_deferred_filter_writes_curated_output_for_accepted_only(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_deferred_filter_impl(monkeypatch)
     pyarrow_parquet = pytest.importorskip("pyarrow.parquet")
 
     in_dir = tmp_path / "input"
@@ -297,6 +301,7 @@ def test_run_deferred_filter_requires_embedded_filter_config(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_deferred_filter_impl(monkeypatch)
     pytest.importorskip("pyarrow.parquet")
 
     in_dir = tmp_path / "input"
@@ -317,6 +322,7 @@ def test_run_deferred_filter_prefers_dataset_seed_when_present(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_deferred_filter_impl(monkeypatch)
     pytest.importorskip("pyarrow.parquet")
 
     in_dir = tmp_path / "input"
@@ -346,7 +352,9 @@ def test_run_deferred_filter_prefers_dataset_seed_when_present(
 
 def test_run_deferred_filter_rejects_stale_filter_output_dir(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_deferred_filter_impl(monkeypatch)
     pytest.importorskip("pyarrow.parquet")
 
     in_dir = tmp_path / "input"
@@ -369,6 +377,7 @@ def test_run_deferred_filter_rejects_extra_split_rows_beyond_metadata(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_deferred_filter_impl(monkeypatch)
     pytest.importorskip("pyarrow.parquet")
 
     in_dir = tmp_path / "input"
@@ -402,6 +411,7 @@ def test_run_deferred_filter_rejects_non_monotonic_split_rows(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_deferred_filter_impl(monkeypatch)
     pytest.importorskip("pyarrow.parquet")
 
     shard_dir = tmp_path / "input" / "shard_00000"
@@ -471,6 +481,7 @@ def test_run_deferred_filter_rejects_lineage_symlinks_during_curated_copy(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_deferred_filter_impl(monkeypatch)
     pytest.importorskip("pyarrow.parquet")
 
     in_dir = tmp_path / "input"
@@ -512,6 +523,7 @@ def test_run_deferred_filter_cleans_up_curated_output_after_split_exhaustion_fai
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_deferred_filter_impl(monkeypatch)
     pytest.importorskip("pyarrow.parquet")
 
     in_dir = tmp_path / "input"

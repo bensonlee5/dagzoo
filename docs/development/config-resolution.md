@@ -35,39 +35,21 @@ After overrides are applied, staged generation validation runs. Invalid combinat
 
 ______________________________________________________________________
 
-## Request precedence
+## Generate handoff mode
 
-`dagzoo request` resolves config in this order (later steps win):
+`dagzoo generate --handoff-root <dir>` does not add a parallel config surface.
+It uses the same generate precedence described above, then applies these
+execution-layer rules:
 
-1. Base YAML `configs/default.yaml`
-1. Request profile overlay:
-   - `profile=default`: no extra overlay
-   - `profile=smoke`: set `dataset.n_train=128`, `dataset.n_test=32`,
-     `dataset.n_features_min=8`, `dataset.n_features_max=12`,
-     `graph.n_nodes_min=2`, and `graph.n_nodes_max=12`
-1. Request task override -> `dataset.task`
-1. Request seed override -> `seed` (when `seed` is set in the request file)
-1. Request rows override -> `dataset.rows`
-1. Request missingness profile overlay copied from the canonical missingness presets:
-   - `none`
-   - `mcar`
-   - `mar`
-   - `mnar`
-1. Request output root -> `output.out_dir = <output_root>/generated`
-1. CLI device override (`--device`) -> `runtime.device`
-1. Hardware policy transforms (`--hardware-policy`)
-1. Default CUDA fixed-layout auto-batch floor
-   (`runtime.fixed_layout_target_cells`) based on detected GPU memory, applied
-   only when the config leaves that field unset
-1. Request execution only:
-   - `profile=smoke` caps or clears `dataset.rows` against the smoke total-row
-     envelope before one-time run realization and records trace source
-     `request.smoke_rows_cap`
+1. Reject stale handoff roots containing a prior `handoff_manifest.json`,
+   existing `generated/shard_*` output, or legacy `filter/` / `curated/`
+   artifacts
+1. Force `output.out_dir = <handoff_root>/generated` and record trace source
+   `generate.handoff_root`
+1. Write `handoff_manifest.json` at `<handoff_root>/handoff_manifest.json`
 
-`dagzoo request` does not add a parallel config surface and does not re-enable
-inline filtering. Request runs always execute as canonical generation into
-`<output_root>/generated` followed by deferred filtering into
-`<output_root>/filter` with accepted-only shards under `<output_root>/curated`.
+`--handoff-root` is incompatible with `--out` and `--no-dataset-write`.
+Filtering remains disabled; handoff runs publish generated shards only.
 
 ______________________________________________________________________
 

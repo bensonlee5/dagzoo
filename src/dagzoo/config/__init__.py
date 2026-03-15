@@ -47,14 +47,6 @@ from .normalization import (
     normalize_noise_family,
     normalize_shift_mode,
 )
-from .request import (
-    REQUEST_FILE_VERSION_V1,
-    REQUEST_PROFILE_DEFAULT,
-    REQUEST_PROFILE_SMOKE,
-    REQUEST_TASK_CLASSIFICATION,
-    REQUEST_TASK_REGRESSION,
-    RequestFileConfig,
-)
 from .rows import (
     DatasetRowsSpec,
     dataset_rows_bounds,
@@ -79,11 +71,6 @@ __all__ = [
     "NOISE_MIXTURE_COMPONENT_GAUSSIAN",
     "NOISE_MIXTURE_COMPONENT_LAPLACE",
     "NOISE_MIXTURE_COMPONENT_STUDENT_T",
-    "REQUEST_FILE_VERSION_V1",
-    "REQUEST_PROFILE_DEFAULT",
-    "REQUEST_PROFILE_SMOKE",
-    "REQUEST_TASK_CLASSIFICATION",
-    "REQUEST_TASK_REGRESSION",
     "SHIFT_MODE_CUSTOM",
     "SHIFT_MODE_GRAPH_DRIFT",
     "SHIFT_MODE_MECHANISM_DRIFT",
@@ -104,7 +91,6 @@ __all__ = [
     "NoiseFamily",
     "NoiseMixtureComponent",
     "OutputConfig",
-    "RequestFileConfig",
     "RowsMode",
     "RuntimeConfig",
     "ShiftConfig",

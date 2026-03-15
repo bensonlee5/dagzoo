@@ -73,7 +73,9 @@ def test_generate_cli_rejects_oversized_seed() -> None:
     assert int(exc.value.code) == 2
 
 
-def test_generate_cli_rejects_inline_filter_enabled(tmp_path) -> None:
+def test_generate_cli_rejects_inline_filter_enabled(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
     cfg = load_repo_config()
     cfg.filter.enabled = True
     config_path = write_config(tmp_path, cfg, "inline_filter.yaml")
@@ -94,6 +96,8 @@ def test_generate_cli_rejects_inline_filter_enabled(tmp_path) -> None:
             ]
         )
     assert int(exc.value.code) == 2
+    captured = capsys.readouterr()
+    assert "Inline filtering has been removed from generate" in captured.err
 
 
 def test_generate_cli_rejects_removed_parallel_generation_runtime_keys(tmp_path) -> None:
@@ -494,159 +498,80 @@ def test_diversity_audit_cli_accepts_filter_enabled_configs(
     }
 
 
-def test_request_cli_rejects_missing_request_file(tmp_path) -> None:
+def test_request_subcommand_is_removed() -> None:
     with pytest.raises(SystemExit) as exc:
         main(
             [
                 "request",
                 "--request",
-                str(tmp_path / "missing.yaml"),
+                "request.yaml",
             ]
         )
 
     assert int(exc.value.code) == 2
 
 
-def test_request_cli_rejects_n_jobs_when_deferred_filtering_is_disabled(
+def test_generate_cli_rejects_handoff_root_with_out(
     tmp_path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    request_path = tmp_path / "request.yaml"
-    request_path.write_text(
-        yaml.safe_dump(
-            {
-                "version": "v1",
-                "task": "classification",
-                "dataset_count": 2,
-                "rows": 1024,
-                "profile": "default",
-                "output_root": str(tmp_path / "requests" / "out"),
-            }
-        ),
-        encoding="utf-8",
-    )
-
     with pytest.raises(SystemExit) as exc:
         main(
             [
-                "request",
-                "--request",
-                str(request_path),
-                "--n-jobs",
-                "4",
+                "generate",
+                "--config",
+                "configs/default.yaml",
+                "--handoff-root",
+                str(tmp_path / "handoff"),
+                "--out",
+                str(tmp_path / "out"),
             ]
         )
 
     assert int(exc.value.code) == 2
     captured = capsys.readouterr()
-    assert "Deferred filtering is temporarily disabled" in captured.err
-    assert "`dagzoo request --n-jobs` is unavailable." in captured.err
+    assert "`--handoff-root` cannot be combined with `--out`." in captured.err
 
 
-def test_request_cli_rejects_invalid_request_payload(tmp_path) -> None:
-    request_path = tmp_path / "invalid_request.yaml"
-    request_path.write_text(
-        yaml.safe_dump({"version": "v1", "unexpected": "value"}),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(SystemExit) as exc:
-        main(
-            [
-                "request",
-                "--request",
-                str(request_path),
-            ]
-        )
-
-    assert int(exc.value.code) == 2
-
-
-def test_request_cli_rejects_invalid_request_yaml(
+def test_generate_cli_rejects_handoff_root_with_no_dataset_write(
     tmp_path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    request_path = tmp_path / "invalid_request.yaml"
-    request_path.write_text("version: [v1\n", encoding="utf-8")
-
     with pytest.raises(SystemExit) as exc:
         main(
             [
-                "request",
-                "--request",
-                str(request_path),
+                "generate",
+                "--config",
+                "configs/default.yaml",
+                "--handoff-root",
+                str(tmp_path / "handoff"),
+                "--no-dataset-write",
             ]
         )
 
     assert int(exc.value.code) == 2
     captured = capsys.readouterr()
-    assert "Failed to parse request file" in captured.err
-    assert "Traceback" not in captured.err
+    assert "`--handoff-root` cannot be combined with `--no-dataset-write`." in captured.err
 
 
-def test_request_cli_invokes_request_runner(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, object] = {}
+def test_generate_cli_rejects_stale_handoff_root(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stale_generated_dir = tmp_path / "handoff" / "generated" / "shard_00000"
+    stale_generated_dir.mkdir(parents=True, exist_ok=True)
 
-    class _FilterResult:
-        manifest_path = Path("manifest.ndjson")
-        summary_path = Path("summary.json")
-        total_datasets = 2
-        accepted_datasets = 1
-        rejected_datasets = 1
-        datasets_per_minute = 42.0
-        curated_out_dir = Path("curated")
-        curated_accepted_datasets = 1
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                "configs/default.yaml",
+                "--handoff-root",
+                str(tmp_path / "handoff"),
+            ]
+        )
 
-    class _Result:
-        effective_config_path = Path("effective_config.yaml")
-        effective_config_trace_path = Path("effective_config_trace.yaml")
-        handoff_manifest_path = Path("handoff_manifest.json")
-        generated_dir = Path("generated")
-        generated_datasets = 2
-        filter_result = _FilterResult()
-
-    def _stub_run_request_execution(**kwargs):
-        captured.update(kwargs)
-        return _Result()
-
-    monkeypatch.setattr("dagzoo.cli.run_request_execution", _stub_run_request_execution)
-
-    request_path = tmp_path / "request.yaml"
-    request_path.write_text(
-        yaml.safe_dump(
-            {
-                "version": "v1",
-                "task": "classification",
-                "dataset_count": 2,
-                "rows": 1024,
-                "profile": "default",
-                "output_root": "requests/out",
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    code = main(
-        [
-            "request",
-            "--request",
-            str(request_path),
-            "--device",
-            "cpu",
-            "--hardware-policy",
-            "none",
-            "--n-jobs",
-            "4",
-            "--print-effective-config",
-            "--print-resolution-trace",
-        ]
-    )
-
-    assert code == 0
-    assert captured["request_path"] == str(request_path)
-    assert captured["device_override"] == "cpu"
-    assert captured["hardware_policy"] == "none"
-    assert captured["n_jobs_override"] == 4
-    assert captured["print_effective_config_flag"] is True
-    assert captured["print_resolution_trace_flag"] is True
+    assert int(exc.value.code) == 2
+    captured = capsys.readouterr()
+    assert "already contains shard data" in captured.err
 
 
 def test_generate_cli_uses_default_config_without_noise_overrides(

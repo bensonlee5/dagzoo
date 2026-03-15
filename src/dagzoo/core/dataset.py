@@ -16,7 +16,6 @@ from dagzoo.core.identity import (
     canonical_request_run_provenance,
     canonical_request_run_split_group,
 )
-from dagzoo.filtering.availability import FILTERING_UNSUPPORTED_MESSAGE
 from dagzoo.rng import KeyedRng
 from dagzoo.types import DatasetBundle
 
@@ -31,7 +30,10 @@ def _validate_public_generation_config(config: GeneratorConfig) -> None:
     """Reject public generation configs that are intentionally unsupported."""
 
     if bool(config.filter.enabled):
-        raise ValueError(f"{FILTERING_UNSUPPORTED_MESSAGE} Set filter.enabled=false.")
+        raise ValueError(
+            "Inline filtering has been removed from generate. Set filter.enabled=false and run "
+            "`dagzoo filter --in <shard_dir> --out <out_dir>` after generation."
+        )
 
 
 def _require_metadata_string(metadata: Mapping[str, Any], *, key: str) -> str:

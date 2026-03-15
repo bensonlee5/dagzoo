@@ -22,7 +22,7 @@ SUGGESTED_PYTEST_TARGETS = (
             "tests/test_cli_validation.py",
             "tests/test_cli_outputs.py",
             "tests/test_benchmark_cli.py",
-            "tests/test_request_execution.py",
+            "tests/test_generate_handoff.py",
         ),
     ),
     (
@@ -39,8 +39,7 @@ SUGGESTED_PYTEST_TARGETS = (
         (
             "tests/test_config.py",
             "tests/test_config_resolution.py",
-            "tests/test_request_config.py",
-            "tests/test_request_execution.py",
+            "tests/test_generate_handoff.py",
         ),
     ),
     (
@@ -48,8 +47,7 @@ SUGGESTED_PYTEST_TARGETS = (
         (
             "tests/test_config.py",
             "tests/test_config_resolution.py",
-            "tests/test_request_config.py",
-            "tests/test_request_execution.py",
+            "tests/test_generate_handoff.py",
         ),
     ),
     (
@@ -57,7 +55,7 @@ SUGGESTED_PYTEST_TARGETS = (
         (
             "tests/test_config.py",
             "tests/test_config_resolution.py",
-            "tests/test_request_execution.py",
+            "tests/test_generate_handoff.py",
             "tests/test_benchmark_cli.py",
         ),
     ),

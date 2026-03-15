@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import sys
 from types import ModuleType
+from typing import NoReturn
 
 from dagzoo.config import GeneratorConfig
 
 
-def raise_usage_error(message: str) -> None:
+def raise_usage_error(message: str) -> NoReturn:
     """Exit with argparse-compatible usage error semantics."""
 
     print(f"error: {message}", file=sys.stderr)

@@ -10,7 +10,7 @@ contains imported legacy history, so date order is not strictly monotonic:
 `0.3.0` records the older `cauchy-generator -> dagzoo` rename, while `0.5.0`
 records the later `dagsynth -> dagzoo` rename on the current release line.
 
-## [0.9.13] - 2026-03-14
+## [0.10.0] - 2026-03-14
 
 ### Changed
 
@@ -20,13 +20,16 @@ records the later `dagsynth -> dagzoo` rename on the current release line.
 - Filter-enabled `dagzoo benchmark` and `dagzoo diversity-audit` workflows
   remain supported because they replay filter metrics analytically rather than
   producing deferred-filter artifacts.
-- **BREAKING:** `dagzoo request` is now a generate-only workflow. Request runs
-  write generated shards, effective-config artifacts, and a handoff manifest,
-  but no longer produce `filter/` or `curated/` artifacts.
-- **BREAKING:** `dagzoo request --n-jobs` now fails fast because request runs
-  no longer execute deferred filtering.
-- **BREAKING:** request handoff manifests now use schema version `3` and point
-  downstream consumers at `generated_dir` as the canonical training artifact.
+- **BREAKING:** Removed the `dagzoo request` subcommand and the separate
+  request-file contract. Downstream handoff runs now use
+  `dagzoo generate --handoff-root <dir>`.
+- **BREAKING:** Handoff manifests now use schema
+  `dagzoo_generate_handoff_manifest` with a `generate_invocation` block instead
+  of request-file echo data.
+- `dagzoo generate --handoff-root` now writes generated shards,
+  `effective_config.yaml`, and `effective_config_trace.yaml` under
+  `<handoff_root>/generated`, publishes `handoff_manifest.json` at the handoff
+  root, and rejects stale handoff roots before execution.
 - Canonical `dataset_id` and `split_groups.request_run` now incorporate the
   effective `runtime.fixed_layout_target_cells` budget, including values
   applied by hardware policies, so distinct generated corpora no longer share

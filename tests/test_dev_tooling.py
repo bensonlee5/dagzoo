@@ -196,7 +196,7 @@ def test_impact_report_suggests_pytest_targets_for_cli_paths() -> None:
         "tests/test_cli_validation.py",
         "tests/test_cli_outputs.py",
         "tests/test_benchmark_cli.py",
-        "tests/test_request_execution.py",
+        "tests/test_generate_handoff.py",
     )
 
 

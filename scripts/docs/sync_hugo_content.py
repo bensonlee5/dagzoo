@@ -41,7 +41,6 @@ USER_MD_SOURCES = [
     "transforms.md",
     "usage-guide.md",
     "output-format.md",
-    "request-file-contract.md",
     "features/diagnostics.md",
     "features/missingness.md",
     "features/many-class.md",
@@ -80,10 +79,6 @@ PAGE_METADATA: dict[str, PageMeta] = {
     "output-format.md": PageMeta(
         weight=40,
         description="Artifact schema, metadata contract, and shard layout.",
-    ),
-    "request-file-contract.md": PageMeta(
-        weight=45,
-        description="Public request schema and one-way handoff contract for downstream consumers.",
     ),
     "features/diagnostics.md": PageMeta(
         weight=60,

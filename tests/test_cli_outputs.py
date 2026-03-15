@@ -77,34 +77,47 @@ def test_filter_cli_prints_curated_output_summary(
     assert "Deferred filtering is temporarily disabled" in captured.err
 
 
-def test_request_cli_prints_request_execution_summary(
+def test_generate_cli_prints_handoff_execution_summary(
     tmp_path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    class _Result:
-        effective_config_path = Path("effective_config.yaml")
-        effective_config_trace_path = Path("effective_config_trace.yaml")
-        handoff_manifest_path = Path("handoff_manifest.json")
-        generated_dir = Path("generated")
-        generated_datasets = 2
+    def _stub_generate_batch_iter(*_args, **_kwargs):
+        return iter(())
 
-    monkeypatch.setattr("dagzoo.cli.run_request_execution", lambda **kwargs: _Result())
+    def _stub_write_packed_parquet_shards_stream(
+        _stream,
+        *,
+        out_dir: Path,
+        shard_size: int,
+        compression: str,
+    ) -> int:
+        assert shard_size > 0
+        assert compression
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return 2
 
-    request_path = tmp_path / "request.yaml"
-    request_path.write_text(
-        "version: v1\n"
-        "task: classification\n"
-        "dataset_count: 2\n"
-        "rows: 1024\n"
-        "profile: default\n"
-        "output_root: requests/out\n",
-        encoding="utf-8",
+    monkeypatch.setattr("dagzoo.cli.generate_batch_iter", _stub_generate_batch_iter)
+    monkeypatch.setattr(
+        "dagzoo.cli.commands.generate.write_packed_parquet_shards_stream",
+        _stub_write_packed_parquet_shards_stream,
+    )
+    monkeypatch.setattr(
+        "dagzoo.cli.commands.generate.write_generate_handoff_manifest",
+        lambda **_kwargs: Path("handoff_manifest.json"),
     )
 
     code = main(
         [
-            "request",
-            "--request",
-            str(request_path),
+            "generate",
+            "--config",
+            "configs/default.yaml",
+            "--handoff-root",
+            str(tmp_path / "handoff"),
+            "--num-datasets",
+            "2",
+            "--device",
+            "cpu",
+            "--hardware-policy",
+            "none",
         ]
     )
 
@@ -112,7 +125,7 @@ def test_request_cli_prints_request_execution_summary(
     captured = capsys.readouterr()
     assert "Wrote effective config:" in captured.out
     assert "Wrote handoff manifest:" in captured.out
-    assert "Wrote 2 datasets to: generated" in captured.out
+    assert "Wrote 2 datasets to:" in captured.out
 
 
 def test_benchmark_cli_prints_configs_and_writes_baseline(

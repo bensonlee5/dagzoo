@@ -251,40 +251,37 @@ with per-variant diversity status and throughput deltas.
 
 ______________________________________________________________________
 
-## 12. Request-file handoff workflows
+## 12. Generate handoff workflows
 
-Use `dagzoo request` when a downstream repo such as `tab-foundry` needs a small
-request-file contract instead of the full internal config surface.
+Use `dagzoo generate --handoff-root` when a downstream repo such as
+`tab-foundry` needs a stable handoff root. There is no separate request-file
+contract now; the handoff workflow uses the normal internal config plus CLI
+overrides.
 
-Example request file:
-
-```yaml
-version: v1
-task: classification
-dataset_count: 2
-rows: 1024
-profile: smoke
-output_root: requests/tab_foundry_smoke
-seed: 7
-```
-
-Run the one-way handoff workflow:
+Example one-way handoff run:
 
 ```bash
-dagzoo request --request requests/tab_foundry_smoke.yaml --device cpu --hardware-policy none
+dagzoo generate \
+  --config configs/default.yaml \
+  --handoff-root handoffs/tab_foundry_smoke \
+  --num-datasets 2 \
+  --rows 1024 \
+  --seed 7 \
+  --device cpu \
+  --hardware-policy none
 ```
 
 That command writes:
 
-- `requests/tab_foundry_smoke/handoff_manifest.json`
-- `requests/tab_foundry_smoke/generated/`
+- `handoffs/tab_foundry_smoke/handoff_manifest.json`
+- `handoffs/tab_foundry_smoke/generated/`
 
 Downstream consumption should start from `handoff_manifest.json`. The manifest
-surfaces the generated corpus path and effective-config artifacts in one
-versioned JSON file:
+surfaces the generated corpus path, effective-config artifacts, and invocation
+metadata in one versioned JSON file:
 
 ```bash
-./.venv/bin/python -c "import json; from pathlib import Path; payload=json.loads(Path('requests/tab_foundry_smoke/handoff_manifest.json').read_text()); print(payload['artifacts']['generated_dir']); print(payload['summary']['generated_datasets'])"
+./.venv/bin/python -c "import json; from pathlib import Path; payload=json.loads(Path('handoffs/tab_foundry_smoke/handoff_manifest.json').read_text()); print(payload['artifacts']['generated_dir']); print(payload['summary']['generated_datasets'])"
 ```
 
 Closed-loop feedback from downstream predictions is still out of scope for this
@@ -301,7 +298,6 @@ ______________________________________________________________________
   [shift](features/shift.md),
   [noise](features/noise.md),
   [benchmark guardrails](features/benchmark-guardrails.md)
-- Request-file contract: [request-file-contract.md](request-file-contract.md)
 - Output contract: [output-format.md](output-format.md)
 - Config precedence and trace artifacts: [development/config-resolution.md](development/config-resolution.md)
 - System guide and terminology: [how-it-works.md](how-it-works.md)
