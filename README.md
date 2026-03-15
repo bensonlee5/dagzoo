@@ -112,18 +112,16 @@ Run deferred filtering on generated shards:
 dagzoo filter --in data/run1 --out data/run1_filter
 ```
 
-Run a downstream handoff workflow from a concise request file:
+Run a downstream handoff workflow from `generate`:
 
 ```bash
-dagzoo request --request requests/tab_foundry_smoke.yaml --device cpu --hardware-policy none
+dagzoo generate --config configs/default.yaml --num-datasets 10 --handoff-root handoffs/run1 --device cpu --hardware-policy none
 ```
 
-`dagzoo request` writes one stable request-run root with:
+`dagzoo generate --handoff-root` writes one stable handoff root with:
 
 - `handoff_manifest.json` as the downstream machine-readable entrypoint
 - `generated/` for raw shard outputs plus effective-config artifacts
-- `filter/` for deferred-filter artifacts
-- `curated/` for accepted-only shards
 
 Run a smoke benchmark:
 
@@ -169,11 +167,10 @@ Start here for end-user workflows and contracts:
 - [Transforms (Math Reference)](https://bensonlee5.github.io/dagzoo/docs/transforms/): Formal transform math, notation, and operator definitions.
 - [Usage Guide](https://bensonlee5.github.io/dagzoo/docs/usage-guide/): Primary workflow hub.
 - [Output Format](https://bensonlee5.github.io/dagzoo/docs/output-format/): Output schema and artifacts.
-- [Request File Contract](https://bensonlee5.github.io/dagzoo/docs/request-file-contract/): Public request schema and one-way handoff contract for downstream consumers.
 - [Feature Guides](https://bensonlee5.github.io/dagzoo/docs/features/): Diagnostics, missingness, many-class, shift, noise, and benchmark guardrails.
 
 If you are integrating `dagzoo` downstream, treat these as the stable
 references:
 
-- Request inputs for `dagzoo request`: [Request File Contract](https://bensonlee5.github.io/dagzoo/docs/request-file-contract/)
-- Generated and request-run artifacts: [Output Format](https://bensonlee5.github.io/dagzoo/docs/output-format/)
+- Handoff workflow and CLI usage: [Usage Guide](https://bensonlee5.github.io/dagzoo/docs/usage-guide/)
+- Generated artifacts and handoff manifest schema: [Output Format](https://bensonlee5.github.io/dagzoo/docs/output-format/)
