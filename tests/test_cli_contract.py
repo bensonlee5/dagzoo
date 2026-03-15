@@ -5,7 +5,6 @@ from dagzoo.cli.parsing import DEVICE_CHOICES, HARDWARE_POLICY_CHOICES
 
 _COMMAND_BASE_ARGS = {
     "generate": ["generate", "--config", "configs/default.yaml"],
-    "request": ["request", "--request", "request.yaml"],
     "benchmark": ["benchmark"],
 }
 
@@ -48,3 +47,19 @@ def test_cli_parser_rejects_invalid_hardware_policy_choice(command: str) -> None
         parser.parse_args([*_COMMAND_BASE_ARGS[command], "--hardware-policy", "missing-policy"])
 
     assert int(exc_info.value.code) == 2
+
+
+def test_cli_parser_accepts_generate_handoff_root() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "generate",
+            "--config",
+            "configs/default.yaml",
+            "--handoff-root",
+            "handoffs/smoke",
+        ]
+    )
+
+    assert args.handoff_root == "handoffs/smoke"

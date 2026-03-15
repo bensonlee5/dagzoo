@@ -128,6 +128,7 @@ def test_build_generate_handoff_manifest_is_versioned_and_valid(tmp_path) -> Non
 
     assert payload["schema_name"] == GENERATE_HANDOFF_SCHEMA_NAME
     assert payload["schema_version"] == GENERATE_HANDOFF_SCHEMA_VERSION
+    assert "request" not in payload
     assert payload["identity"]["source_family"] == "dagzoo.fixed_layout_scm"
     assert payload["identity"]["generate_run_id"] == _UNIT_REQUEST_RUN_ID
     assert payload["identity"]["generated_corpus_id"] == stable_blake2s_hex(
@@ -139,6 +140,21 @@ def test_build_generate_handoff_manifest_is_versioned_and_valid(tmp_path) -> Non
     assert payload["generate_invocation"]["config_path"] == str(
         Path("configs/default.yaml").resolve()
     )
+    assert set(payload["generate_invocation"]["overrides"]) == {
+        "num_datasets",
+        "seed",
+        "rows",
+        "device",
+        "hardware_policy",
+        "missing_rate",
+        "missing_mechanism",
+        "missing_mar_observed_fraction",
+        "missing_mar_logit_scale",
+        "missing_mnar_logit_scale",
+        "diagnostics",
+        "diagnostics_out_dir",
+        "handoff_root",
+    }
     assert payload["generate_invocation"]["overrides"]["handoff_root"] == str(run_root.resolve())
     assert payload["artifacts"]["generated_dir"] == str((run_root / "generated").resolve())
     assert payload["artifacts_relative"] == {
@@ -315,6 +331,7 @@ def test_generate_cli_handoff_root_writes_generated_outputs_and_manifest(tmp_pat
     handoff = json.loads((handoff_root / "handoff_manifest.json").read_text(encoding="utf-8"))
     validate_generate_handoff_manifest(handoff)
     assert handoff["schema_name"] == GENERATE_HANDOFF_SCHEMA_NAME
+    assert "request" not in handoff
     assert handoff["artifacts"]["generated_dir"] == str((handoff_root / "generated").resolve())
     assert handoff["artifacts_relative"]["generated_dir"] == "generated"
     assert handoff["defaults"]["recommended_training_corpus"] == "generated"
@@ -324,6 +341,21 @@ def test_generate_cli_handoff_root_writes_generated_outputs_and_manifest(tmp_pat
     assert handoff["generate_invocation"]["config_path"] == str(
         Path("configs/default.yaml").resolve()
     )
+    assert set(handoff["generate_invocation"]["overrides"]) == {
+        "num_datasets",
+        "seed",
+        "rows",
+        "device",
+        "hardware_policy",
+        "missing_rate",
+        "missing_mechanism",
+        "missing_mar_observed_fraction",
+        "missing_mar_logit_scale",
+        "missing_mnar_logit_scale",
+        "diagnostics",
+        "diagnostics_out_dir",
+        "handoff_root",
+    }
     assert handoff["generate_invocation"]["overrides"]["num_datasets"] == 1
     assert handoff["generate_invocation"]["overrides"]["handoff_root"] == str(
         handoff_root.resolve()

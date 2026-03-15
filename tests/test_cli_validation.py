@@ -574,6 +574,74 @@ def test_generate_cli_rejects_stale_handoff_root(
     assert "already contains shard data" in captured.err
 
 
+def test_generate_cli_rejects_stale_handoff_root_manifest(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    handoff_root = tmp_path / "handoff"
+    handoff_root.mkdir(parents=True, exist_ok=True)
+    (handoff_root / "handoff_manifest.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                "configs/default.yaml",
+                "--handoff-root",
+                str(handoff_root),
+            ]
+        )
+
+    assert int(exc.value.code) == 2
+    captured = capsys.readouterr()
+    assert "already contains a prior handoff manifest" in captured.err
+
+
+def test_generate_cli_rejects_stale_handoff_root_filter_artifacts(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filter_dir = tmp_path / "handoff" / "filter"
+    filter_dir.mkdir(parents=True, exist_ok=True)
+    (filter_dir / "filter_manifest.ndjson").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                "configs/default.yaml",
+                "--handoff-root",
+                str(tmp_path / "handoff"),
+            ]
+        )
+
+    assert int(exc.value.code) == 2
+    captured = capsys.readouterr()
+    assert "already contains prior filter artifacts" in captured.err
+
+
+def test_generate_cli_rejects_stale_handoff_root_curated_shards(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    curated_dir = tmp_path / "handoff" / "curated" / "shard_00000"
+    curated_dir.mkdir(parents=True, exist_ok=True)
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--config",
+                "configs/default.yaml",
+                "--handoff-root",
+                str(tmp_path / "handoff"),
+            ]
+        )
+
+    assert int(exc.value.code) == 2
+    captured = capsys.readouterr()
+    assert "already contains curated shard data" in captured.err
+
+
 def test_generate_cli_uses_default_config_without_noise_overrides(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

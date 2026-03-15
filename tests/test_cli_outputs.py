@@ -124,6 +124,7 @@ def test_generate_cli_prints_handoff_execution_summary(
     assert code == 0
     captured = capsys.readouterr()
     assert "Wrote effective config:" in captured.out
+    assert "Wrote effective config trace:" in captured.out
     assert "Wrote handoff manifest:" in captured.out
     assert "Wrote 2 datasets to:" in captured.out
 
